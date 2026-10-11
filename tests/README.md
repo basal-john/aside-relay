@@ -59,6 +59,7 @@ otherwise launch queue workers and warm the browser MCP connection.
 
 | Current behavior | Automated checks |
 | --- | --- |
+| Appearance palette reset, custom primary contrast, UI/content/code font persistence, live HTML preview and system changes | `unit/theme-visual.test.mjs`, `e2e/appearance.spec.ts`, `backend/test_fonts.py` |
 | Send, immediate draft clear and blur, send/stop state, streamed response, failed delivery restore | `e2e/core-chat.spec.ts`, `boot.test.mjs`, `backend/test_api.py`, `backend/test_runner.py` |
 | Duplicate run acceptance, lost acknowledgement, stale run correlation, reconnect snapshot, socket cleanup | `boot.test.mjs`, `backend/test_api.py`, `backend/test_realtime.py` |
 | Queue/steer/edit/cancel, ordering, pause/resume, native consumed races, restart with attachments | `backend/test_followups.py`, `backend/test_native_queue.py`, `e2e/queue.spec.ts` |

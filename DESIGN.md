@@ -16,22 +16,22 @@ aside-relay uses a restrained, monochrome conversation interface inspired by Cha
 
 | Role | Light | Dark |
 | --- | --- | --- |
-| Canvas | `#ffffff` | `#212121` |
-| Sidebar / composer / code | `#f7f7f7` | `#2f2f2f` |
-| User bubble | `#f1f1f1` | `#303030` |
+| Canvas | `#ffffff` | `#000000` |
+| Sidebar / composer / code | `#f7f7f7` | `#141414` |
+| User bubble | `#f1f1f1` | `#181818` |
 | Text | `#171717` | `#f3f3f3` |
-| Secondary text | `#666666` | `#b4b4b4` |
-| Border | `#e9e9e9` | `#414141` |
-| Hover | `#ededed` | `#3b3b3b` |
+| Secondary text | `#666666` | `#999999` |
+| Border | `#e9e9e9` | `#343434` |
+| Hover | `#ededed` | `#303030` |
 | Error | `#b42318` | `#ff9b91` |
 | Composer / dialog radius | `28px` | `28px` |
 | User bubble radius | `24px` | `24px` |
 
-Wanted Sans is the UI typeface and loads through the same-origin proxy. Code uses bundled D2Coding with a compact 1.4 line height. Body text uses 16px / 1.7; user messages use 16px / 1.55; header text uses 19px, weight 650. Inputs start at 16px and scale with the text-size setting to avoid iOS focus zoom.
+Wanted Sans is the default UI and content typeface. UI, content and code each have independent font selectors; webfonts load through the same-origin allowlisted proxy using cached WOFF2 subsets. System choices use device fonts. Code defaults to bundled D2Coding with a compact 1.4 line height. Body text uses 16px / 1.6; user messages use 16px / 1.55; header text uses 19px, weight 650. Inputs start at 16px and scale with the text-size setting to avoid iOS focus zoom.
 
-`global.css` owns the light/dark color values, reset, and Markdown descendant rules. `web/src/tokens.stylex.ts` exposes these colors and typography to component styles. StyleX extracts component styles at build time.
+`global.css` owns the default light/dark colors, reset, and Markdown descendant rules. `theme-presets.ts` contains the 44 variants of 29 Codex theme families; `theme.ts` applies preset colors, custom accents and independent font choices through CSS variables. `web/src/tokens.stylex.ts` exposes these colors and typography to component styles. StyleX extracts component styles at build time.
 
-Settings → Appearance exposes a Dark mode switch and text sizes from 100% to 200%. Text uses relative units so this preference scales conversation content, controls, and code. Light is the default; an explicit choice persists in browser storage and applies before React mounts. The theme covers conversations, drawers, dialogs, code highlighting, and toasts. Images, browser captures, and rendered diagrams retain their source colors; diagrams use a light backing for contrast.
+Settings → Appearance exposes Light/Dark/System modes, separate light and dark palette selectors, primary-color swatches and a native color picker, independent UI/content/code font selectors, and text sizes from 100% to 200%. The Dark mode switch changes the mode explicitly. System mode follows live device changes. Presets supply their accent unless a custom primary color is selected; Theme default clears that override. Button foregrounds choose black or white for contrast. Text uses relative units so this preference scales conversation content, controls, and code. Light is the default; an explicit choice persists in browser storage and applies before React mounts. The theme covers conversations, drawers, dialogs, code highlighting, toasts and live HTML visual previews. Font loading updates composer measurements without a height animation. Images, browser captures, and rendered diagrams retain their source colors; diagrams use a light backing for contrast.
 
 ## Controls and states
 

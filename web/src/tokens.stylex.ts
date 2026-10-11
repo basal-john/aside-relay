@@ -17,5 +17,5 @@ export const tokens = stylex.defineVars({
   primaryForeground: 'var(--primary-foreground)',
   primaryHover: 'var(--primary-hover)',
   mediaWhite: '#ffffff',
-  font: '"Wanted Sans Variable", "Wanted Sans", sans-serif',
+  font: 'var(--font-sans)',
 });

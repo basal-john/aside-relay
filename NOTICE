@@ -30,3 +30,12 @@ web/src/assets/fonts/D2Coding-Regular.woff2 and D2Coding-Bold.woff2
   Copyright (c) 2015, NAVER Corporation
   https://github.com/naver/d2codingfont
   The full license is in web/src/assets/fonts/D2Coding.OFL.txt.
+
+Inter, Geist, Noto Sans KR, Noto Serif KR, IBM Plex Sans, JetBrains Mono,
+Fira Code and Geist Mono are proxied at runtime from Google Fonts and cached locally.
+  SIL Open Font License; font sources and licenses:
+  https://github.com/google/fonts/tree/main/ofl
+
+web/src/theme-presets.ts contains palette color values for the 29 theme families
+available in the Codex desktop app, adapted to aside-relay surfaces.
+  Theme names identify their corresponding palettes; no desktop application code is bundled.

@@ -31,7 +31,8 @@
     --primary: #a34dff; --primary-foreground: #ffffff; --primary-hover: color-mix(in srgb, var(--primary), black 12%);
     --control-border: #dcdcdc; --selection: color-mix(in srgb, var(--primary) 20%, var(--canvas));
     --syntax-keyword: #a626a4; --syntax-string: #36713b; --syntax-number: #855b00; --syntax-title: #205cc9;
-    --font-code: "D2Coding", monospace; --code-line-height: 1.4;
+    --font-sans: "Wanted Sans Variable", "Wanted Sans", sans-serif;
+    --font-content: var(--font-sans); --font-code: "D2Coding", monospace; --code-line-height: 1.4;
     color-scheme: light; background: var(--canvas); -webkit-text-size-adjust: 100%; font-size: var(--text-size, 100%);
   }
   html[data-theme="dark"] {
@@ -43,7 +44,7 @@
     --syntax-keyword: #dda5df; --syntax-string: #a7d6a7; --syntax-number: #e5c07b; --syntax-title: #9ec4ff;
     color-scheme: dark;
   }
-  body, button, input, textarea, select { font-family: "Wanted Sans Variable", "Wanted Sans", sans-serif; }
+  body, button, input, textarea, select { font-family: var(--font-sans); }
   code, pre { font-family: var(--font-code); user-select: text; -webkit-user-select: text; -webkit-touch-callout: default; }
   body { background: var(--canvas); color: var(--text); font-size: 1rem; -webkit-tap-highlight-color: transparent; }
   input, textarea, [contenteditable="true"] { user-select: text; -webkit-user-select: text; -webkit-touch-callout: default; touch-action: pan-x pan-y; }
@@ -68,7 +69,7 @@
   article[data-message-id] { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
   article[data-selectable="true"], article[data-selectable="true"] *, pre, pre *, code, code * { -webkit-touch-callout: default; user-select: text; -webkit-user-select: text; }
   ::selection { background: var(--selection); }
-  .markdown { font-size: 1rem; line-height: 1.6; overflow-wrap: anywhere; min-width: 0; }
+  .markdown { font-family: var(--font-content); font-size: 1rem; line-height: 1.6; overflow-wrap: anywhere; min-width: 0; }
   .markdown > :first-child { margin-top: 0; }
   .markdown > :last-child { margin-bottom: 0; }
   .markdown p { margin: 0 0 12px; white-space: pre-wrap; }
@@ -85,6 +86,7 @@
   .markdown table { border-collapse: collapse; width: 100%; font-size: 0.875rem; }
   .markdown td, .markdown th { padding: 11px 14px; border-bottom: 1px solid var(--border); text-align: left; min-width: 120px; }
   .markdown th { font-weight: 650; background: var(--surface); }
+  .markdown svg text { font-family: var(--font-content) !important; }
   .markdown img { border-radius: 16px; max-height: 420px; object-fit: contain; cursor: zoom-in; }
   .hljs-keyword, .hljs-selector-tag { color: var(--syntax-keyword); } .hljs-string, .hljs-attr { color: var(--syntax-string); }
   .hljs-number, .hljs-literal { color: var(--syntax-number); } .hljs-comment { color: var(--muted); }

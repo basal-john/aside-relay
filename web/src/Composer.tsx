@@ -18,8 +18,8 @@ const MAX_ATTACHMENTS = 12;
 const COMPACT_DRAFT_HEIGHT = 28;
 const MAX_DRAFT_HEIGHT = 160;
 
-export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, textSize, isKeyboardOpen, runOptions }: {
-  chat: UseChat; onBrowser: () => void; draft: string; setDraft: (value: string) => void; revision: number; notify: (text: string, kind?: 'error' | 'success') => void; textSize: number; isKeyboardOpen: boolean; runOptions?: RunOptions;
+export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, textSize, uiFont, isKeyboardOpen, runOptions }: {
+  chat: UseChat; onBrowser: () => void; draft: string; setDraft: (value: string) => void; revision: number; notify: (text: string, kind?: 'error' | 'success') => void; textSize: number; uiFont: string; isKeyboardOpen: boolean; runOptions?: RunOptions;
 }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const footerRef = useRef<HTMLElement>(null);
@@ -73,7 +73,7 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
   }, [revision]);
   useEffect(() => () => { recognitionRef.current?.stop(); [...attachmentRef.current.flatMap(attachment => attachment.preview ? [attachment.preview] : []), ...pendingPreviewRevokesRef.current].forEach(preview => URL.revokeObjectURL(preview)); }, []);
   function resizeInput() { if (input.current) { input.current.style.height = 'auto'; input.current.style.height = Math.min(input.current.scrollHeight, MAX_DRAFT_HEIGHT) + 'px'; } }
-  useLayoutEffect(resizeInput, [draft, textSize, isExpanded]);
+  useLayoutEffect(resizeInput, [draft, textSize, uiFont, isExpanded]);
   useLayoutEffect(() => {
     const footer = footerRef.current;
     if (!footer) return;
@@ -87,7 +87,9 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
     const area = input.current; if (!area) return;
     let width = area.clientWidth;
     const observer = new ResizeObserver(() => { if (area.clientWidth !== width) { width = area.clientWidth; resizeInput(); } });
-    observer.observe(area); return () => observer.disconnect();
+    observer.observe(area);
+    document.fonts.addEventListener('loadingdone', resizeInput);
+    return () => { observer.disconnect(); document.fonts.removeEventListener('loadingdone', resizeInput); };
   }, [isExpanded]);
   const hasUploadPending = attachments.some(attachment => !attachment.upload && !attachment.hasError);
   const hasInput = draft.length > 0 || attachments.length > 0;

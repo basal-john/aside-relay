@@ -3,6 +3,7 @@ import test from 'node:test'
 import { JSDOM } from 'jsdom'
 
 import {
+  APPEARANCE_STORAGE_KEY, THEME_PRESETS, contrastForeground, loadAppearance, resolveTheme,
   TEXT_SIZE_STORAGE_KEY,
   THEME_STORAGE_KEY,
   applyTextSize,
@@ -61,7 +62,7 @@ test('theme and text-size storage use safe defaults and retain supported choices
 test('applying a theme updates both the page palette and iOS status-bar metadata', () => {
   const environment = installDom()
   try {
-    document.documentElement.style.setProperty('--canvas', '#050505')
+    document.head.insertAdjacentHTML('beforeend', '<style>html[data-theme="dark"] { --canvas: #050505; }</style>')
     applyTheme('dark')
     applyTextSize(150)
 
@@ -166,3 +167,49 @@ test('visual documents announce readiness and only accept matching parent theme 
     rendered.window.close()
   }
 })
+
+
+test('appearance validates every stored choice and rejects CSS injection', () => {
+  const environment = installDom();
+  try {
+    localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify({ lightPreset: 'dracula-dark', darkPreset: 'dracula-dark', accent: 'url(https://unsafe.test)', uiFont: 'unknown', contentFont: 'noto-serif-kr', codeFont: 'jetbrains-mono' }));
+    assert.deepEqual(loadAppearance(), { lightPreset: 'relay', darkPreset: 'dracula-dark', accent: '', uiFont: 'wanted-sans', contentFont: 'noto-serif-kr', codeFont: 'jetbrains-mono' });
+    localStorage.setItem(APPEARANCE_STORAGE_KEY, '{');
+    assert.equal(loadAppearance().darkPreset, 'relay');
+  } finally { environment.restore(); }
+});
+
+test('all 29 preset families apply their palette and restore default without leaking colors', () => {
+  const environment = installDom();
+  try {
+    assert.equal(new Set(THEME_PRESETS.map(preset => preset.name)).size, 29);
+    for (const preset of THEME_PRESETS) {
+      const appearance = { ...loadAppearance(), [preset.scheme === 'light' ? 'lightPreset' : 'darkPreset']: preset.id };
+      applyTheme(preset.scheme, appearance);
+      assert.equal(document.documentElement.style.getPropertyValue('--canvas'), preset.background);
+      assert.equal(document.querySelector('meta[name="theme-color"]').content, preset.background);
+      assert.equal(document.documentElement.style.getPropertyValue('--primary'), preset.accent);
+    }
+    applyTheme('light', loadAppearance());
+    assert.equal(document.documentElement.style.getPropertyValue('--canvas'), '');
+    assert.equal(document.documentElement.style.getPropertyValue('--primary'), '#a34dff');
+  } finally { environment.restore(); }
+});
+
+test('custom accent, independent fonts and visuals share settings; font links are deduplicated', () => {
+  const environment = installDom();
+  try {
+    const appearance = { ...loadAppearance(), accent: '#f0b429', uiFont: 'inter', contentFont: 'noto-serif-kr', codeFont: 'fira-code' };
+    applyTheme('dark', appearance);
+    applyTheme('dark', appearance);
+    assert.equal(document.documentElement.style.getPropertyValue('--primary-foreground'), '#000000');
+    assert.match(visualTheme().variables['--font-sans'], /Noto Serif KR/);
+    assert.equal(document.querySelectorAll('link[data-appearance-font]').length, 3);
+    assert.equal(contrastForeground('#000000'), '#ffffff');
+    assert.equal(contrastForeground('#ffffff'), '#000000');
+    window.matchMedia = () => ({ matches: true });
+    assert.equal(resolveTheme('system'), 'dark');
+    window.matchMedia = () => ({ matches: false });
+    assert.equal(resolveTheme('system'), 'light');
+  } finally { environment.restore(); }
+});

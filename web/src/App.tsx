@@ -20,7 +20,7 @@ import { ImagePreview } from './ImagePreview';
 import { Settings } from './Settings';
 import { SessionWorkspace, type SessionWorkspaceState } from './SessionWorkspace';
 import { RenameConversation, SessionMenu, type SessionMenuTarget } from './SessionMenu';
-import { applyTheme, THEME_STORAGE_KEY, applyTextSize, loadTextSize, TEXT_SIZE_STORAGE_KEY, type Theme } from './theme';
+import { applyTheme, loadThemeMode, resolveTheme, loadAppearance, APPEARANCE_STORAGE_KEY, type Appearance, type ThemeMode, THEME_STORAGE_KEY, applyTextSize, loadTextSize, TEXT_SIZE_STORAGE_KEY, type Theme } from './theme';
 import { ICON_STROKE, SESSION_MENU_LABEL, DELETE_CONVERSATION_TITLE, OPEN_DIALOG_SELECTOR, Sheet, DialogBackdropReset, IconButton, focusDialogSurface, resolveDialogReturnFocus, trapDialogFocus, styles as ui } from './ui';
 
 const Messages = lazy(() => import('./Messages').then(module => ({ default: module.Messages })));
@@ -42,6 +42,8 @@ export function App() {
   const chat = useChat();
   const shouldReduceMotion = useReducedMotion();
   const [theme, setTheme] = useState<Theme>(() => document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
+  const [themeMode, setThemeMode] = useState(loadThemeMode);
+  const [appearance, setAppearance] = useState(loadAppearance);
   const [textSize, setTextSize] = useState(loadTextSize);
   const [announcement, setAnnouncement] = useState('');
   const announcedRunRef = useRef({ sessionId: chat.sessionId, isRunning: false });
@@ -81,12 +83,24 @@ export function App() {
     try { localStorage.setItem(TEXT_SIZE_STORAGE_KEY, String(size)); }
     catch { notify('Text size changed, but your browser could not save the preference.', 'error'); }
   }
-  function toggleTheme() {
-    const next = theme === 'light' ? 'dark' : 'light';
-    applyTheme(next); setTheme(next);
-    try { localStorage.setItem(THEME_STORAGE_KEY, next); }
+  function changeThemeMode(mode: ThemeMode) {
+    const next = resolveTheme(mode);
+    applyTheme(next, appearance); setTheme(next); setThemeMode(mode);
+    try { localStorage.setItem(THEME_STORAGE_KEY, mode); }
     catch { notify('Theme changed, but your browser could not save the preference.', 'error'); }
   }
+  function changeAppearance(next: Appearance) {
+    applyTheme(theme, next); setAppearance(next);
+    try { localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify(next)); }
+    catch { notify('Appearance changed, but your browser could not save the preference.', 'error'); }
+  }
+  useEffect(() => {
+    if (themeMode !== 'system') return;
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const update = () => { const next = resolveTheme('system'); applyTheme(next, appearance); setTheme(next); };
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, [themeMode, appearance]);
   function newChat() { chat.newChat(); setRunOptions(undefined); setDraft(''); setRevision(value => value + 1); setDrawer(false); setMenuSession(undefined); changeAtBottom(true); }
   function newIncognitoChat() { newChat(); setRunOptions({ mode: 'incognito' }); }
   function openSession(id: string) { void chat.openSession(id); setRunOptions(undefined); setDraft(''); setRevision(value => value + 1); setDrawer(false); setMenuSession(undefined); changeAtBottom(true); }
@@ -268,10 +282,10 @@ export function App() {
         {chat.sessionId && chat.isReady && !chat.isOpening && !chat.authError && <BrowserLive key={chat.sessionId} sessionId={chat.sessionId} request={chat.request} isBrowserOpen={panel === 'browser'} isVisible={!panel && !isDrawer && !menuSession && !deleteTarget && !zoom} onOpen={targetId => openPanel('browser', targetId)} />}
       </div>
       {chat.isReady && !chat.isOpening && !chat.authError && <SessionWorkspace chat={chat} notify={notify} onOpenSession={openSession} onOutputs={() => openPanel('files')} onStateChange={setWorkspaceState} />}
-      <Composer runOptions={runOptions} chat={chat} onBrowser={() => openPanel('browser')} draft={draft} setDraft={setDraft} revision={revision} notify={notify} textSize={textSize} isKeyboardOpen={isKeyboardOpen} />
+      <Composer runOptions={runOptions} chat={chat} onBrowser={() => openPanel('browser')} draft={draft} setDraft={setDraft} revision={revision} notify={notify} textSize={textSize} uiFont={appearance.uiFont} isKeyboardOpen={isKeyboardOpen} />
     </main>
     <AnimatePresence>{isDrawer && <Drawer key="drawer" onClose={() => { setMenuSession(undefined); setDrawer(false); }}><Sidebar chat={chat} isDrawer onClose={() => { setMenuSession(undefined); setDrawer(false); }} onNew={newChat} onNewIncognito={newIncognitoChat} onOpen={openSession} onSettings={() => openPanel('settings')} onBrowser={() => openPanel('browser')} onMenu={setMenuSession} /></Drawer>}</AnimatePresence>
-    <AnimatePresence mode="wait">{panel === 'settings' ? <Dialog key="settings" title="Settings" onClose={closePanel}><Settings chat={chat} notifications={notifications} notify={notify} isDarkMode={theme === 'dark'} onThemeToggle={toggleTheme} textSize={textSize} onTextSizeChange={changeTextSize} onWorkspace={() => openPanel('workspace')} /></Dialog> : panel === 'browser' ? <Sheet key={`browser:${browserTarget ?? "all"}`} title="Browser" isWide onClose={closePanel}><BrowserPanel initialTargetId={browserTarget} sessionId={chat.sessionId} request={chat.request} notify={notify} onClose={closePanel} onStart={prompt => { closePanel(); if (!chat.sessionId) newChat(); setDraft(prompt); }} /></Sheet> : panel === 'workspace' ? <Suspense key="workspace" fallback={<Dialog title="Workspace & preferences" onClose={closePanel}><DialogDescription>Loading workspace…</DialogDescription></Dialog>}><Workspace chat={chat} notify={notify} onClose={closePanel} onOpenSession={id => { closePanel(); openSession(id); }} onNewProjectChat={projectId => { closePanel(); newChat(); setRunOptions({ projectId }); }} /></Suspense> : panel === 'files' && effectiveFilesSessionId ? <Suspense key={effectiveFilesSessionId} fallback={<Dialog title="Files & outputs" onClose={closePanel}><DialogDescription>Loading files…</DialogDescription></Dialog>}><Artifacts sessionId={effectiveFilesSessionId} request={chat.request} notify={notify} onZoom={setZoom} onClose={closePanel} /></Suspense> : undefined}</AnimatePresence>
+    <AnimatePresence mode="wait">{panel === 'settings' ? <Dialog key="settings" title="Settings" onClose={closePanel}><Settings chat={chat} notifications={notifications} notify={notify} isDarkMode={theme === 'dark'} onThemeToggle={() => changeThemeMode(theme === 'light' ? 'dark' : 'light')} themeMode={themeMode} onThemeModeChange={changeThemeMode} appearance={appearance} onAppearanceChange={changeAppearance} textSize={textSize} onTextSizeChange={changeTextSize} onWorkspace={() => openPanel('workspace')} /></Dialog> : panel === 'browser' ? <Sheet key={`browser:${browserTarget ?? "all"}`} title="Browser" isWide onClose={closePanel}><BrowserPanel initialTargetId={browserTarget} sessionId={chat.sessionId} request={chat.request} notify={notify} onClose={closePanel} onStart={prompt => { closePanel(); if (!chat.sessionId) newChat(); setDraft(prompt); }} /></Sheet> : panel === 'workspace' ? <Suspense key="workspace" fallback={<Dialog title="Workspace & preferences" onClose={closePanel}><DialogDescription>Loading workspace…</DialogDescription></Dialog>}><Workspace chat={chat} notify={notify} onClose={closePanel} onOpenSession={id => { closePanel(); openSession(id); }} onNewProjectChat={projectId => { closePanel(); newChat(); setRunOptions({ projectId }); }} /></Suspense> : panel === 'files' && effectiveFilesSessionId ? <Suspense key={effectiveFilesSessionId} fallback={<Dialog title="Files & outputs" onClose={closePanel}><DialogDescription>Loading files…</DialogDescription></Dialog>}><Artifacts sessionId={effectiveFilesSessionId} request={chat.request} notify={notify} onZoom={setZoom} onClose={closePanel} /></Suspense> : undefined}</AnimatePresence>
     {menuSession && !chat.authError && <SessionMenu key={menuSession.id} target={menuSession} chat={chat} onClose={() => setMenuSession(undefined)} notify={notify} onRename={setRenameTarget} onDelete={setDeleteTarget} onFiles={id => openPanel('files', id)} />}
     <AnimatePresence>{sidechat && <Dialog key="sidechat" title="Ask in side chat" onClose={() => { if (!isStartingSidechat) setSidechat(undefined); }}><blockquote {...stylex.props(styles.sidechatQuote)}>{sidechat.text}</blockquote><label {...stylex.props(styles.sidechatLabel)}>Message<textarea autoFocus rows={3} value={sidechatPrompt} disabled={isStartingSidechat} onChange={event => setSidechatPrompt(event.currentTarget.value)} {...stylex.props(ui.field)} /></label><DialogActions><Button disabled={isStartingSidechat} onClick={() => setSidechat(undefined)}>Cancel</Button><Button variant="primary" disabled={isStartingSidechat || !sidechatPrompt.trim()} onClick={() => { void startSidechat(); }}>{isStartingSidechat ? 'Starting…' : 'Send'}</Button></DialogActions></Dialog>}</AnimatePresence>
     <AnimatePresence>{renameTarget && <RenameConversation key={renameTarget.id} session={renameTarget} chat={chat} onClose={() => setRenameTarget(undefined)} />}</AnimatePresence>

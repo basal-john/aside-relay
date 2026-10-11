@@ -90,7 +90,7 @@ let mermaidPromise: Promise<Mermaid> | undefined;
 function loadMermaid() {
   if (!mermaidPromise) mermaidPromise = new Promise<Mermaid>((resolve, reject) => {
     const script = document.createElement('script'); script.src = '/vendor/mermaid.min.js';
-    script.onload = () => { const mermaid = (window as Window & { mermaid?: Mermaid }).mermaid; if (mermaid) { mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'neutral', fontFamily: 'Wanted Sans Variable, Wanted Sans, sans-serif' }); resolve(mermaid); } else reject(new Error('Diagram unavailable')); };
+    script.onload = () => { const mermaid = (window as Window & { mermaid?: Mermaid }).mermaid; if (mermaid) { mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'neutral', fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--font-content').trim() }); resolve(mermaid); } else reject(new Error('Diagram unavailable')); };
     script.onerror = () => { script.remove(); mermaidPromise = undefined; reject(new Error('Diagram unavailable')); }; document.head.appendChild(script);
   });
   return mermaidPromise;
@@ -146,7 +146,8 @@ export function Messages({ chat, listRef, onAtBottomChange, notify, onZoom, onOp
   const [isFontReady, setFontReady] = useState(false);
   useEffect(() => {
     let isActive = true;
-    void Promise.all([document.fonts.load('16px "Wanted Sans Variable"'), document.fonts.load('16px "D2Coding"')]).then(() => document.fonts.ready, () => undefined).then(() => { if (isActive) setFontReady(true); });
+    const fontStyle = getComputedStyle(document.documentElement);
+    void Promise.all(['--font-content', '--font-code'].map(name => document.fonts.load('16px ' + fontStyle.getPropertyValue(name).trim()))).then(() => document.fonts.ready, () => undefined).then(() => { if (isActive) setFontReady(true); });
     return () => { isActive = false; };
   }, []);
   useLayoutEffect(() => {
@@ -235,7 +236,7 @@ const styles = stylex.create({
   bottomSpace: { height: 'calc(var(--composer-height) + var(--workspace-height, 0px))' },
   message: { minWidth: 0, maxWidth: '100%', flexShrink: 0 },
   user: { alignSelf: 'flex-end', backgroundColor: tokens.bubble, borderRadius: 24, padding: '12px 18px', maxWidth: '88%', fontSize: '1rem', lineHeight: 1.55 },
-  userText: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
+  userText: { fontFamily: 'var(--font-content)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
   citation: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 24, minHeight: 24, padding: '0 7px', margin: '0 2px', borderRadius: 12, backgroundColor: { default: tokens.surface, ':hover': tokens.hover }, color: tokens.muted, fontSize: '0.6875rem', fontWeight: 600, lineHeight: 1.3, textDecoration: 'none', verticalAlign: 'middle' },
   code: { minWidth: 0, maxWidth: '100%', borderRadius: 16, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, overflow: 'hidden', marginTop: 16, marginBottom: 20, backgroundColor: tokens.surface },
   codeHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 6px 2px 16px', borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: tokens.border, fontSize: '0.75rem', color: tokens.muted },

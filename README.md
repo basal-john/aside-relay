@@ -120,12 +120,38 @@ Click any image to view it at full size.
   Sleeping tabs stay visible with their state.
 - Conversation deep links, last-conversation restoration, and notifications that
   open the matching conversation.
-- Light/dark mode, Wanted Sans, an anchored multiline composer, and mobile
+- Light/dark/system mode, 29 theme families (44 light/dark variants), custom primary colors,
+  independent UI/content/code fonts, an anchored multiline composer, and mobile
   sheet/drawer transitions. The UI is English; messages keep their own language.
 - Web Push completion alerts containing the actual answer preview when the device
   is away from the app. Optional ntfy completion alerts are also available.
 
 [DESIGN.md](DESIGN.md) describes the interface and responsive behavior.
+
+### Appearance
+
+Open **Settings → Appearance** to choose a light palette and dark palette independently.
+**System** follows your device's appearance and updates while the app is open.
+The palettes cover the theme families available in the Codex desktop app, adapted to
+aside-relay's chat surfaces. The aside-relay defaults keep the white/black backgrounds
+and purple accent. Each preset supplies its own accent; **Primary color** overrides it,
+and **Theme default** restores the preset's color. Send buttons, pins, unread markers,
+menus and HTML visual previews use the same primary color. Button text automatically
+uses black or white for contrast. The page's theme-color metadata follows the background.
+
+UI and content fonts each offer Wanted Sans, System, Inter, Geist, Noto Sans KR,
+IBM Plex Sans and Noto Serif KR. Code fonts offer D2Coding, System Mono,
+JetBrains Mono, Fira Code and Geist Mono. UI font changes affect controls; content
+font changes affect conversation messages and HTML previews. D2Coding remains the
+code default. System fonts use the device's installed fonts. The other webfonts are
+fetched through the bridge's same-origin allowlisted font proxy and cached locally;
+Korean fonts use WOFF2 unicode-range subsets rather than downloading a whole family.
+A system fallback remains available when a download fails.
+
+Appearance and text size persist in this browser's local storage and apply before
+React mounts. These choices belong to aside-relay and do not modify native Aside
+preferences. New font downloads require the bridge to reach fonts.googleapis.com
+and fonts.gstatic.com; Wanted Sans uses cdn.jsdelivr.net.
 
 ## Choose a hosting route
 

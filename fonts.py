@@ -36,9 +36,20 @@ WANTED_SANS_ROOT = ("https://cdn.jsdelivr.net/gh/wanteddev/wanted-sans@v1.0.3/"
                     "packages/wanted-sans/fonts/webfonts/variable/split/")
 FAMILIES: dict[str, str] = {
     "wanted-sans": WANTED_SANS_ROOT + "WantedSansVariable.min.css",
+    **{font_id: "https://fonts.googleapis.com/css2?family=" + family + "&display=swap"
+       for font_id, family in {
+           "inter": "Inter:wght@100..900", "geist": "Geist:wght@100..900",
+           "noto-sans-kr": "Noto+Sans+KR:wght@100..900", "noto-serif-kr": "Noto+Serif+KR:wght@200..900",
+           "ibm-plex-sans": "IBM+Plex+Sans:wght@100..700", "jetbrains-mono": "JetBrains+Mono:wght@100..800",
+           "fira-code": "Fira+Code:wght@300..700", "geist-mono": "Geist+Mono:wght@100..900",
+       }.items()},
 }
 
-_ALLOWED_HOSTS = ("cdn.jsdelivr.net",)
+_FONT_ROOTS = (WANTED_SANS_ROOT, *(
+    "https://fonts.gstatic.com/s/" + name + "/"
+    for name in ("inter", "geist", "notosanskr", "notoserifkr", "ibmplexsans", "jetbrainsmono", "firacode", "geistmono")
+))
+_FONT_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"}
 _URL_RE = re.compile(r"url\((https://[^)]+)\)")
 
 
@@ -59,11 +70,11 @@ async def css(client: httpx.AsyncClient, font_id: str) -> str:
     url = FAMILIES.get(font_id)
     if not url:
         return "/* system font — no webfont */"
-    cached = _key(url, ".css")
+    cached = _key(url if font_id == "wanted-sans" else url + _FONT_HEADERS["User-Agent"], ".css")
     if cached.exists():
         text = cached.read_text()
     else:
-        r = await client.get(url, timeout=20, follow_redirects=True)
+        r = await client.get(url, timeout=20, headers=_FONT_HEADERS, follow_redirects=True)
         r.raise_for_status()
         text = r.text
         cached.write_text(text)
@@ -91,10 +102,7 @@ def _register(url: str) -> str:
 
 async def file(client: httpx.AsyncClient, fid: str) -> tuple[bytes, str] | None:
     url = _index.get(fid)
-    if not url or not url.startswith(WANTED_SANS_ROOT):
-        return None
-    host = url.split("/")[2]
-    if not any(host.endswith(h) for h in _ALLOWED_HOSTS):
+    if not url or not url.startswith(_FONT_ROOTS):
         return None
     ext = ".woff2" if url.endswith(".woff2") else ".bin"
     cached = _key(url, ext)

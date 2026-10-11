@@ -267,7 +267,7 @@ function installBrowserGlobals(targetWindow) {
   globalThis.cancelAnimationFrame = targetWindow.cancelAnimationFrame.bind(targetWindow);
   globalThis.matchMedia = targetWindow.matchMedia = query => ({ matches: query.includes('pointer: fine'), media: query, onchange: null, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; } });
   targetWindow.visualViewport = { height: 844, offsetTop: 0, addEventListener() {}, removeEventListener() {} };
-  targetWindow.document.fonts = { load: async () => [], ready: Promise.resolve() };
+  targetWindow.document.fonts = Object.assign(new targetWindow.EventTarget(), { load: async () => [], ready: Promise.resolve() });
   targetWindow.HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
     const height = this.hasAttribute('data-item-index') ? itemHeight : 744;
     return { x: 0, y: 0, top: 0, left: 0, bottom: height, right: 374, width: 374, height, toJSON() {} };

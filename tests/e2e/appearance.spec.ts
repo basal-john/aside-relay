@@ -1,0 +1,35 @@
+import { test, expect, SESSION_A } from './fixture';
+
+test('appearance responds immediately, persists fonts and colors and syncs the HTML preview', async ({ page, mockAside }) => {
+  mockAside.messages.get(SESSION_A)!.push({ seq: 2, role: 'assistant', ts: Date.now(), responseId: 'appearance-visual', blocks: [{ type: 'text', text: '```visual\n<html><body><h1>Theme preview</h1></body></html>\n```' }] });
+  await page.goto(`/c/${SESSION_A}`);
+  await expect(page.getByTitle('HTML visual')).toBeVisible();
+  await page.getByRole('button', { name: 'Minimize browser preview' }).click();
+  const drawer = page.getByRole('button', { name: 'Open conversations' });
+  if (await drawer.isVisible()) await drawer.click();
+  await page.getByRole('button', { name: /Settings/ }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await settings.getByLabel('Theme mode', { exact: true }).selectOption('dark');
+  await settings.getByLabel('Dark theme', { exact: true }).selectOption('dracula-dark');
+  await settings.getByRole('button', { name: 'Primary color #f0b429', exact: true }).click();
+  await settings.getByLabel('UI font', { exact: true }).selectOption('inter');
+  await settings.getByLabel('Content font', { exact: true }).selectOption('noto-serif-kr');
+  await settings.getByLabel('Code font', { exact: true }).selectOption('jetbrains-mono');
+  await expect.poll(() => page.evaluate(() => document.querySelector('meta[name="theme-color"]')?.getAttribute('content'))).toBe('#282a36');
+  await expect.poll(() => page.getByTitle('HTML visual').contentFrame().locator('h1').evaluate(element => getComputedStyle(element).fontFamily)).toContain('Noto Serif KR');
+  await expect.poll(() => page.getByTitle('HTML visual').contentFrame().locator('html').evaluate(element => getComputedStyle(element).getPropertyValue('--primary').trim())).toBe('#f0b429');
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).fontFamily)).toContain('Inter');
+  await page.reload();
+  await expect(settings.getByLabel('Dark theme', { exact: true })).toHaveValue('dracula-dark');
+  await expect(settings.getByLabel('Code font', { exact: true })).toHaveValue('jetbrains-mono');
+  await expect(settings.getByLabel('Primary color', { exact: true })).toHaveValue('#f0b429');
+  await settings.getByRole('button', { name: 'Theme default', exact: true }).click();
+  await expect(settings.getByLabel('Primary color', { exact: true })).toHaveValue('#ff79c6');
+  await settings.getByLabel('Dark theme', { exact: true }).selectOption('relay');
+  await settings.getByLabel('Theme mode', { exact: true }).selectOption('system');
+  await page.emulateMedia({ colorScheme: 'light' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
