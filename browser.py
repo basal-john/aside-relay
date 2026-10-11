@@ -17,6 +17,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import time
 from pathlib import Path
 
@@ -38,7 +39,7 @@ SHOT_QUEUE_MAX = 6
 _shot_sem = asyncio.Semaphore(SHOT_CONCURRENCY)
 _shot_waiting = 0
 
-_tabs_cache: tuple[float, str | None, list[dict]] | None = None
+_tabs_cache: tuple[float, tuple[str | None, bool], list[dict]] | None = None
 _page_titles: dict[str, tuple[str, str]] = {}
 _tabs_lock = asyncio.Lock()
 _shot_locks: dict[str, asyncio.Lock] = {}
@@ -79,16 +80,19 @@ _ATTACH = """
 
 
 # --------------------------------------------------------------------- 목록
-async def list_tabs(force: bool = False, session_id: str | None = None) -> list[dict]:
+async def list_tabs(force: bool = False, session_id: str | None = None, *, show_all: bool = False) -> list[dict]:
     global _tabs_cache
     async with _tabs_lock:
         now = time.time()
-        if not force and _tabs_cache and _tabs_cache[1] == session_id and now - _tabs_cache[0] < config.TAB_CACHE_TTL:
+        scope = (session_id, show_all)
+        if not force and _tabs_cache and _tabs_cache[1] == scope and now - _tabs_cache[0] < config.TAB_CACHE_TTL:
             return _tabs_cache[2]
+        binding_session = session_id or (await mcp.repl_json(CURRENT_SESSION_CODE))["id"]
+        session = await daemon.call("sessions.get", {"accountId": ACCOUNT_ID, "sessionId": binding_session})
+        binding = session["browserBinding"]
         code = """
   const bt = await listBrowserTabs();
-  let ct = [];
-  try { ct = await chrome.tabs.query({}); } catch (e) { ct = []; }
+  const ct = await chrome.tabs.query({});
   const merged = bt.map(t => {
     const c = ct.find(c => c.id === t.id) || ct.find(c => c.url === t.url && c.windowId === t.windowId);
     return {
@@ -98,6 +102,7 @@ async def list_tabs(force: bool = False, session_id: str | None = None) -> list[
       favicon: t.faviconUrl || null,
       active: !!t.active,
       windowId: t.windowId,
+      index: c ? c.index : null,
       chromeId: c ? c.id : null,
       loaded: c ? (c.status !== 'unloaded' && !c.discarded) : null,
       status: c ? c.status : null,
@@ -107,7 +112,6 @@ async def list_tabs(force: bool = False, session_id: str | None = None) -> list[
   console.log(JSON.stringify(merged));
 """
         tabs = await mcp.repl_json(code, title="Listing browser tabs", timeout=45)
-        tabs = tabs if isinstance(tabs, list) else []
         current_targets = {tab["targetId"] for tab in tabs}
         for target in list(_page_titles):
             if target not in current_targets:
@@ -118,12 +122,22 @@ async def list_tabs(force: bool = False, session_id: str | None = None) -> list[
                 cached_url, cached_title = _page_titles.get(tab["targetId"], ("", ""))
                 title = cached_title if cached_url == tab["url"] else ""
             tab["title"] = title
-        if session_id:
-            targets, active_target = await asyncio.to_thread(daemondb.browser_targets, session_id)
+        if session_id and not show_all:
+            session_tabs = await daemon.call("sessions.tabs.list", {"accountId": ACCOUNT_ID, "sessionId": session_id})
+            owned_tabs = [tab for tab in session_tabs if tab["ownership"] == "owned" and tab.get("targetId") and tab.get("url") not in (None, "", ":", "about:blank")]
+            targets = {tab["targetId"] for tab in owned_tabs}
+            active_target = session.get("activeTabTargetId")
+            if active_target and not any(tab.get("targetId") == active_target for tab in session_tabs):
+                targets.add(active_target)
             tabs = [tab for tab in tabs if tab.get("targetId") in targets]
+            created_at = {tab["targetId"]: tab["createdAt"] for tab in owned_tabs}
+            tabs.sort(key=lambda tab: created_at.get(tab["targetId"], ""), reverse=True)
             for tab in tabs:
                 tab["active"] = tab["targetId"] == active_target
-        _tabs_cache = (now, session_id, tabs)
+        else:
+            tabs = [tab for tab in tabs if tab["windowId"] == binding["windowId"] and not tab["url"].startswith(("chrome://", "chrome-extension://"))]
+            tabs.sort(key=lambda tab: tab["index"] if tab["index"] is not None else math.inf)
+        _tabs_cache = (now, scope, tabs)
         return tabs
 
 
@@ -131,18 +145,18 @@ def _title_key(value: str) -> str:
     return value.removeprefix("https://").removeprefix("http://").removeprefix("www.").rstrip("/")
 
 
-async def find_tab(target_id: str, *, force: bool = False, session_id: str | None = None) -> dict:
-    for tab in await list_tabs(force=force, session_id=session_id):
+async def find_tab(target_id: str, *, force: bool = False, session_id: str | None = None, show_all: bool = False) -> dict:
+    for tab in await list_tabs(force=force, session_id=session_id, show_all=show_all):
         if tab.get("targetId") == target_id:
             return tab
-    for tab in await list_tabs(force=True, session_id=session_id):
+    for tab in await list_tabs(force=True, session_id=session_id, show_all=show_all):
         if tab.get("targetId") == target_id:
             return tab
     raise TabNotFound(target_id)
 
 
-async def _require_awake(target_id: str, session_id: str | None = None) -> dict:
-    tab = await find_tab(target_id, session_id=session_id)
+async def _require_awake(target_id: str, session_id: str | None = None, *, show_all: bool = False) -> dict:
+    tab = await find_tab(target_id, session_id=session_id, show_all=show_all)
     # loaded 가 None 이면 chrome.tabs 매칭 실패(중복 URL 등) — 판단 불가라 시도는 해본다.
     if tab.get("loaded") is False:
         raise TabAsleep(tab)
@@ -156,7 +170,7 @@ def _shot_path(target_id: str, full: bool) -> Path:
 
 
 async def screenshot(target_id: str, *, full: bool = False, quality: int = 62,
-                     max_age: float | None = None, session_id: str | None = None) -> tuple[Path, dict]:
+                     max_age: float | None = None, session_id: str | None = None, show_all: bool = False) -> tuple[Path, dict]:
     """탭 스크린샷을 브리지 캐시로 가져온다.
 
     repl 샌드박스는 세션 디렉토리 밖으로 못 쓴다. 세션 artifacts/ 에 저장시킨 뒤
@@ -178,13 +192,13 @@ async def screenshot(target_id: str, *, full: bool = False, quality: int = 62,
         async with _shot_sem, lock:
             if dest.exists() and time.time() - dest.stat().st_mtime < max_age:
                 return dest, {"cached": True}
-            return await _capture(target_id, dest, full, quality, session_id)
+            return await _capture(target_id, dest, full, quality, session_id, show_all)
     finally:
         _shot_waiting -= 1
 
 
-async def _capture(target_id: str, dest: Path, full: bool, quality: int, session_id: str | None) -> tuple[Path, dict]:
-    tab = await _require_awake(target_id, session_id)
+async def _capture(target_id: str, dest: Path, full: bool, quality: int, session_id: str | None, show_all: bool) -> tuple[Path, dict]:
+    tab = await _require_awake(target_id, session_id, show_all=show_all)
     code = _ATTACH + f"""
   const dir = pwd + '/artifacts';
   await fs.mkdir(dir, {{ recursive: true }});
@@ -215,12 +229,12 @@ async def _capture(target_id: str, dest: Path, full: bool, quality: int, session
 
 
 # --------------------------------------------------------------------- 읽기
-async def tab_text(target_id: str, *, interactive: bool = False, session_id: str | None = None) -> dict:
+async def tab_text(target_id: str, *, interactive: bool = False, session_id: str | None = None, show_all: bool = False) -> dict:
     """snapshot(a11y tree) 우선, 비면 innerText 폴백.
 
     Angular 계열 SPA 는 a11y 트리가 비어서 나오는 경우가 실제로 있다 → 폴백 필수.
     """
-    await _require_awake(target_id, session_id)
+    await _require_awake(target_id, session_id, show_all=show_all)
     code = _ATTACH + f"""
   const pg = await __attach({_jsq(target_id)});
   let tree = '';
@@ -257,13 +271,13 @@ async def open_tab(url: str, session_id: str | None = None) -> dict:
     return {**out, "url": url}
 
 
-async def close_tab(target_id: str, session_id: str | None = None) -> dict:
-    tab = await find_tab(target_id, session_id=session_id)
+async def close_tab(target_id: str, session_id: str | None = None, *, show_all: bool = False) -> dict:
+    tab = await find_tab(target_id, session_id=session_id, show_all=show_all)
     binding_session = session_id or (await mcp.repl_json(CURRENT_SESSION_CODE))["id"]
     session = await daemon.call("sessions.get", {"accountId": ACCOUNT_ID, "sessionId": binding_session})
     binding = {**session["browserBinding"], "windowId": tab["windowId"]}
     await daemon.extension("Aside.controlTab", {"action": "close", "targetId": target_id, "url": tab["url"]}, binding)
-    tabs = await list_tabs(force=True, session_id=session_id)
+    tabs = await list_tabs(force=True, session_id=session_id, show_all=show_all)
     if any(tab["targetId"] == target_id for tab in tabs):
         raise ConnectionError("The browser tab is still open.")
     if session_id:
@@ -275,9 +289,9 @@ async def close_tab(target_id: str, session_id: str | None = None) -> dict:
     return {"ok": True}
 
 
-async def focus_tab(target_id: str, session_id: str | None = None) -> dict:
+async def focus_tab(target_id: str, session_id: str | None = None, *, show_all: bool = False) -> dict:
     """포커스. bringToFront 가 막히면 attach 만 하고 솔직하게 focused:false 로 알린다."""
-    await _require_awake(target_id, session_id)
+    await _require_awake(target_id, session_id, show_all=show_all)
     code = _ATTACH + f"""
   const pg = await __attach({_jsq(target_id)});
   let focused = false;
@@ -285,5 +299,5 @@ async def focus_tab(target_id: str, session_id: str | None = None) -> dict:
   console.log(JSON.stringify({{ ok: true, focused, url: pg.url() }}));
 """
     out = await mcp.repl_json(code, title="Focusing tab", timeout=60)
-    await list_tabs(force=True, session_id=session_id)
+    await list_tabs(force=True, session_id=session_id, show_all=show_all)
     return out

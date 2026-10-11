@@ -24,6 +24,7 @@ import httpx
 
 import config
 import conversation_pins
+from daemon import ACCOUNT_ID, daemon
 
 log = logging.getLogger("aside-remote.sessions")
 
@@ -571,19 +572,22 @@ async def list_sessions(client: httpx.AsyncClient, *, limit: int = 30,
                         cursor: str | None = None, q: str | None = None) -> dict:
     """키셋 페이지네이션. offset 이 아니라 (mtime, id) 로 잘라서,
     페이지를 넘기는 사이에 새 세션이 위에 끼어들어도 항목이 밀리거나 중복되지 않는다."""
-    rows = _get_index()
+    live: dict[str, dict] = {}
+    page_size = 200
+    while True:
+        page = await daemon.call("sessions.listPreviewItems", {
+            "accountId": ACCOUNT_ID, "limit": page_size, "cursor": len(live),
+            "order": "desc", "parent": "root", "archived": "exclude",
+            "ephemeral": "exclude", "routines": "exclude", "coders": "exclude",
+        })
+        live.update({item["id"]: item for item in page})
+        if len(page) < page_size:
+            break
+    rows = [row for row in _get_index() if row[1] in live]
     pins = await asyncio.to_thread(conversation_pins.pinned_ids)
 
     def sort_key(row):
         return (0 if row[1] in pins else 1, -row[0], row[1])
-
-    live: dict[str, dict] = {}
-    try:
-        for s in await live_sessions():
-            if s.get("id"):
-                live[s["id"]] = s
-    except Exception:
-        pass
 
     # 방금 시작해 messages.jsonl 이 아직 없는 세션은 디스크에 안 보인다 → recents 로 메운다.
     known = {r[1] for r in rows}

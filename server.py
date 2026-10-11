@@ -821,27 +821,27 @@ async def api_upload_get(fid: str):
 
 # ------------------------------------------------------------------ 탭
 @app.get("/api/tabs", dependencies=[Auth])
-async def api_tabs(refresh: bool = False, session: str | None = None):
+async def api_tabs(refresh: bool = False, session: str | None = None, all: bool = False):
     if session and sessions.session_dir(session) is None:
         raise HTTPException(404, "Conversation not found.")
-    tabs = await browser.list_tabs(force=refresh, session_id=session)
+    tabs = await browser.list_tabs(force=refresh, session_id=session, show_all=all)
     return {"count": len(tabs), "tabs": tabs}
 
 
 @app.get("/api/tabs/{target_id}/shot", dependencies=[Auth])
 async def api_tab_shot(target_id: str, full: bool = False, q: int = Query(62, ge=20, le=95),
-                       fresh: bool = False, session: str | None = None):
+                       fresh: bool = False, session: str | None = None, all: bool = False):
     if session:
-        await browser.find_tab(target_id, session_id=session)
+        await browser.find_tab(target_id, session_id=session, show_all=all)
     path, _meta = await browser.screenshot(target_id, full=full, quality=q,
-                                           max_age=0 if fresh else None, session_id=session)
+                                           max_age=0 if fresh else None, session_id=session, show_all=all)
     return FileResponse(path, media_type="image/jpeg",
                         headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/tabs/{target_id}/text", dependencies=[Auth])
-async def api_tab_text(target_id: str, interactive: bool = False, session: str | None = None):
-    return await browser.tab_text(target_id, interactive=interactive, session_id=session)
+async def api_tab_text(target_id: str, interactive: bool = False, session: str | None = None, all: bool = False):
+    return await browser.tab_text(target_id, interactive=interactive, session_id=session, show_all=all)
 
 
 @app.post("/api/tabs", dependencies=[Auth])
@@ -853,13 +853,13 @@ async def api_open_tab(payload: dict, session: str | None = None):
 
 
 @app.post("/api/tabs/{target_id}/focus", dependencies=[Auth])
-async def api_focus(target_id: str, session: str | None = None):
-    return await browser.focus_tab(target_id, session_id=session)
+async def api_focus(target_id: str, session: str | None = None, all: bool = False):
+    return await browser.focus_tab(target_id, session_id=session, show_all=all)
 
 
 @app.delete("/api/tabs/{target_id}", dependencies=[Auth])
-async def api_close_tab(target_id: str, session: str | None = None):
-    return await browser.close_tab(target_id, session_id=session)
+async def api_close_tab(target_id: str, session: str | None = None, all: bool = False):
+    return await browser.close_tab(target_id, session_id=session, show_all=all)
 
 
 @app.post("/api/repl", dependencies=[Auth])

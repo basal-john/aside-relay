@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Virtuoso } from 'react-virtuoso';
 import { Ellipsis, Pin, Plus, Search, Settings2, X, ChevronRight } from 'lucide-react';
@@ -8,9 +8,16 @@ import { tokens } from './tokens.stylex';
 import { ICON_STROKE, BrowserIcon, IconButton, styles as ui } from './ui';
 import { Button } from './Button';
 
+const RECENT_CONVERSATION_LIMIT = 3;
+
 export function Sidebar({ chat, isDrawer, onClose, onNew, onOpen, onSettings, onBrowser, onMenu }: {
   chat: UseChat; isDrawer?: boolean; onClose?: () => void; onNew: () => void; onOpen: (id: string) => void; onSettings: () => void; onBrowser: () => void; onMenu: (target: SessionMenuTarget) => void;
 }) {
+  const [isShowingAll, setShowingAll] = useState(false);
+  const isExpanded = isShowingAll || !!chat.searchQuery.trim();
+  const pinnedSessions = chat.sessions.filter(session => session.isPinned);
+  const recentSessions = chat.sessions.filter(session => !session.isPinned);
+  const visibleSessions = isExpanded ? chat.sessions : [...pinnedSessions, ...recentSessions.slice(0, RECENT_CONVERSATION_LIMIT)];
   const press = useRef<{ x: number; y: number; timer: ReturnType<typeof setTimeout> } | undefined>(undefined);
   const hasLongPressed = useRef(false);
   useEffect(() => cancelPress, []);
@@ -22,7 +29,7 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onOpen, onSettings, on
     return anchor && session ? { id: session.id, title: session.title, anchor } : undefined;
   }
   let lastGroup = '';
-  const rows = chat.sessions.flatMap(session => {
+  const rows = visibleSessions.flatMap(session => {
     const group = session.isPinned ? 'Pinned' : dateGroup(session.mtime); const hasHeading = group !== lastGroup; lastGroup = group;
     return [...(hasHeading ? [{ kind: 'heading' as const, group }] : []), { kind: 'session' as const, session }];
   });
@@ -44,7 +51,7 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onOpen, onSettings, on
     <button {...stylex.props(styles.newChat)} onClick={onNew}><Plus size={20} strokeWidth={ICON_STROKE} />New chat</button>
     <div {...stylex.props(styles.search)}><Search size={17} strokeWidth={ICON_STROKE} /><input aria-label="Search conversations" placeholder="Search" value={chat.searchQuery} onChange={event => chat.setSearchQuery(event.target.value)} {...stylex.props(styles.searchInput)} />{chat.searchQuery && <button {...stylex.props(styles.clear)} aria-label="Clear search" onClick={() => chat.setSearchQuery('')}><X size={16} /></button>}</div>
     <div {...stylex.props(styles.list)}>
-      {rows.length > 0 && <Virtuoso data={rows} initialItemCount={12} defaultItemHeight={50} increaseViewportBy={150} style={{ height: '100%' }} computeItemKey={(_, row) => row.kind === 'heading' ? row.group : row.session.id} components={sessionListComponents} context={chat} itemContent={(_, row) => {
+      {rows.length > 0 && <Virtuoso data={rows} initialItemCount={12} defaultItemHeight={50} increaseViewportBy={150} style={{ height: '100%' }} computeItemKey={(_, row) => row.kind === 'heading' ? row.group : row.session.id} components={isExpanded ? sessionListComponents : recentSessionListComponents} context={chat} itemContent={(_, row) => {
         if (row.kind === 'heading') return <h2 {...stylex.props(styles.group)}>{row.group}</h2>;
         const session = row.session;
         return <div {...stylex.props(styles.session, session.id === chat.sessionId && styles.selected)}>
@@ -54,6 +61,7 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onOpen, onSettings, on
       }} />}
       {!chat.sessions.length && <p role="status" {...stylex.props(styles.empty)}>{chat.isLoadingSessions ? 'Loading conversations…' : chat.authError ? 'Connect in Settings to see your conversations.' : chat.searchQuery ? 'No matching conversations' : 'Your conversations will appear here.'}</p>}
     </div>
+    {!chat.searchQuery.trim() && (isShowingAll || recentSessions.length > RECENT_CONVERSATION_LIMIT || chat.hasMore) && <Button {...stylex.props(styles.showAll)} aria-expanded={isShowingAll} onClick={() => setShowingAll(current => !current)}>{isShowingAll ? 'Show recent' : 'Show all'}<ChevronRight size={16} aria-hidden="true" /></Button>}
     <div {...stylex.props(styles.bottom)}><button {...stylex.props(styles.nav)} onClick={onBrowser}><BrowserIcon size={19} />Browser</button><button {...stylex.props(styles.nav)} onClick={onSettings}><Settings2 size={19} strokeWidth={ICON_STROKE} />Settings<span {...stylex.props(styles.connection, chat.isConnected && styles.connected)} role="img" aria-label={chat.isConnected ? 'Connected' : 'Disconnected'} /></button></div>
   </aside>;
 }
@@ -62,6 +70,7 @@ function SessionListFooter({ context: chat }: { context?: UseChat }) {
   return chat?.hasMore ? <Button {...stylex.props(styles.more)} onClick={() => void chat.loadMore()} disabled={chat.isLoadingMore}>{chat.isLoadingMore ? 'Loading…' : 'Show more'}<ChevronRight size={16} /></Button> : undefined;
 }
 const sessionListComponents = { Footer: SessionListFooter };
+const recentSessionListComponents = {};
 
 function dateGroup(seconds: number) {
   const date = new Date(seconds * 1000); const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -93,4 +102,5 @@ const styles = stylex.create({
   connected: { backgroundColor: tokens.primary },
   empty: { fontSize: '0.875rem', lineHeight: 1.6, color: tokens.muted, padding: 12 },
   more: { marginTop: 12, width: '100%', backgroundColor: 'transparent' },
+  showAll: { margin: '0 14px 12px', flexShrink: 0 },
 });

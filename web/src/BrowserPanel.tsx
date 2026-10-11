@@ -40,7 +40,8 @@ type BrowserPanelProps = {
 type PreviewStatus = "idle" | "loading" | "ready" | "asleep" | "missing" | "error"
 
 export function BrowserPanel({ request, notify, onStart, onClose, sessionId, initialTargetId }: BrowserPanelProps) {
-  const sessionQuery = sessionId ? `&session=${encodeURIComponent(sessionId)}` : ""
+  const [isShowingAllTabs, setShowingAllTabs] = useState(false)
+  const sessionQuery = sessionId ? `&session=${encodeURIComponent(sessionId)}${isShowingAllTabs ? '&all=true' : ''}` : ""
   const initialTargetRef = useRef(initialTargetId)
   const [tabs, setTabs] = useState<BrowserTab[]>([])
   const [selectedTab, setSelectedTab] = useState<BrowserTab>()
@@ -103,9 +104,7 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
       const value: unknown = await response.json()
       if (signal?.aborted || generation !== listGenerationRef.current) return
       if (!isTabResponse(value)) throw new Error("Invalid tab list.")
-      const sortedTabs = value.tabs.filter(tab => !closingTabsRef.current.has(tab.targetId)).sort(
-        (first, second) => (second.lastAccessed ?? 0) - (first.lastAccessed ?? 0),
-      )
+      const sortedTabs = value.tabs.filter(tab => !closingTabsRef.current.has(tab.targetId))
       setTabs(sortedTabs)
       const initialTarget = initialTargetRef.current
       setSelectedTab((current) => sortedTabs.find((tab) => tab.targetId === (current?.targetId ?? initialTarget)))
@@ -240,7 +239,7 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
     }
   }
 
-  const availableTabs = tabs.filter((tab) => tab.loaded !== false)
+  const availableTabs = tabs
   const filteredTabs = availableTabs.filter((tab) => {
     const needle = query.trim().toLocaleLowerCase()
     return (
@@ -330,7 +329,7 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
               <input ref={searchInputRef} {...stylex.props(styles.searchInput)} value={query} placeholder="Search tabs" onChange={(event) => setQuery(event.target.value)} />
             </label>
           </div>
-          <div {...stylex.props(styles.meta)}>{availableTabs.length + openingTabs.length} tabs</div>
+          <div {...stylex.props(styles.listScope)}><div {...stylex.props(styles.meta)}>{availableTabs.length + openingTabs.length} {sessionId && !isShowingAllTabs ? 'chat tabs' : 'tabs'}</div>{sessionId && <Button size="compact" aria-expanded={isShowingAllTabs} onClick={() => { listGenerationRef.current += 1; setTabs([]); setShowingAllTabs(current => !current) }}>{isShowingAllTabs ? 'Chat tabs' : 'Show all'}</Button>}</div>
           <div {...stylex.props(styles.list)}>
             {listError && <EmptyState title="Reconnecting…" detail={listError} />}
             {!listError && isLoadingTabs && tabs.length === 0 && <EmptyState title="Loading tabs…" detail="Chrome may take a moment to respond." />}
@@ -481,6 +480,7 @@ const styles = stylex.create({
   textarea: { width: "100%", minHeight: 88, resize: "vertical", padding: "13px 14px", borderWidth: 1, borderStyle: "solid", borderColor: tokens.border, borderRadius: 14, backgroundColor: tokens.canvas, color: tokens.text, fontFamily: tokens.font, fontSize: '1rem', lineHeight: 1.45 },
   actionGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 },
   externalLink: { textDecoration: 'none' },
+  listScope: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   confirmRow: { minHeight: 52, display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: 8, padding: "4px 0" },
   empty: { minHeight: 220, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 7, padding: 28, textAlign: "center", color: tokens.muted, fontSize: '0.875rem' },
   openDisclosure: { width: '100%', marginTop: 8 },

@@ -92,6 +92,12 @@ Click any image to view it at full size.
   with a gesture; pages can also open in your own browser.
 - Pin, rename, share, delete, and copy conversation links or session IDs.
   Pins appear first; other conversations sort by their latest activity.
+- Recent conversations with **Show all**, using Aside's ordinary-chat visibility
+  rules. Subagents, archived chats, and temporary CLI sessions stay out of both
+  the list and search results.
+- Browser lists switch between **Chat tabs** (including tabs owned by its child
+  agents) and **Show all** (web tabs in the conversation's browser window).
+  Sleeping tabs stay visible with their state.
 - Conversation deep links, last-conversation restoration, and notifications that
   open the matching conversation.
 - Light/dark mode, Wanted Sans, an anchored multiline composer, and mobile
@@ -1257,6 +1263,18 @@ agent runs, the local daemon, and session files. Intermediate messages stream
 from `messages.jsonl` rather than waiting for a final CLI answer. Conversations
 are stored under the configured Aside user directory; uploads go there so the
 agent can read them within Aside's permitted roots.
+
+Conversation visibility and titles come from `sessions.listPreviewItems`, the
+same daemon query used by Aside's chat list. Disk messages supply activity times
+and previews for those visible conversations. The sidebar starts with pinned
+chats and the latest three unpinned chats; **Show all** expands the virtualized
+list, and search covers every visible conversation. Show all retains the same
+visibility rules rather than exposing internal agent sessions.
+
+Chat tabs use `sessions.tabs.list` so the parent chat includes its child agents'
+owned tabs. Closed targets are omitted. **Show all** follows the browser window's
+tab order and excludes browser-internal pages and Aside extension pages. It does
+not mix tabs from other windows into the current conversation's browser list.
 
 These integrations rely on Aside's internal behavior rather than a stable
 public server API. The bridge uses the installed signed CLI to authorize daemon
