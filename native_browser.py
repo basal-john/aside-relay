@@ -23,19 +23,19 @@ KEYS = {
 async def control_browser_tab(target_id: str, payload: dict, session: str | None = None,
                               show_all: bool = Query(False, alias="all")):
     action = payload.get("action")
-    if action not in CONTROL_ACTIONS:
+    if not isinstance(action, str) or action not in CONTROL_ACTIONS:
         raise HTTPException(400, "Unsupported browser action.")
     x, y = payload.get("x"), payload.get("y")
     if action == "click" and not (_is_unit_number(x) and _is_unit_number(y)):
         raise HTTPException(400, "Click coordinates must be between 0 and 1.")
     delta_x, delta_y = payload.get("deltaX", 0), payload.get("deltaY", 0)
-    if action == "scroll" and not all(isinstance(value, int) and abs(value) <= 4000 for value in (delta_x, delta_y)):
+    if action == "scroll" and not all(isinstance(value, int) and not isinstance(value, bool) and abs(value) <= 4000 for value in (delta_x, delta_y)):
         raise HTTPException(400, "Scroll distance is invalid.")
     text = payload.get("text", "")
     if action == "type" and (not isinstance(text, str) or len(text) > 5_000):
         raise HTTPException(400, "Text is invalid.")
     key = payload.get("key", "")
-    if action == "key" and key not in KEYS:
+    if action == "key" and (not isinstance(key, str) or key not in KEYS):
         raise HTTPException(400, "Key is not supported.")
     url = payload.get("url", "")
     if action == "navigate" and not _is_web_url(url):
@@ -103,5 +103,8 @@ def _is_unit_number(value: object) -> bool:
 def _is_web_url(value: object) -> bool:
     if not isinstance(value, str) or len(value) > 8_192:
         return False
-    parsed = urlparse(value)
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+    try:
+        parsed = urlparse(value)
+        return parsed.scheme in {"http", "https"} and bool(parsed.hostname)
+    except ValueError:
+        return False

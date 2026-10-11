@@ -85,7 +85,10 @@ export type ChatSession = {
   projectId?: string
   statusLabel?: string
   suspensionKind?: string
+  archived?: boolean
 }
+
+export type SessionSettings = { title?: string; isPinned?: boolean; unread?: boolean; archived?: boolean }
 
 export type UploadAttachment = {
   id: string
@@ -159,7 +162,7 @@ export type UseChat = {
   resumeQueue: () => Promise<boolean>
   upload: (file: File) => Promise<UploadAttachment>
   deleteSession: (sessionId: string) => Promise<boolean>
-  updateSession: (sessionId: string, settings: { title?: string; isPinned?: boolean }) => Promise<boolean>
+  updateSession: (sessionId: string, settings: SessionSettings, previousSettings?: SessionSettings) => Promise<boolean>
   abort: () => Promise<boolean>
   clearRecoveredDraft: () => void
   dismissToast: (toastId: string) => void

@@ -7,6 +7,7 @@ import { JSDOM } from 'jsdom';
 
 const root = path.resolve(import.meta.dirname, '..');
 const dist = path.join(root, 'web/dist');
+const UI_TIMEOUT_MS = 5_000;
 const indexPath = path.join(dist, 'index.html');
 if (!fs.existsSync(indexPath)) throw new Error('web/dist is missing. Run npm run build first.');
 
@@ -18,12 +19,12 @@ if (!fs.existsSync(entryPath)) throw new Error(`The production entry is missing:
 
 const now = Date.now() / 1_000;
 const sessions = [
-  createSession('AAA', 'Alpha conversation', now),
-  createSession('BBB', 'Beta conversation', now - 60),
+  createSession('ALPHASESSION001', 'Alpha conversation', now),
+  createSession('BETASESSION0001', 'Beta conversation', now - 60),
 ];
 const messages = new Map([
-  ['AAA', [createMessage(0, 'user', [{ type: 'text', text: 'Alpha prompt' }])]],
-  ['BBB', [
+  ['ALPHASESSION001', [createMessage(0, 'user', [{ type: 'text', text: 'Alpha prompt' }])]],
+  ['BETASESSION0001', [
     createMessage(0, 'user', [{ type: 'text', text: 'Inspect this' }]),
     createMessage(1, 'assistant', [
       { type: 'thinking', text: 'Plan\nCheck the page' },
@@ -40,7 +41,7 @@ let failures = 0;
 
 const dom = new JSDOM(html, { url: 'http://localhost/settings', pretendToBeVisual: true });
 const { window } = dom;
-window.localStorage.setItem('lastSession', 'BBB');
+window.localStorage.setItem('lastSession', 'BETASESSION0001');
 installBrowserGlobals(window);
 installFetch(window);
 const socket = installWebSocket(window);
@@ -53,7 +54,7 @@ window.addEventListener('unhandledrejection', event => captureError(event.reason
 console.log('production React boot');
 await Promise.race([
   import(pathToFileURL(entryPath).href),
-  new Promise((_, reject) => setTimeout(() => reject(new Error('Timed out importing the production bundle.')), 2_000)),
+  new Promise((_, reject) => setTimeout(() => reject(new Error('Timed out importing the production bundle.')), UI_TIMEOUT_MS)),
 ]);
 await waitFor(() => document.querySelector('[aria-current="page"]')?.textContent.includes('Beta'));
 await waitFor(() => document.querySelector('[aria-label="Your message"]'));
@@ -62,7 +63,7 @@ check('conversation list rendered', document.querySelectorAll('aside[aria-label=
 check('settings refresh restores the last conversation in the background', location.pathname === '/settings' && document.querySelector('[aria-current="page"]')?.textContent.includes('Beta'));
 check('restored messages rendered', document.querySelector('[aria-label="Your message"]')?.textContent.includes('Inspect this'));
 click(document.querySelector('[role="dialog"][data-app-dialog] button[aria-label="Close"]'));
-await waitFor(() => location.pathname === '/c/BBB');
+await waitFor(() => location.pathname === '/c/BETASESSION0001');
 
 console.log('activity state and mobile drawer');
 const activity = document.querySelector('details');
@@ -83,13 +84,13 @@ typeIn(drawer.querySelector('input[aria-label="Search conversations"]'), 'Alpha'
 await waitFor(() => drawer.textContent.includes('Alpha conversation') && !drawer.textContent.includes('Beta conversation'));
 check('search filters from the API', drawer.textContent.includes('Alpha conversation'));
 click([...drawer.querySelectorAll('button')].find(button => button.textContent.includes('Alpha conversation')));
-await waitFor(() => location.pathname === '/c/AAA');
-check('opening a result routes to its conversation', location.pathname === '/c/AAA');
+await waitFor(() => location.pathname === '/c/ALPHASESSION001');
+check('opening a result routes to its conversation', location.pathname === '/c/ALPHASESSION001');
 await waitFor(() => !document.querySelector('dialog[aria-label="Conversation menu"]'));
 check('drawer closes after selection', !document.querySelector('dialog[aria-label="Conversation menu"]'));
 
 console.log('dead link and stale run correlation');
-history.pushState({}, '', '/c/ZZZdead');
+history.pushState({}, '', '/c/MISSINGSESSION1');
 window.dispatchEvent(new window.PopStateEvent('popstate'));
 await waitFor(() => location.pathname === '/');
 check('dead conversation is replaced with the new-chat route', location.pathname === '/');
@@ -110,18 +111,18 @@ typeIn(draft, 'Accepted after disconnect');
 click(document.querySelector('button[aria-label="Send message"]'));
 await waitFor(() => socketRequests.filter(request => request.op === 'run').length === 2);
 const recoveredRun = lastSocketRequest('run');
-messages.set('NEWSESSION01', [createMessage(0, 'user', [{ type: 'text', text: 'Accepted after disconnect' }])]);
-running.add('NEWSESSION01');
-runRequests.set(recoveredRun.requestId, { status: 'started', sessionId: 'NEWSESSION01', runId: 'recovered-run' });
+messages.set('NEWSESSION0001', [createMessage(0, 'user', [{ type: 'text', text: 'Accepted after disconnect' }])]);
+running.add('NEWSESSION0001');
+runRequests.set(recoveredRun.requestId, { status: 'started', sessionId: 'NEWSESSION0001', runId: 'recovered-run' });
 socket.disconnect();
-await waitFor(() => location.pathname === '/c/NEWSESSION01');
+await waitFor(() => location.pathname === '/c/NEWSESSION0001');
 await waitFor(() => document.querySelector('[aria-label="Your message"]')?.textContent.includes('Accepted after disconnect'));
-check('request registry recovers a lost run.started event', location.pathname === '/c/NEWSESSION01');
+check('request registry recovers a lost run.started event', location.pathname === '/c/NEWSESSION0001');
 check('canonical fetch recovers the first message', document.querySelector('[aria-label="Your message"]')?.textContent.includes('Accepted after disconnect'));
 check('draft stays clear after recovered acceptance', draft.value === '');
 
 click(document.querySelector('button[aria-label="New chat"]'));
-socket.emit({ op: 'run.done', sessionId: 'NEWSESSION01', runId: 'recovered-run' });
+socket.emit({ op: 'run.done', sessionId: 'NEWSESSION0001', runId: 'recovered-run' });
 await tick(30);
 check('old run completion does not reopen its conversation', location.pathname === '/');
 check('explicit new chat choice is persisted', localStorage.getItem('lastSessionMode') === 'new');
@@ -152,10 +153,10 @@ function tick(milliseconds = 0) {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
 
-async function waitFor(condition, timeout = 2_000) {
+async function waitFor(condition, timeout = UI_TIMEOUT_MS) {
   const deadline = Date.now() + timeout;
   while (!condition()) {
-    if (Date.now() >= deadline) throw new Error('Timed out waiting for the UI.');
+    if (Date.now() >= deadline) throw new Error(`UI condition timed out at ${location.pathname}: ${condition.toString()}`);
     await tick(10);
   }
 }

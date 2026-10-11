@@ -59,7 +59,7 @@ export function parseBrowserLibrary(value: unknown, kind: "history" | "bookmarks
       title: typeof title === "string" && title.trim() ? title : new URL(url).hostname,
       url,
       favicon: typeof favicon === "string" && favicon ? favicon : undefined,
-      detail: kind === "history" && typeof visitCount === "number" ? `${visitCount} visits` : undefined,
+      detail: kind === "history" && typeof visitCount === "number" && Number.isSafeInteger(visitCount) && visitCount >= 0 ? `${visitCount} visits` : undefined,
     }]
   })
 }

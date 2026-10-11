@@ -3,10 +3,10 @@ import * as stylex from '@stylexjs/stylex';
 import { motion, useReducedMotion } from 'motion/react';
 import { Virtuoso } from 'react-virtuoso';
 import { ArrowDownUp, ChevronRight, Ellipsis, EyeOff, Grid2X2, List, Pin, Plus, Search, Settings2, X } from 'lucide-react';
-import type { ChatSession, UseChat } from './types';
+import type { ChatSession, SessionSettings, UseChat } from './types';
 import type { SessionMenuTarget } from './SessionMenu';
 import { tokens } from './tokens.stylex';
-import { ICON_STROKE, AsideIcon, BrowserIcon, IconButton, styles as ui } from './ui';
+import { ICON_STROKE, SESSION_CHANGE_EVENT, AsideIcon, BrowserIcon, IconButton, styles as ui } from './ui';
 import { Button } from './Button';
 import { useAutoRefresh } from './useAutoRefresh';
 
@@ -53,6 +53,7 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen
   const [refreshRevision, setRefreshRevision] = useState(0);
   const chatSessionsRef = useRef(chat.sessions);
   const nativeSessionsRef = useRef(nativeSessions);
+  const pendingSettingsRef = useRef(new Map<string, SessionSettings>());
   const nativeQueryRef = useRef('');
   const activeQueryRef = useRef('');
   const loadMoreControllerRef = useRef<AbortController | undefined>(undefined);
@@ -61,8 +62,8 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen
   const activeQuery = nativeQueryKey({ view, sort, projectId, status: statusFilter, query: chat.searchQuery });
   activeQueryRef.current = activeQuery;
   const isExpanded = isShowingAll || !!chat.searchQuery.trim();
-  const pinnedSessions = chat.sessions.filter(session => session.isPinned);
-  const recentSessions = chat.sessions.filter(session => !session.isPinned);
+  const pinnedSessions = chat.sessions.filter(session => !session.archived && session.isPinned);
+  const recentSessions = chat.sessions.filter(session => !session.archived && !session.isPinned);
   const chatSessionsRevision = chat.sessions.map(session => `${session.id}:${session.status}:${Number(session.unread)}:${session.mtime}`).join('|');
   const loadNative = useCallback(async (signal: AbortSignal) => {
     if (!isExpanded) return;
@@ -78,7 +79,7 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen
         const result = readNativePage(await response.json(), view === 'archived');
         items.push(...result.items); next = result.nextCursor; cursor = result.nextCursor ?? cursor;
       }
-      if (!signal.aborted) { setNativeSessions(items); setNextCursor(next); }
+      if (!signal.aborted) { setNativeSessions(items.map(item => ({ ...item, ...pendingSettingsRef.current.get(item.id) }))); setNextCursor(next); }
     } catch {
       if (signal.aborted) return;
       const canUseFallback = view === 'active' && !projectId && !statusFilter && !chat.searchQuery.trim();
@@ -95,9 +96,26 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen
   }, [activeQuery]);
   useEffect(() => () => loadMoreControllerRef.current?.abort(), []);
   useEffect(() => {
-    const refresh = () => setRefreshRevision(current => current + 1);
-    window.addEventListener('aside:sessions-changed', refresh);
-    return () => window.removeEventListener('aside:sessions-changed', refresh);
+    const refresh = (event: Event) => {
+      if (event instanceof CustomEvent) {
+        const detail: unknown = event.detail;
+        if (typeof detail === 'object' && detail !== null && 'id' in detail && typeof detail.id === 'string' && 'settings' in detail && typeof detail.settings === 'object' && detail.settings !== null) {
+          const value = detail.settings;
+          const settings: SessionSettings = {
+            ...('title' in value && typeof value.title === 'string' ? { title: value.title } : {}),
+            ...('isPinned' in value && typeof value.isPinned === 'boolean' ? { isPinned: value.isPinned } : {}),
+            ...('unread' in value && typeof value.unread === 'boolean' ? { unread: value.unread } : {}),
+            ...('archived' in value && typeof value.archived === 'boolean' ? { archived: value.archived } : {}),
+          };
+          if ('isPending' in detail && detail.isPending === true) pendingSettingsRef.current.set(detail.id, { ...pendingSettingsRef.current.get(detail.id), ...settings });
+          else pendingSettingsRef.current.delete(detail.id);
+          setNativeSessions(current => current.map(session => session.id === detail.id ? { ...session, ...settings } : session));
+        }
+      }
+      setRefreshRevision(current => current + 1);
+    };
+    window.addEventListener(SESSION_CHANGE_EVENT, refresh);
+    return () => window.removeEventListener(SESSION_CHANGE_EVENT, refresh);
   }, []);
   useEffect(() => {
     if (!isShowingAll) return;
@@ -105,7 +123,7 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen
     void chat.request('/api/native/projects', { cache: 'no-store', signal: controller.signal }).then(response => response.json()).then(value => { if (!controller.signal.aborted) setProjects(readProjects(value)); }).catch(() => undefined);
     return () => controller.abort();
   }, [chat.request, isShowingAll]);
-  const visibleSessions: SidebarSession[] = isExpanded ? nativeSessions : [...pinnedSessions, ...recentSessions.slice(0, recentLimit)];
+  const visibleSessions: SidebarSession[] = isExpanded ? nativeSessions.filter(session => !!session.archived === (view === 'archived')) : [...pinnedSessions, ...recentSessions.slice(0, recentLimit)];
   const press = useRef<{ x: number; y: number; timer: ReturnType<typeof setTimeout> } | undefined>(undefined);
   const hasLongPressed = useRef(false);
   useEffect(() => cancelPress, []);
@@ -121,7 +139,7 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen
       const response = await chat.request(nativeSessionsUrl({ view, sort, projectId, status: statusFilter, query: chat.searchQuery, cursor: nextCursor, limit: NATIVE_PAGE_SIZE }), { cache: 'no-store', signal: controller.signal });
       const result = readNativePage(await response.json(), view === 'archived');
       if (controller.signal.aborted || activeQueryRef.current !== queryKey) return;
-      setNativeSessions(current => [...current, ...result.items.filter(item => !current.some(existing => existing.id === item.id))]);
+      setNativeSessions(current => [...current, ...result.items.filter(item => !current.some(existing => existing.id === item.id)).map(item => ({ ...item, ...pendingSettingsRef.current.get(item.id) }))]);
       setNextCursor(result.nextCursor);
     } catch { if (!controller.signal.aborted && activeQueryRef.current === queryKey) setNativeError(true); }
     finally {

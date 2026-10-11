@@ -6,7 +6,13 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "node tests/boot.test.mjs"
+    "test": "npm run test:unit && npm run test:backend && npm run test:mutations && npm run build && npm run test:smoke && npm run test:e2e",
+    "test:unit": "node --test tests/unit/*.test.mjs",
+    "test:backend": "node tests/run-backend.mjs",
+    "test:mutations": "node tests/verify-mutations.mjs",
+    "test:smoke": "node tests/boot.test.mjs",
+    "test:e2e": "tsc -p tsconfig.tests.json && playwright test",
+    "test:repeat": "playwright test --repeat-each=3"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
@@ -22,6 +28,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.0",
     "@rolldown/plugin-babel": "^0.2.4",
     "@stylexjs/unplugin": "^0.19.1",
     "@types/mdast": "^4.0.4",

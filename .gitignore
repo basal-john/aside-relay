@@ -7,3 +7,4 @@ logs/
 .DS_Store
 node_modules/
 web/dist/
+output/playwright/

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { formatRequestError } from "./errors"
 import { useAutoRefresh } from "./useAutoRefresh"
+import { SESSION_CHANGE_EVENT } from "./ui"
 import {
   isRecord,
   parseChatMessage,
@@ -21,6 +22,7 @@ import type {
   LiveAssistant,
   ModelConfig,
   RunOptions,
+  SessionSettings,
   QueuedMessage,
   Toast,
   UploadAttachment,
@@ -55,7 +57,6 @@ type ActiveLiveAssistant = LiveAssistant & {
 
 type QueueResponse = { items: QueuedMessage[]; isPaused: boolean }
 type QueueMutation = { id: string; sessionId?: string; generation: number; update: (state: QueueResponse) => QueueResponse }
-type SessionSettings = { title?: string; isPinned?: boolean }
 
 type SocketMessage = {
   op: string
@@ -250,7 +251,7 @@ export const useChat = (): UseChat => {
   const queueDeliveryRef = useRef<Promise<unknown>>(Promise.resolve())
   const activeDeliveryRef = useRef<Promise<boolean> | undefined>(undefined)
   const sessionMutationsRef = useRef<{ key: string; id: string; settings: SessionSettings }[]>([])
-  const sessionBasesRef = useRef(new Map<string, ChatSession>())
+  const sessionBasesRef = useRef(new Map<string, SessionSettings>())
   const sessionWritesRef = useRef(new Map<string, Promise<unknown>>())
   const deletingSessionsRef = useRef(new Set<string>())
   const followupRequestRef = useRef<{ key: string; id: string } | undefined>(undefined)
@@ -1296,36 +1297,49 @@ export const useChat = (): UseChat => {
     [api, newChat, openSession, pushToast, refreshSessions, updateSessions],
   )
 
-  const updateSession = useCallback((id: string, settings: SessionSettings) => {
+  const updateSession = useCallback((id: string, settings: SessionSettings, previousSettings?: SessionSettings) => {
     const key = createRequestId()
     const previous = sessionsRef.current.find(session => session.id === id)
-    if (previous && !sessionBasesRef.current.has(id)) sessionBasesRef.current.set(id, previous)
+    const wasSelected = settings.archived === true && sessionIdRef.current === id
+    if (wasSelected) newChat()
+    const generation = openGenerationRef.current
+    const baseSettings = previous ? { ...previous, ...previousSettings } : previousSettings
+    if (baseSettings && !sessionBasesRef.current.has(id)) sessionBasesRef.current.set(id, baseSettings)
     sessionMutationsRef.current.push({ key, id, settings })
     updateSessions(current => current.map(session => session.id === id ? { ...session, ...settings } : session).sort(compareSessions))
+    window.dispatchEvent(new CustomEvent(SESSION_CHANGE_EVENT, { detail: { id, settings, isPending: true } }))
     const delivery = (sessionWritesRef.current.get(id) ?? Promise.resolve()).then(async () => {
       try {
-        const details = await api(`/api/sessions/${encodeURIComponent(id)}`, parseSessionDetails, {
-          method: "PATCH", body: JSON.stringify(settings),
-        })
+        let details: SessionSettings = settings
+        if (settings.unread !== undefined || settings.archived !== undefined) {
+          const action = settings.unread !== undefined ? settings.unread ? 'unread' : 'read' : settings.archived ? 'archive' : 'unarchive'
+          await request(`/api/native/sessions/${encodeURIComponent(id)}/${action}`, { method: "POST" })
+        } else {
+          details = await api(`/api/sessions/${encodeURIComponent(id)}`, parseSessionDetails, {
+            method: "PATCH", body: JSON.stringify(settings),
+          })
+        }
         const base = sessionBasesRef.current.get(id)
         if (base) sessionBasesRef.current.set(id, { ...base, ...details })
         return true
       } catch (error) {
         pushToast(`Couldn't update the conversation. ${getErrorMessage(error)}`)
+        if (wasSelected && generation === openGenerationRef.current && sessionIdRef.current === undefined) void openSession(id)
         return false
       } finally {
         sessionMutationsRef.current = sessionMutationsRef.current.filter(mutation => mutation.key !== key)
         const base = sessionBasesRef.current.get(id)
         const remaining = sessionMutationsRef.current.filter(mutation => mutation.id === id)
-        const next = remaining.reduce<SessionSettings>((current, mutation) => ({ ...current, ...mutation.settings }), base ? { ...(settings.title !== undefined ? { title: base.title } : {}), ...(settings.isPinned !== undefined ? { isPinned: base.isPinned } : {}) } : {})
+        const next = remaining.reduce<SessionSettings>((current, mutation) => ({ ...current, ...mutation.settings }), base ? { ...(settings.title !== undefined ? { title: base.title } : {}), ...(settings.isPinned !== undefined ? { isPinned: base.isPinned } : {}), ...(settings.unread !== undefined ? { unread: base.unread } : {}), ...(settings.archived !== undefined ? { archived: base.archived ?? false } : {}) } : {})
         updateSessions(current => current.map(session => session.id === id ? { ...session, ...next } : session).sort(compareSessions))
+        window.dispatchEvent(new CustomEvent(SESSION_CHANGE_EVENT, { detail: { id, settings: next, isPending: remaining.length > 0 } }))
         if (!remaining.length) { sessionBasesRef.current.delete(id); void refreshSessions() }
       }
     })
     sessionWritesRef.current.set(id, delivery)
     void delivery.then(() => { if (sessionWritesRef.current.get(id) === delivery) sessionWritesRef.current.delete(id) })
     return delivery
-  }, [api, pushToast, refreshSessions, updateSessions])
+  }, [api, request, newChat, openSession, pushToast, refreshSessions, updateSessions])
 
   const abort = useCallback(async () => {
     const selectedSessionId = sessionIdRef.current

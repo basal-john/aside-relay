@@ -5,7 +5,7 @@ import type { UseChat } from './types';
 import { parseSessionDetails } from './responses';
 import { PopoverMenu } from './PopoverMenu';
 import { tokens } from './tokens.stylex';
-import { ICON_STROKE, RENAME_CONVERSATION_TITLE, styles as ui } from './ui';
+import { ICON_STROKE, RENAME_CONVERSATION_TITLE, SESSION_CHANGE_EVENT, styles as ui } from './ui';
 import { Button } from './Button';
 import { Dialog, DialogActions, DialogDescription } from './Dialog';
 
@@ -25,7 +25,7 @@ export function SessionMenu({ target, chat, onClose, onRename, onDelete, onFiles
   const url = new URL('/c/' + encodeURIComponent(target.id), location.origin).href;
   const title = session?.title ?? details?.title ?? target.title;
   const isPinned = session?.isPinned ?? details?.isPinned ?? false;
-  const isUnread = session?.unread ?? target.unread ?? false;
+  const isUnread = target.unread ?? session?.unread ?? false;
   useEffect(() => {
     if (session) return;
     const controller = new AbortController();
@@ -42,18 +42,10 @@ export function SessionMenu({ target, chat, onClose, onRename, onDelete, onFiles
   }
   async function mutateNative(path: string, successMessage: string) {
     setBusy(true); onClose();
-    if (path === '/archive' && chat.sessionId === target.id) chat.newChat();
-    try {
-      const response = await chat.request('/api/native/sessions/' + encodeURIComponent(target.id) + path, { method: 'POST' });
-      if (!response.ok) throw new Error();
-      window.dispatchEvent(new Event('aside:sessions-changed'));
-      await chat.refreshSessions();
+    const settings = path === '/read' || path === '/unread' ? { unread: path === '/unread' } : { archived: path === '/archive' };
+    if (await chat.updateSession(target.id, settings, { unread: isUnread, archived: target.archived ?? false })) {
       notify(successMessage, 'success');
-      return response;
-    } catch {
-      setBusy(false);
-      notify('Could not update the conversation. Try again.', 'error');
-    }
+    } else setBusy(false);
   }
 
   async function shareSnapshot() {
@@ -75,7 +67,7 @@ export function SessionMenu({ target, chat, onClose, onRename, onDelete, onFiles
 
   async function updatePinned() {
     onClose();
-    if (await chat.updateSession(target.id, { isPinned: !isPinned })) window.dispatchEvent(new Event('aside:sessions-changed'));
+    if (await chat.updateSession(target.id, { isPinned: !isPinned }, { isPinned })) window.dispatchEvent(new Event(SESSION_CHANGE_EVENT));
   }
 
   if (dialog === 'project') return <MoveConversationDialog sessionId={target.id} currentProjectId={target.projectId} chat={chat} notify={notify} onClose={onClose} />;
@@ -122,7 +114,7 @@ function MoveConversationDialog({ sessionId, currentProjectId, chat, notify, onC
       try {
         const response = await chat.request('/api/native/sessions/' + encodeURIComponent(sessionId), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: selectedId || null }) });
         if (!response.ok) throw new Error();
-        window.dispatchEvent(new Event('aside:sessions-changed'));
+        window.dispatchEvent(new Event(SESSION_CHANGE_EVENT));
         onClose(); await chat.refreshSessions(); notify('Conversation moved.', 'success');
       } catch { setSaving(false); notify('Could not move the conversation.', 'error'); }
     }}>Move</Button></DialogActions>
@@ -153,7 +145,7 @@ export function RenameConversation({ session, chat, onClose }: { session: Conver
   return <Dialog title={RENAME_CONVERSATION_TITLE} initialFocus={input} onClose={onClose}><form onSubmit={event => {
     event.preventDefault(); if (!title.trim()) return;
     const nextTitle = title.trim(); onClose();
-    void chat.updateSession(session.id, { title: nextTitle }).then(isUpdated => { if (isUpdated) window.dispatchEvent(new Event('aside:sessions-changed')); });
+    void chat.updateSession(session.id, { title: nextTitle }, { title: session.title }).then(isUpdated => { if (isUpdated) window.dispatchEvent(new Event(SESSION_CHANGE_EVENT)); });
   }}>
     <DialogDescription>Choose a name for this conversation.</DialogDescription>
     <input ref={input} aria-label="Conversation name" maxLength={120} value={title} {...stylex.props(ui.field)} onChange={event => setTitle(event.target.value)} />

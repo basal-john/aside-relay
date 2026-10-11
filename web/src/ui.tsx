@@ -7,6 +7,7 @@ import { tokens } from './tokens.stylex';
 export const ICON_STROKE = 1.8;
 export const SESSION_MENU_LABEL = 'Session options';
 export const SESSION_MENU_TITLE = 'Session';
+export const SESSION_CHANGE_EVENT = 'aside:sessions-changed';
 export const RENAME_CONVERSATION_TITLE = 'Rename conversation';
 export const DELETE_CONVERSATION_TITLE = 'Delete conversation?';
 export const OPEN_DIALOG_SELECTOR = 'dialog[open], [data-app-dialog][data-open]';
