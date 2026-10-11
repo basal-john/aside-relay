@@ -10,54 +10,106 @@ its own access-token login; no separate AI API key is required.
 
 ## Screenshots
 
-App-only captures of aside-relay in a phone-sized browser, using public sample
-content and controlled API fixtures. Device status
-bars and browser address bars are omitted. The gallery shows code, interactive
-HTML, tool activity, queue controls, conversations, browser previews, and settings.
+Current app UI captured in a phone-sized browser with public sample conversations
+and controlled API fixtures. These are browser screenshots, not design mockups.
+Device status bars and browser address bars are omitted. Browser previews show a
+public sample documentation page; connection and task states are fixture data.
 Click any image to view it at full size.
 
 <table>
   <tr>
     <th>Code and conversation</th>
-    <th>Interactive HTML visual</th>
+    <th>Interactive HTML</th>
     <th>Visual source</th>
   </tr>
   <tr>
-    <td><a href="docs/screenshots/code-response.jpg"><img src="docs/screenshots/code-response.jpg" width="240" alt="TypeScript response in a compact D2Coding code block above an interactive diagram"></a></td>
-    <td><a href="docs/screenshots/visual-preview.jpg"><img src="docs/screenshots/visual-preview.jpg" width="240" alt="HTML workflow diagram with Browse highlighted after tapping its next-step button"></a></td>
-    <td><a href="docs/screenshots/visual-source.jpg"><img src="docs/screenshots/visual-source.jpg" width="240" alt="HTML visual switched to its source with a Preview button"></a></td>
+    <td><a href="docs/screenshots/code-response.jpg"><img src="docs/screenshots/code-response.jpg" width="240" alt="A TypeScript stream reader in compact D2Coding above the anchored composer"></a></td>
+    <td><a href="docs/screenshots/visual-preview.jpg"><img src="docs/screenshots/visual-preview.jpg" width="240" alt="An HTML workflow after tapping Next step to highlight Browse"></a></td>
+    <td><a href="docs/screenshots/visual-source.jpg"><img src="docs/screenshots/visual-source.jpg" width="240" alt="The same HTML visual switched to its source view"></a></td>
+  </tr>
+  <tr>
+    <th>Appearance and fonts</th>
+    <th>Custom primary color</th>
+    <th>Default light</th>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/appearance-settings.jpg"><img src="docs/screenshots/appearance-settings.jpg" width="240" alt="Nord selected with Inter for UI and content and JetBrains Mono for code"></a></td>
+    <td><a href="docs/screenshots/primary-color.jpg"><img src="docs/screenshots/primary-color.jpg" width="240" alt="A teal primary color selected with Theme default available to reset it"></a></td>
+    <td><a href="docs/screenshots/theme-light.jpg"><img src="docs/screenshots/theme-light.jpg" width="240" alt="The default light palette with Wanted Sans and D2Coding"></a></td>
+  </tr>
+  <tr>
+    <th>Nord · Inter</th>
+    <th>Dracula · Geist</th>
+    <th>Solarized · IBM Plex Sans</th>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/theme-nord.jpg"><img src="docs/screenshots/theme-nord.jpg" width="240" alt="A streaming chat in Nord with Inter and JetBrains Mono"></a></td>
+    <td><a href="docs/screenshots/theme-dracula.jpg"><img src="docs/screenshots/theme-dracula.jpg" width="240" alt="The same chat in Dracula with Geist and Geist Mono"></a></td>
+    <td><a href="docs/screenshots/theme-solarized.jpg"><img src="docs/screenshots/theme-solarized.jpg" width="240" alt="The same chat in light Solarized with IBM Plex Sans and Fira Code"></a></td>
   </tr>
   <tr>
     <th>Tool activity</th>
+    <th>Subagent status</th>
+    <th>Task progress</th>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/tool-activity.jpg"><img src="docs/screenshots/tool-activity.jpg" width="240" alt="Expanded actions with colored subagent icons, browser and code icons, and a file path"></a></td>
+    <td><a href="docs/screenshots/subagents.jpg"><img src="docs/screenshots/subagents.jpg" width="240" alt="Two completed subagents with distinct colors, models, reasoning levels and Open controls"></a></td>
+    <td><a href="docs/screenshots/tasks.jpg"><img src="docs/screenshots/tasks.jpg" width="240" alt="A Tasks dialog listing completed mobile and browser checks"></a></td>
+  </tr>
+  <tr>
     <th>Queue and steering</th>
     <th>Edit a queued message</th>
+    <th>Models and reasoning</th>
   </tr>
   <tr>
-    <td><a href="docs/screenshots/tool-activity.jpg"><img src="docs/screenshots/tool-activity.jpg" width="240" alt="Expanded browser actions showing completed steps and technical details"></a></td>
-    <td><a href="docs/screenshots/queue-steering.jpg"><img src="docs/screenshots/queue-steering.jpg" width="240" alt="Queued message menu with Edit message, Steer instead, and Cancel message"></a></td>
-    <td><a href="docs/screenshots/queue-edit.jpg"><img src="docs/screenshots/queue-edit.jpg" width="240" alt="Queued message being edited inline with Cancel and Save controls"></a></td>
+    <td><a href="docs/screenshots/queue-steering.jpg"><img src="docs/screenshots/queue-steering.jpg" width="240" alt="A queued message menu offering Edit message, Steer instead and Cancel message"></a></td>
+    <td><a href="docs/screenshots/queue-edit.jpg"><img src="docs/screenshots/queue-edit.jpg" width="240" alt="A queued follow-up edited inline with Cancel and Save controls"></a></td>
+    <td><a href="docs/screenshots/model-picker.jpg"><img src="docs/screenshots/model-picker.jpg" width="240" alt="The model dialog with OpenAI Codex models and a reasoning-effort selector"></a></td>
   </tr>
   <tr>
-    <th>Conversation drawer</th>
+    <th>Recent conversations</th>
+    <th>All conversations</th>
     <th>Conversation menu</th>
-    <th>Model picker</th>
   </tr>
   <tr>
-    <td><a href="docs/screenshots/conversation-drawer.jpg"><img src="docs/screenshots/conversation-drawer.jpg" width="240" alt="Drawer showing the sample README demo conversation"></a></td>
-    <td><a href="docs/screenshots/conversation-menu.jpg"><img src="docs/screenshots/conversation-menu.jpg" width="240" alt="Conversation menu with pin, rename, share, copy link, and copy session ID"></a></td>
-    <td><a href="docs/screenshots/model-picker.jpg"><img src="docs/screenshots/model-picker.jpg" width="240" alt="Model selection dialog with providers and reasoning effort"></a></td>
+    <td><a href="docs/screenshots/conversation-drawer.jpg"><img src="docs/screenshots/conversation-drawer.jpg" width="240" alt="The drawer with a pinned chat, a running activity indicator and Show all"></a></td>
+    <td><a href="docs/screenshots/conversation-filters.jpg"><img src="docs/screenshots/conversation-filters.jpg" width="240" alt="The expanded drawer with archive, project, status, ordering and layout controls"></a></td>
+    <td><a href="docs/screenshots/conversation-menu.jpg"><img src="docs/screenshots/conversation-menu.jpg" width="240" alt="The conversation menu with pin, rename, files, project, unread, archive and share controls"></a></td>
   </tr>
   <tr>
-    <th>Browser picture-in-picture</th>
-    <th>Browser sheet</th>
+    <th>Browser PiP</th>
+    <th>Browser controls</th>
+    <th>Zoomable browser preview</th>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/browser-pip.jpg"><img src="docs/screenshots/browser-pip.jpg" width="240" alt="A browser preview alongside its conversation with open, minimize and close controls"></a></td>
+    <td><a href="docs/screenshots/browser-sheet.jpg"><img src="docs/screenshots/browser-sheet.jpg" width="240" alt="The browser sheet with address navigation, Control and Open in your browser"></a></td>
+    <td><a href="docs/screenshots/browser-zoom.jpg"><img src="docs/screenshots/browser-zoom.jpg" width="240" alt="An expanded browser preview at 150 percent with zoom and reset controls"></a></td>
+  </tr>
+  <tr>
+    <th>Workspace and preferences</th>
+    <th>Skills</th>
+    <th>MCP and permissions</th>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/workspace.jpg"><img src="docs/screenshots/workspace.jpg" width="240" alt="The workspace dialog with its fixed header and project, routine, memory, context, skill and connection cards"></a></td>
+    <td><a href="docs/screenshots/workspace-skills.jpg"><img src="docs/screenshots/workspace-skills.jpg" width="240" alt="The Skills screen with a single header, Import, Add skill and editable installed skills"></a></td>
+    <td><a href="docs/screenshots/workspace-connections.jpg"><img src="docs/screenshots/workspace-connections.jpg" width="240" alt="A connected MCP server with per-tool permissions and its available tools"></a></td>
+  </tr>
+  <tr>
+    <th>Files and outputs</th>
+    <th>Rename dialog</th>
     <th>Connection and notifications</th>
   </tr>
   <tr>
-    <td><a href="docs/screenshots/browser-pip.jpg"><img src="docs/screenshots/browser-pip.jpg" width="240" alt="Browser preview beside completed browser actions"></a></td>
-    <td><a href="docs/screenshots/browser-sheet.jpg"><img src="docs/screenshots/browser-sheet.jpg" width="240" alt="Browser sheet showing the page title, URL, preview, and Open in your browser action"></a></td>
-    <td><a href="docs/screenshots/settings.jpg"><img src="docs/screenshots/settings.jpg" width="240" alt="Settings dialog showing connection and notification status"></a></td>
+    <td><a href="docs/screenshots/files-preview.jpg"><img src="docs/screenshots/files-preview.jpg" width="240" alt="Conversation artifacts with a release-notes preview and file actions"></a></td>
+    <td><a href="docs/screenshots/rename-dialog.jpg"><img src="docs/screenshots/rename-dialog.jpg" width="240" alt="A focused Rename conversation dialog with its name field, Cancel and Save"></a></td>
+    <td><a href="docs/screenshots/settings.jpg"><img src="docs/screenshots/settings.jpg" width="240" alt="Settings showing bridge and browser connection state and response notifications"></a></td>
   </tr>
 </table>
+
+[Features](#features) · [Themes and fonts](#appearance) · [Setup guide](#setup-guide)
 
 ## Setup guide
 
@@ -111,7 +163,7 @@ Click any image to view it at full size.
   unread completed chats show dots.
 - New incognito and project conversations, plus tab, file, folder, and skill
   references in the composer. Dictation is offered where the browser supports it.
-- **Settings → Workspace** connects projects and project instructions,
+- **Settings → Workspace & preferences** connects projects and project instructions,
   routines and run history, memory, context awareness, installed skills,
   MCP connections and tool permissions, custom providers, account/devices,
   and native preferences. Controls follow the connected daemon's capabilities.
@@ -128,6 +180,28 @@ Click any image to view it at full size.
 
 [DESIGN.md](DESIGN.md) describes the interface and responsive behavior.
 
+### Find the controls
+
+| What you want to do | Where to go |
+| --- | --- |
+| Change colors, fonts or text size | Drawer → Settings → Appearance |
+| Browse older chats or archived chats | Drawer → Show all; choose Chats or Archive, then filter by project or status |
+| Pin, rename, mark unread, archive or share | Header → Session options, or long-press a conversation in the drawer |
+| Edit, steer or cancel a queued follow-up | Send while a response runs, then open the queued message's three-dot menu |
+| Change the model or reasoning effort | Focus the composer → model chip |
+| Inspect an agent or task | Agents or tasks chip above the composer |
+| Inspect a tool call | Expand its activity summary; Technical details shows its inputs and output |
+| Browse generated files | Session options → Files & outputs |
+| Switch between an HTML visual and its code | Source / Preview inside the visual card |
+| Watch or control a browser tab | Open the PiP or Drawer → Browser; select a tab and enable Control |
+| Zoom a browser preview | Tap the preview in the browser sheet; use zoom controls, pinch or pan |
+| Manage projects, routines, skills or MCP | Drawer → Settings → Workspace & preferences |
+
+Rename, confirmation, model, appearance and workspace controls use dialogs.
+Workspace pages share one fixed header; only the body scrolls. Browser previews
+use a sheet and a separate zoomable detail view. Available native controls and
+models come from the connected Aside profile.
+
 ### Appearance
 
 Open **Settings → Appearance** to choose a light palette and dark palette independently.
@@ -139,11 +213,32 @@ and **Theme default** restores the preset's color. Send buttons, pins, unread ma
 menus and HTML visual previews use the same primary color. Button text automatically
 uses black or white for contrast. The page's theme-color metadata follows the background.
 
-UI and content fonts each offer Wanted Sans, System, Inter, Geist, Noto Sans KR,
-IBM Plex Sans and Noto Serif KR. Code fonts offer D2Coding, System Mono,
-JetBrains Mono, Fira Code and Geist Mono. UI font changes affect controls; content
-font changes affect conversation messages and HTML previews. D2Coding remains the
-code default. System fonts use the device's installed fonts. The other webfonts are
+The preset catalog has **29 families and 44 variants**, in addition to aside-relay's
+own light and dark defaults:
+
+| Available modes | Theme families |
+| --- | --- |
+| Light and dark | Absolutely, Catppuccin, Codex, Everforest, GitHub, Gruvbox, Linear, Notion, One, Raycast, Rose Pine, Solarized, VS Code Plus, Vercel, Xcode |
+| Dark | Ayu, Dracula, Lobster, Material, Matrix, Monokai, Night Owl, Nord, OG, Oscurange, Sentry, Temple, Tokyo Night |
+| Light | Proof |
+
+Choose **Theme mode** first, then select that mode's palette. Both palette choices
+are saved, so switching modes keeps each selection. Use a primary-color swatch
+or the color picker for a custom accent. The custom accent applies to both modes
+until you select **Theme default**. Text size offers 100%, 125%, 150%, 175% and 200%.
+
+The gallery compares the same conversation across default light, Nord, Dracula
+and Solarized, and shows a teal custom accent. Its font combinations are examples;
+you can mix UI, content and code fonts independently.
+
+| Font setting | Choices | Affects |
+| --- | --- | --- |
+| UI font | Wanted Sans, System, Inter, Geist, Noto Sans KR, IBM Plex Sans, Noto Serif KR | Headers, controls, menus and dialogs |
+| Content font | Wanted Sans, System, Inter, Geist, Noto Sans KR, IBM Plex Sans, Noto Serif KR | Conversation messages and HTML previews |
+| Code font | D2Coding, System Mono, JetBrains Mono, Fira Code, Geist Mono | Code blocks and visual source |
+
+Wanted Sans remains the UI and content default. D2Coding remains the code default.
+System fonts use the device's installed fonts. The other webfonts are
 fetched through the bridge's same-origin allowlisted font proxy and cached locally;
 Korean fonts use WOFF2 unicode-range subsets rather than downloading a whole family.
 A system fallback remains available when a download fails.
