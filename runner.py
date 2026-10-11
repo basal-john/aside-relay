@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import config
-from daemon import repair_browser_binding
+from daemon import ACCOUNT_ID, daemon, repair_browser_binding
 import sessions
 
 log = logging.getLogger("aside-remote.runner")
@@ -339,7 +339,13 @@ def _newest_real_dir(names: set[str]) -> str | None:
 
 async def start_run(prompt: str, *, model: str | None = None, effort: str | None = None,
                     speed: str | None = None, provider: str | None = None,
-                    permission: str | None = None, host: str | None = None) -> Run:
+                    permission: str | None = None, host: str | None = None,
+                    incognito: bool = False, project_id: str | None = None) -> Run:
+    if incognito or project_id is not None:
+        return await _start_native_run(
+            prompt, model=model, effort=effort, speed=speed, provider=provider,
+            permission=permission, host=host, incognito=incognito, project_id=project_id,
+        )
     options = dict(model=model, effort=effort, speed=speed, provider=provider,
                    permission=permission, host=host)
     async with session_lock:
@@ -355,6 +361,149 @@ async def start_run(prompt: str, *, model: str | None = None, effort: str | None
             if not _can_recover_browser_start(run):
                 break
         return run
+
+
+async def _start_native_run(prompt: str, *, model: str | None, effort: str | None,
+                            speed: str | None, provider: str | None,
+                            permission: str | None, host: str | None,
+                            incognito: bool, project_id: str | None) -> Run:
+    if host not in (None, "local"):
+        raise ValueError("Incognito and project conversations can only start on the local host")
+    model_config, permission_mode, browser_binding = await asyncio.gather(
+        _native_model(model=model, effort=effort, speed=speed, provider=provider),
+        _native_permission(permission),
+        _browser_binding_with_recovery(),
+    )
+    created = await daemon.call("sessions.create", {
+        "accountId": ACCOUNT_ID,
+        "projectId": project_id,
+        "browserBinding": browser_binding,
+        "model": model_config,
+        "permissionMode": permission_mode,
+        "runtimeConfig": {
+            "memoryExtractionDisabled": False,
+            "proactiveMode": False,
+            "finalConfirm": False,
+            "workingDirs": [],
+        },
+        "incognito": incognito,
+    }, mutation=True)
+    session_id = created.get("id") if isinstance(created, dict) else None
+    if not isinstance(session_id, str) or not session_id:
+        raise RuntimeError("Aside did not return a conversation id")
+    try:
+        return await _resume_run(session_id, prompt)
+    except Exception:
+        try:
+            await daemon.call("sessions.delete", {
+                "accountId": ACCOUNT_ID,
+                "sessionId": session_id,
+            }, mutation=True)
+        except Exception:
+            log.warning("empty native conversation cleanup failed session=%s",
+                        session_id, exc_info=True)
+        raise
+
+
+async def _native_model(*, model: str | None, effort: str | None,
+                        speed: str | None, provider: str | None) -> dict:
+    current, available = await asyncio.gather(
+        daemon.call("settings.get", {"accountId": ACCOUNT_ID, "key": "defaultModel"}),
+        daemon.call("models.listAvailable", {"accountId": ACCOUNT_ID}),
+    )
+    if not isinstance(current, dict) or not isinstance(available, list):
+        raise RuntimeError("Aside model settings are unavailable")
+    selected_provider = provider
+    selected_model = model
+    if model and "/" in model:
+        selected_provider, selected_model = model.split("/", 1)
+    selected_provider = selected_provider or current.get("provider")
+    selected_model = selected_model or current.get("modelId")
+    selected = next((value for value in available
+                     if isinstance(value, dict) and value.get("provider") == selected_provider
+                     and value.get("id") == selected_model), None)
+    if selected is None:
+        raise ValueError("The selected model is not available")
+    levels = selected.get("availableThinkingLevels")
+    if not isinstance(levels, list) or not all(isinstance(value, str) for value in levels):
+        raise RuntimeError("Aside returned invalid model capabilities")
+    thinking_level = effort or current.get("thinkingLevel")
+    if thinking_level not in levels:
+        raise ValueError("The selected reasoning effort is not available for this model")
+    supports_fast = selected.get("supportsFastMode") is True
+    if speed not in (None, "default", "fast"):
+        raise ValueError("The selected model speed is invalid")
+    fast_mode = speed == "fast" if speed is not None else bool(current.get("fastMode"))
+    return {
+        "provider": selected_provider,
+        "modelId": selected_model,
+        "thinkingLevel": thinking_level,
+        "fastMode": fast_mode and supports_fast,
+    }
+
+
+async def _native_permission(permission: str | None) -> str:
+    if permission in ("ask", "guard"):
+        return "guard"
+    if permission == "full-access":
+        return permission
+    if permission is not None:
+        raise ValueError("The selected access permission is invalid")
+    current = await daemon.call("settings.get", {
+        "accountId": ACCOUNT_ID,
+        "key": "defaultPermissionMode",
+    })
+    if current not in ("guard", "full-access"):
+        raise RuntimeError("Aside permission settings are unavailable")
+    return current
+
+
+async def _current_browser_binding() -> dict:
+    resolver = await daemon.call("cli.replStart", {"accountId": ACCOUNT_ID}, mutation=True)
+    resolver_id = resolver.get("id") if isinstance(resolver, dict) else None
+    if not isinstance(resolver_id, str):
+        raise ConnectionError("Aside browser binding is unavailable")
+    try:
+        value = await daemon.call("cli.replRun", {
+            "accountId": ACCOUNT_ID,
+            "id": resolver_id,
+            "code": "console.log(JSON.stringify(aside.sessions.current().id));",
+        }, mutation=True)
+        content = value.get("content") if isinstance(value, dict) else None
+        text = next((block.get("text") for block in content or []
+                     if isinstance(block, dict) and isinstance(block.get("text"), str)), None)
+        session_id = json.loads(text) if isinstance(text, str) else None
+        if not isinstance(session_id, str):
+            raise ConnectionError("Aside browser binding is unavailable")
+        current = await daemon.call("sessions.get", {
+            "accountId": ACCOUNT_ID,
+            "sessionId": session_id,
+        })
+        binding = current.get("browserBinding") if isinstance(current, dict) else None
+        if not isinstance(binding, dict):
+            raise ConnectionError("Aside browser binding is unavailable")
+        return binding
+    finally:
+        await daemon.call("cli.replClose", {
+            "accountId": ACCOUNT_ID,
+            "id": resolver_id,
+        }, mutation=True)
+
+
+async def _browser_binding_with_recovery() -> dict:
+    try:
+        return await _current_browser_binding()
+    except Exception:
+        log.warning("native conversation browser binding unavailable", exc_info=True)
+    if not await _reopen_browser_profile():
+        raise ConnectionError(BROWSER_DISCONNECTED_MESSAGE) from None
+    for delay in _BROWSER_START_RETRY_DELAYS:
+        await asyncio.sleep(delay)
+        try:
+            return await _current_browser_binding()
+        except Exception:
+            log.warning("native conversation browser binding retry failed", exc_info=True)
+    raise ConnectionError(BROWSER_DISCONNECTED_MESSAGE) from None
 
 
 def _can_recover_browser_start(run: Run) -> bool:
@@ -491,11 +640,24 @@ async def continue_run(session_id: str, prompt: str, *, model: str | None = None
     if ignored:
         log.info("resume ignores exec-only options %s (session=%s)", ignored, session_id)
 
+    return await _resume_run(session_id, prompt)
+
+
+async def resume_queue(session_id: str) -> Run:
+    """Resume an interrupted native queue without adding another user message."""
+    return await _resume_run(session_id, None)
+
+
+async def _resume_run(session_id: str, prompt: str | None) -> Run:
     stream_log_path = _stream_log()
     args = ["--log-dump", stream_log_path,
-            "session", "resume", *_account_args(), session_id, prompt]
+            "session", "resume", *_account_args(), session_id]
+    if prompt is not None:
+        args.append(prompt)
     async with session_lock:
-        if sessions.session_dir(session_id) is None:
+        import daemondb
+        has_native_session = await asyncio.to_thread(daemondb.has_row, session_id)
+        if sessions.session_dir(session_id) is None and has_native_session is not True:
             _remove_stream_log(stream_log_path)
             raise FileNotFoundError(SESSION_NOT_FOUND_MESSAGE)
         existing = _runs.get(session_id)
@@ -510,7 +672,7 @@ async def continue_run(session_id: str, prompt: str, *, model: str | None = None
         except Exception:
             _remove_stream_log(stream_log_path)
             raise
-        run = Run(session_id=session_id, prompt=prompt, proc=proc, master_fd=master,
+        run = Run(session_id=session_id, prompt=prompt or "", proc=proc, master_fd=master,
                   stream_log_path=stream_log_path, canonical_start_seq=next_seq)
         _runs[session_id] = run
         asyncio.create_task(_drain(run))
@@ -610,5 +772,21 @@ async def steer(session_id: str, prompt: str) -> bool:
         log.warning("session steer failed session=%s", session_id, exc_info=True)
         return False
     log.info("session steer session=%s rc=%s out=%s", session_id, proc.returncode,
+             _strip_ansi(out.decode("utf-8", "replace")).strip()[:120])
+    return proc.returncode == 0
+
+
+async def queue(session_id: str, prompt: str) -> bool:
+    """Add a prompt to Aside's native queuedMessages list."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            config.ASIDE_BIN, "session", "queue", *_account_args(), session_id, prompt,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        )
+        out, _ = await _communicate(proc, timeout=15)
+    except Exception:
+        log.warning("session queue failed session=%s", session_id, exc_info=True)
+        return False
+    log.info("session queue session=%s rc=%s out=%s", session_id, proc.returncode,
              _strip_ansi(out.decode("utf-8", "replace")).strip()[:120])
     return proc.returncode == 0

@@ -20,6 +20,7 @@ import type {
   ChatSession,
   LiveAssistant,
   ModelConfig,
+  RunOptions,
   QueuedMessage,
   Toast,
   UploadAttachment,
@@ -562,6 +563,32 @@ export const useChat = (): UseChat => {
     [cancelPendingRequests, fetchMessages, pushToast, releaseQueueEdit, retireLiveAssistant, sendSocket],
   )
 
+  const refreshMessages = useCallback(async () => {
+    const id = sessionIdRef.current
+    if (!id) return false
+    return await fetchMessages(id, openGenerationRef.current)
+  }, [fetchMessages])
+
+  useEffect(() => {
+    if (!sessionId || isOpening || !isReady || authError) return
+    const id = sessionId
+    const controller = new AbortController()
+    let isMarking = false
+    async function markRead() {
+      if (document.visibilityState !== "visible" || isMarking) return
+      isMarking = true
+      try {
+        await request(`/api/native/sessions/${encodeURIComponent(id)}/read`, { method: "POST", signal: controller.signal })
+        if (!controller.signal.aborted) updateSessions(current => current.map(item => item.id === id ? { ...item, unread: false } : item))
+      } catch {
+        // The next visible message or session refresh retries native read state.
+      } finally { isMarking = false }
+    }
+    void markRead()
+    document.addEventListener("visibilitychange", markRead)
+    return () => { controller.abort(); document.removeEventListener("visibilitychange", markRead) }
+  }, [sessionId, isOpening, isReady, authError, messages.at(-1)?.seq, request, updateSessions])
+
   const restoreSavedSession = useCallback(async (sessionPage?: Promise<void>) => {
     const routeSessionId = getRouteSessionId()
     const mode = localStorage.getItem(LAST_SESSION_MODE_KEY)
@@ -972,7 +999,7 @@ export const useChat = (): UseChat => {
   }, [fetchMessages, handleSocketMessage, recoverPendingRequest, subscribe])
 
   const send = useCallback(
-    async (prompt: string, attachments: UploadAttachment[] = [], model?: ModelConfig) => {
+    async (prompt: string, attachments: UploadAttachment[] = [], model?: ModelConfig, options?: RunOptions) => {
       const text = prompt.trim()
       if (!text && attachments.length === 0) return false
       const selectedSessionId = sessionIdRef.current
@@ -984,6 +1011,7 @@ export const useChat = (): UseChat => {
       const modelOptions = !selectedSessionId && model ? {
         model: `${model.provider}/${model.modelId}`, effort: model.thinkingLevel, speed: model.fastMode ? "fast" : "default",
       } : {}
+      const runOptions = selectedSessionId ? {} : options ?? {}
       const socket = socketRef.current
       setPendingPrompt(prompt)
       pendingPromptRef.current = prompt
@@ -1014,7 +1042,7 @@ export const useChat = (): UseChat => {
                       prompt: text,
                       attachments: payloadAttachments,
                     }
-                  : { op: "run", requestId, prompt: text, attachments: payloadAttachments, ...modelOptions },
+                  : { op: "run", requestId, prompt: text, attachments: payloadAttachments, ...modelOptions, ...runOptions },
               ),
             )
           })
@@ -1025,7 +1053,7 @@ export const useChat = (): UseChat => {
             : "/api/runs"
           const result = await api(path, parseStartedRun, {
             method: "POST",
-            body: JSON.stringify({ prompt: text, attachments: payloadAttachments, ...modelOptions }),
+            body: JSON.stringify({ prompt: text, attachments: payloadAttachments, ...modelOptions, ...runOptions }),
           })
           if (
             activeSendRef.current !== requestId ||
@@ -1135,18 +1163,18 @@ export const useChat = (): UseChat => {
     return delivery
   }, [fetchMessages, publishQueue, pushToast, refreshQueue, request])
 
-  const queue = useCallback(async (prompt: string, attachments: UploadAttachment[] = []) => {
+  const queue = useCallback(async (prompt: string, attachments: UploadAttachment[] = [], shouldSteer = false) => {
     if (!prompt.trim() && attachments.length === 0) return false
     const payloadAttachments = attachments.map(({ id, name }) => ({ id, name }))
-    const key = JSON.stringify({ sessionId: sessionIdRef.current, prompt, attachments: payloadAttachments })
+    const key = JSON.stringify({ sessionId: sessionIdRef.current, prompt, attachments: payloadAttachments, shouldSteer })
     if (followupRequestRef.current?.key !== key) followupRequestRef.current = { key, id: createRequestId() }
     const id = followupRequestRef.current.id
     followupRequestRef.current = undefined
     const accepted = await mutateQueue({
-      suffix: "followups", method: "POST", body: { id, prompt: prompt.trim(), attachments: payloadAttachments },
+      suffix: "followups", method: "POST", body: { id, prompt: prompt.trim(), attachments: payloadAttachments, delivery: shouldSteer ? "steer" : "queue" },
       update: state => ({ ...state, items: [...state.items.filter(item => item.id !== id), { id, prompt: prompt.trim(), attachments, status: "queued" }] }),
     })
-    if (!accepted) followupRequestRef.current = { key: JSON.stringify({ sessionId: sessionIdRef.current, prompt, attachments: payloadAttachments }), id }
+    if (!accepted) followupRequestRef.current = { key: JSON.stringify({ sessionId: sessionIdRef.current, prompt, attachments: payloadAttachments, shouldSteer }), id }
     return accepted
   }, [mutateQueue])
 
@@ -1204,7 +1232,7 @@ export const useChat = (): UseChat => {
           body: file,
         })
       } catch (error) {
-        pushToast(`Couldn't upload the image. ${getErrorMessage(error)}`)
+        pushToast(`Couldn't upload the file. ${getErrorMessage(error)}`)
         throw error
       }
     },
@@ -1552,6 +1580,7 @@ export const useChat = (): UseChat => {
     saveToken,
     request,
     refreshSessions,
+    refreshMessages,
     loadMore,
     openSession,
     newChat,

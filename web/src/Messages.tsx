@@ -7,7 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
-import { Copy, Check, Code2 } from 'lucide-react';
+import { Copy, Check, Code2, FileText } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
 import type { ChatMessage, UseChat } from './types';
 import { tokens } from './tokens.stylex';
@@ -18,10 +18,11 @@ import { Activity } from './Activity';
 import { useMessageMenu } from './useMessageMenu';
 import { QueuedBubble } from './QueuedMessages';
 import { Button } from './Button';
+import { Dialog, DialogDescription } from './Dialog';
 
 const markdownPlugins = [remarkGfm];
 const highlightPlugins = [rehypeHighlight];
-const attachmentPrompt = /^\[첨부 이미지\]\n((?:- .*\n)+)위 이미지를[^\n]*(?:\n\n?)?/;
+const attachmentPrompt = /^\[첨부 (?:이미지|파일)\]\n((?:- .*\n)+)위 (?:이미지|파일)[을를][^\n]*(?:\n\n?)?/;
 const initialLocation = { index: 'LAST', align: 'end' } as const;
 const PREVIEW_HEIGHT = 'clamp(240px, 62svh, 560px)';
 const messageListComponents = { Footer: function ChatBottomSpace() { return <div aria-hidden="true" {...stylex.props(styles.bottomSpace)} />; }, Scroller: forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(function ChatScroller({ style, ...props }, ref) {
@@ -106,11 +107,15 @@ function Diagram({ source, notify }: { source: string; notify: (text: string, ki
   </div>;
 }
 
-export function Messages({ chat, listRef, onAtBottomChange, notify, onZoom }: {
+export function Messages({ chat, listRef, onAtBottomChange, notify, onZoom, onOpenSession, onComposeContext, onAskSidechat, agentIds }: {
   chat: UseChat; listRef: RefObject<VirtuosoHandle | null>; onAtBottomChange: (isAtBottom: boolean) => void; notify: (text: string, kind?: 'success' | 'error') => void; onZoom: (src: string) => void;
+  onOpenSession: (sessionId: string) => void;
+  onComposeContext: (context: { messageId: string; text: string }) => void;
+  onAskSidechat: (context: { messageId: string; text: string }) => void;
+  agentIds?: string[];
 }) {
   const { messages, pendingPrompt, liveAssistant, isRunning } = chat;
-  const pendingImages = chat.pendingAttachments.map(attachment => attachment.url);
+  const [isNavigatingTurns, setNavigatingTurns] = useState(false);
   const shouldReduceMotion = useReducedMotion();
   const sources = [...new Map(messages.flatMap(message => message.sources ?? []).map(source => [source.id, source])).values()];
   const messageById = new Map(messages.map(message => [String(message.seq), message]));
@@ -119,7 +124,9 @@ export function Messages({ chat, listRef, onAtBottomChange, notify, onZoom }: {
     const message = messageById.get(id);
     if (!message) return '';
     return message.role === 'user' ? messageText(message).replace(attachmentPrompt, '') : formatCitations({ text: messageText(message), sources });
-  }, notify);
+  }, notify, { sessionId: chat.sessionId, request: chat.request, onOpenSession,
+    onRefreshMessages: async () => { await chat.refreshMessages(); }, onComposeContext, onAskSidechat,
+    onNavigateTurns: () => setNavigatingTurns(true) });
   const [editingId, setEditingId] = useState<string>();
   const [editText, setEditText] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -165,7 +172,7 @@ export function Messages({ chat, listRef, onAtBottomChange, notify, onZoom }: {
   else if (isRunning) groups.push({ kind: 'working' });
   chat.queuedMessages.forEach((_, index) => groups.push({ kind: 'queue', index }));
   if (chat.isQueuePaused) groups.push({ kind: 'paused' });
-  return <div ref={containerRef} id="messages" {...stylex.props(styles.messages)} {...handlers} onClickCapture={event => { if (event.target instanceof Element && event.target.closest('summary')) isFollowingRef.current = false; }} onPointerDownCapture={event => { if (event.target instanceof Element && event.target.id === 'chatScroll') isFollowingRef.current = false; }} onWheelCapture={() => { isFollowingRef.current = false; }} onTouchMoveCapture={() => { isFollowingRef.current = false; }} onKeyDownCapture={event => { if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) isFollowingRef.current = false; }}><Virtuoso ref={listRef} data={groups} components={messageListComponents} initialTopMostItemIndex={initialLocation} initialItemCount={8} defaultItemHeight={96} increaseViewportBy={240} atBottomThreshold={2} atBottomStateChange={isAtBottom => { if (isAtBottom) isFollowingRef.current = true; onAtBottomChange(isAtBottom); }} followOutput={false} totalListHeightChanged={followLatest} style={{ height: '100%', visibility: isFontReady ? 'visible' : 'hidden' }} computeItemKey={(_, group) => group.kind === 'message' ? group.message.responseId ?? 'message-' + group.message.seq : group.kind === 'activity' ? 'activity-' + group.messages[0].seq : group.kind === 'queue' ? chat.queuedMessages[group.index].id : group.kind === 'live' ? liveAssistant?.responseId ?? liveAssistant?.streamId ?? 'live' : group.kind} itemContent={(index, group) => <div {...stylex.props(styles.row, group.kind === 'activity' && styles.activityRow, index === 0 && styles.firstRow)}>{renderGroup(group)}</div>} />{menu}</div>;
+  return <div ref={containerRef} id="messages" {...stylex.props(styles.messages)} {...handlers} onClickCapture={event => { if (event.target instanceof Element && event.target.closest('summary')) isFollowingRef.current = false; }} onPointerDownCapture={event => { if (event.target instanceof Element && event.target.id === 'chatScroll') isFollowingRef.current = false; }} onWheelCapture={() => { isFollowingRef.current = false; }} onTouchMoveCapture={() => { isFollowingRef.current = false; }} onKeyDownCapture={event => { if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) isFollowingRef.current = false; }}><Virtuoso ref={listRef} data={groups} components={messageListComponents} initialTopMostItemIndex={initialLocation} initialItemCount={8} defaultItemHeight={96} increaseViewportBy={240} atBottomThreshold={2} atBottomStateChange={isAtBottom => { if (isAtBottom) isFollowingRef.current = true; onAtBottomChange(isAtBottom); }} followOutput={false} totalListHeightChanged={followLatest} style={{ height: '100%', visibility: isFontReady ? 'visible' : 'hidden' }} computeItemKey={(_, group) => group.kind === 'message' ? group.message.responseId ?? 'message-' + group.message.seq : group.kind === 'activity' ? 'activity-' + group.messages[0].seq : group.kind === 'queue' ? chat.queuedMessages[group.index].id : group.kind === 'live' ? liveAssistant?.responseId ?? liveAssistant?.streamId ?? 'live' : group.kind} itemContent={(index, group) => <div {...stylex.props(styles.row, group.kind === 'activity' && styles.activityRow, index === 0 && styles.firstRow)}>{renderGroup(group)}</div>} />{menu}{isNavigatingTurns && <Dialog title="Jump to turn" onClose={() => setNavigatingTurns(false)}><div {...stylex.props(styles.turnList)}>{groups.flatMap((group, index) => group.kind === 'message' && group.message.role === 'user' ? [<button key={group.message.seq} type="button" {...stylex.props(styles.turnButton)} onClick={() => { isFollowingRef.current = false; setNavigatingTurns(false); requestAnimationFrame(() => listRef.current?.scrollToIndex({ index, align: 'start' })); }}>{messageText(group.message).replace(attachmentPrompt, '') || 'Attachment'}</button>] : [])}</div>{!messages.some(message => message.role === 'user') && <DialogDescription>No turns in this conversation.</DialogDescription>}</Dialog>}</div>;
 
   function followLatest() {
     cancelAnimationFrame(scrollFrameRef.current);
@@ -176,9 +183,9 @@ export function Messages({ chat, listRef, onAtBottomChange, notify, onZoom }: {
   }
 
   function renderGroup(group: typeof groups[number]) {
-    if (group.kind === 'activity') return <Activity messages={group.messages} results={results} onZoom={onZoom} expanded={expanded} onExpandedChange={changeExpanded} />;
-    if (group.kind === 'pending') return <article aria-label="Sending message" {...stylex.props(styles.message, styles.user)}>{pendingImages.map(src => <img key={src} src={src} alt="Pending attachment" {...stylex.props(styles.image)} />)}<div {...stylex.props(styles.userText)}>{pendingPrompt}</div></article>;
-    if (group.kind === 'live' && liveAssistant) return <article data-message-id={liveAssistant.streamId} data-selectable={selectableId === liveAssistant.streamId} tabIndex={0} aria-haspopup="menu" aria-keyshortcuts="Shift+F10" aria-label="Response" aria-busy={!liveAssistant.done} data-streaming={!liveAssistant.done} {...stylex.props(styles.message)}><ResponseMarkdown text={formatCitations({ text: liveAssistant.text, sources, isStreaming: !liveAssistant.done })} isStreaming={!liveAssistant.done} notify={notify} onZoom={onZoom} /></article>;
+    if (group.kind === 'activity') return <Activity messages={group.messages} results={results} onZoom={onZoom} expanded={expanded} onExpandedChange={changeExpanded} onOpenSession={onOpenSession} agentIds={agentIds} />;
+    if (group.kind === 'pending') return <article aria-label="Sending message" {...stylex.props(styles.message, styles.user)}>{chat.pendingAttachments.map(attachment => attachment.mime.startsWith('image/') ? <img key={attachment.id} src={attachment.url} alt={attachment.name} {...stylex.props(styles.image)} /> : <a key={attachment.id} href={attachment.url} target="_blank" rel="noopener noreferrer" {...stylex.props(styles.fileAttachment)}><FileText size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /><span>{attachment.name}</span></a>)}<div {...stylex.props(styles.userText)}>{pendingPrompt}</div></article>;
+    if (group.kind === 'live' && liveAssistant) return <article data-message-id={liveAssistant.streamId} data-message-role="assistant" data-selectable={selectableId === liveAssistant.streamId} tabIndex={0} aria-haspopup="menu" aria-keyshortcuts="Shift+F10" aria-label="Response" aria-busy={!liveAssistant.done} data-streaming={!liveAssistant.done} {...stylex.props(styles.message)}><ResponseMarkdown text={formatCitations({ text: liveAssistant.text, sources, isStreaming: !liveAssistant.done })} isStreaming={!liveAssistant.done} notify={notify} onZoom={onZoom} /></article>;
     if (group.kind === 'working') return <div role="status" aria-label="Working" {...stylex.props(styles.working)}><motion.span {...stylex.props(styles.pulse)} animate={{ opacity: shouldReduceMotion ? 1 : [.4, 1, .4] }} transition={{ duration: 1.2, repeat: shouldReduceMotion ? 0 : Infinity }} />Working…</div>;
     if (group.kind === 'queue') {
       const message = chat.queuedMessages[group.index];
@@ -191,8 +198,8 @@ export function Messages({ chat, listRef, onAtBottomChange, notify, onZoom }: {
     const attachmentMatch = raw.match(attachmentPrompt);
     const text = message.role === 'user' ? attachmentMatch ? raw.slice(attachmentMatch[0].length) : raw : formatCitations({ text: raw, sources });
     const attachments = attachmentMatch ? attachmentMatch[1].trim().split('\n').flatMap(line => { const match = line.match(/^- (.*) → (.+\/([^/]+))$/); return match ? [{ name: match[1], src: '/api/upload/' + encodeURIComponent(match[3]) }] : []; }) : [];
-    return <article key={message.seq} data-message-id={message.seq} data-selectable={selectableId === String(message.seq)} tabIndex={text ? 0 : undefined} aria-haspopup={text ? 'menu' : undefined} aria-keyshortcuts={text ? 'Shift+F10' : undefined} aria-label={message.role === 'user' ? 'Your message' : 'Response'} {...stylex.props(styles.message, message.role === 'user' && styles.user)}>
-      {attachments.map(attachment => <button key={attachment.src} {...stylex.props(styles.imageButton)} onClick={() => onZoom(attachment.src)}><img src={attachment.src} alt={attachment.name} {...stylex.props(styles.image)} /></button>)}
+    return <article key={message.seq} data-message-id={message.seq} data-message-role={message.role} data-turn-index={groups.indexOf(group)} data-selectable={selectableId === String(message.seq)} tabIndex={text ? 0 : undefined} aria-haspopup={text ? 'menu' : undefined} aria-keyshortcuts={text ? 'Shift+F10' : undefined} aria-label={message.role === 'user' ? 'Your message' : 'Response'} {...stylex.props(styles.message, message.role === 'user' && styles.user)}>
+      {attachments.map(attachment => /\.(?:png|jpe?g|gif|webp|avif)$/i.test(attachment.src) ? <button key={attachment.src} {...stylex.props(styles.imageButton)} onClick={() => onZoom(attachment.src)}><img src={attachment.src} alt={attachment.name} {...stylex.props(styles.image)} /></button> : <a key={attachment.src} href={attachment.src} target="_blank" rel="noopener noreferrer" {...stylex.props(styles.fileAttachment)}><FileText size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /><span>{attachment.name}</span></a>)}
       {message.role === 'user' ? <div {...stylex.props(styles.userText)}>{text}</div> : <ResponseMarkdown text={text} notify={notify} onZoom={onZoom} />}
       {message.blocks.filter(block => block.type === 'image').map((block, index) => block.type === 'image' ? <button key={index} {...stylex.props(styles.imageButton)} onClick={() => onZoom('/api/media/' + block.mediaId)}><img src={'/api/media/' + block.mediaId} alt="Attachment" loading="lazy" {...stylex.props(styles.image)} /></button> : undefined)}
     </article>;
@@ -218,12 +225,14 @@ const markdownComponents: Components = {
 };
 
 const styles = stylex.create({
+  turnList: { display: 'flex', flexDirection: 'column', maxHeight: '55svh', overflowY: 'auto', gap: 6 },
+  turnButton: { textAlign: 'left', padding: '10px 12px', borderWidth: 0, borderRadius: 12, backgroundColor: tokens.surface, color: tokens.text, fontSize: '.875rem', lineHeight: 1.45, overflowWrap: 'anywhere', cursor: 'pointer' },
   messages: { height: '100%', width: '100%', minWidth: 0 },
   scroller: { overflowX: 'hidden', overflowAnchor: 'none', overscrollBehaviorY: 'contain', scrollbarWidth: 'thin' },
   row: { display: 'flex', flexDirection: 'column', width: '100%', minWidth: 0, maxWidth: 736, margin: '0 auto', padding: '0 max(20px, env(safe-area-inset-right)) 14px max(20px, env(safe-area-inset-left))', alignItems: 'stretch' },
   activityRow: { paddingBottom: 4 },
   firstRow: { paddingTop: 'calc(var(--header-height) + 12px)' },
-  bottomSpace: { height: 'var(--composer-height)' },
+  bottomSpace: { height: 'calc(var(--composer-height) + var(--workspace-height, 0px))' },
   message: { minWidth: 0, maxWidth: '100%', flexShrink: 0 },
   user: { alignSelf: 'flex-end', backgroundColor: tokens.bubble, borderRadius: 24, padding: '12px 18px', maxWidth: '88%', fontSize: '1rem', lineHeight: 1.55 },
   userText: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
@@ -233,6 +242,7 @@ const styles = stylex.create({
   visual: { display: 'block', width: '100%', height: PREVIEW_HEIGHT, maxWidth: '100%', minWidth: 0, borderWidth: 0, backgroundColor: tokens.canvas },
   previewSource: { height: PREVIEW_HEIGHT, overflow: 'auto' },
   tableScroll: { overflowX: 'auto', maxWidth: '100%', minWidth: 0, overscrollBehaviorX: 'contain', marginTop: 16, marginBottom: 20 },
+  fileAttachment: { display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0', color: tokens.text, fontSize: '.875rem', overflowWrap: 'anywhere', textDecoration: 'none' },
   imageButton: { borderWidth: 0, padding: 0, backgroundColor: 'transparent', display: 'block', width: '100%', maxWidth: '100%', cursor: 'zoom-in' },
   image: { display: 'block', width: '100%', height: 'clamp(160px, 52vw, 320px)', objectFit: 'contain', borderRadius: 16 },
   diagram: { height: PREVIEW_HEIGHT, margin: 0, padding: 16, overflow: 'auto', maxWidth: '100%', backgroundColor: tokens.mediaWhite },

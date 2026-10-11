@@ -5,8 +5,9 @@ import * as stylex from '@stylexjs/stylex';
 import { ArrowDown, Check, CircleAlert, Ellipsis, Menu, SquarePen, X } from 'lucide-react';
 import { AnimatePresence, MotionConfig, motion, usePresence, useReducedMotion } from 'motion/react';
 import { useChat } from './chat';
+import { isRecord } from './responses';
 import { usePushNotifications } from './notifications';
-import type { ChatSession, Toast } from './types';
+import type { ChatSession, Toast, RunOptions } from './types';
 import { tokens } from './tokens.stylex';
 import { Sidebar } from './Sidebar';
 import { Composer } from './Composer';
@@ -16,11 +17,14 @@ import { BrowserLive } from './BrowserLive';
 import { BrowserPanel } from './BrowserPanel';
 import { ImagePreview } from './ImagePreview';
 import { Settings } from './Settings';
+import { SessionWorkspace, type SessionWorkspaceState } from './SessionWorkspace';
 import { RenameConversation, SessionMenu, type SessionMenuTarget } from './SessionMenu';
 import { applyTheme, THEME_STORAGE_KEY, applyTextSize, loadTextSize, TEXT_SIZE_STORAGE_KEY, type Theme } from './theme';
 import { ICON_STROKE, SESSION_MENU_LABEL, DELETE_CONVERSATION_TITLE, OPEN_DIALOG_SELECTOR, Sheet, DialogBackdropReset, IconButton, focusDialogSurface, resolveDialogReturnFocus, trapDialogFocus, styles as ui } from './ui';
 
 const Messages = lazy(() => import('./Messages').then(module => ({ default: module.Messages })));
+const Workspace = lazy(() => import('./Workspace').then(module => ({ default: module.Workspace })));
+const Artifacts = lazy(() => import('./Artifacts').then(module => ({ default: module.Artifacts })));
 const ZOOM_GESTURE_EVENTS = ['gesturestart', 'gesturechange'];
 const TOAST_STACK_LIMIT = 3;
 const TOAST_DURATION = 3_000;
@@ -30,6 +34,8 @@ const latestMessage = { index: 'LAST', align: 'end' } as const;
 const SWIPE_AXIS_THRESHOLD = 10;
 const DRAWER_SWIPE_DISTANCE = 48;
 const HORIZONTAL_GESTURE_RATIO = 1.25;
+type Panel = 'settings' | 'browser' | 'workspace' | 'files';
+const panelsByPath: Record<string, Panel | undefined> = { '/settings': 'settings', '/tabs': 'browser', '/workspace': 'workspace', '/files': 'files' };
 
 export function App() {
   const chat = useChat();
@@ -41,7 +47,13 @@ export function App() {
   const [isDrawer, setDrawer] = useState(false);
   const [menuSession, setMenuSession] = useState<SessionMenuTarget>();
   const [renameTarget, setRenameTarget] = useState<Pick<ChatSession, 'id' | 'title'>>();
-  const [panel, setPanel] = useState<'settings' | 'browser' | undefined>(() => location.pathname === '/settings' ? 'settings' : location.pathname === '/tabs' ? 'browser' : undefined);
+  const [panel, setPanel] = useState<Panel | undefined>(() => panelsByPath[location.pathname]);
+  const [filesSessionId, setFilesSessionId] = useState<string | undefined>(() => new URLSearchParams(location.search).get('session') ?? undefined);
+  const [runOptions, setRunOptions] = useState<RunOptions>();
+  const [workspaceState, setWorkspaceState] = useState<SessionWorkspaceState>();
+  const [sidechat, setSidechat] = useState<{ messageId: string; text: string }>();
+  const [sidechatPrompt, setSidechatPrompt] = useState('');
+  const [isStartingSidechat, setStartingSidechat] = useState(false);
   const [browserTarget, setBrowserTarget] = useState<string>();
   const [deleteTarget, setDeleteTarget] = useState<Pick<ChatSession, 'id' | 'title'>>();
   const [zoom, setZoom] = useState<string>();
@@ -52,6 +64,7 @@ export function App() {
   const [canJump, setCanJump] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLElement>(null);
+  const effectiveFilesSessionId = filesSessionId ?? chat.sessionId;
   const sessionTitle = chat.sessions.find(session => session.id === chat.sessionId)?.title || (chat.sessionId ? 'Conversation' : 'New chat');
   const toasts = [...chat.toasts, ...localToasts].sort((first, second) => first.createdAt - second.createdAt);
 
@@ -73,10 +86,28 @@ export function App() {
     try { localStorage.setItem(THEME_STORAGE_KEY, next); }
     catch { notify('Theme changed, but your browser could not save the preference.', 'error'); }
   }
-  function newChat() { chat.newChat(); setDraft(''); setRevision(value => value + 1); setDrawer(false); setMenuSession(undefined); changeAtBottom(true); }
-  function openSession(id: string) { void chat.openSession(id); setDraft(''); setRevision(value => value + 1); setDrawer(false); setMenuSession(undefined); changeAtBottom(true); }
-  function openPanel(next: 'settings' | 'browser', targetId?: string) { setBrowserTarget(targetId); setPanel(next); setDrawer(false); history.pushState({ panel: next }, '', next === 'settings' ? '/settings' : '/tabs'); }
+  function newChat() { chat.newChat(); setRunOptions(undefined); setDraft(''); setRevision(value => value + 1); setDrawer(false); setMenuSession(undefined); changeAtBottom(true); }
+  function newIncognitoChat() { newChat(); setRunOptions({ mode: 'incognito' }); }
+  function openSession(id: string) { void chat.openSession(id); setRunOptions(undefined); setDraft(''); setRevision(value => value + 1); setDrawer(false); setMenuSession(undefined); changeAtBottom(true); }
+  function openPanel(next: Panel, targetId?: string) { const sessionId = targetId ?? chat.sessionId; setBrowserTarget(next === 'browser' ? targetId : undefined); if (next === 'files') setFilesSessionId(sessionId); setPanel(next); setDrawer(false); history.pushState({ panel: next }, '', next === 'browser' ? '/tabs' : next === 'files' && sessionId ? '/files?session=' + encodeURIComponent(sessionId) : '/' + next); }
   function closePanel() { setPanel(undefined); setBrowserTarget(undefined); history.replaceState({}, '', chat.sessionId ? '/c/' + encodeURIComponent(chat.sessionId) : '/'); }
+  function composeContext({ text }: { messageId: string; text: string }) { setDraft(current => `${text.split('\n').map(line => '> ' + line).join('\n')}\n\n${current}`); requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('#draft')?.focus({ preventScroll: true })); }
+  function askSidechat(context: { messageId: string; text: string }) { setSidechatPrompt(''); setSidechat(context); }
+  async function startSidechat() {
+    if (!sidechat || !chat.sessionId || !sidechatPrompt.trim() || isStartingSidechat) return;
+    setStartingSidechat(true);
+    try {
+      const response = await chat.request(`/api/native/sessions/${encodeURIComponent(chat.sessionId)}/command`, {
+        method: 'POST', body: JSON.stringify({ command: 'sidechat', prompt: sidechatPrompt.trim(), quote: sidechat.text }),
+      });
+      const value: unknown = await response.json();
+      const result = isRecord(value) && isRecord(value.result) ? value.result : undefined;
+      const id = result && typeof result.id === 'string' ? result.id : undefined;
+      if (!id) throw new Error('Aside did not return a side chat.');
+      setSidechat(undefined); setSidechatPrompt(''); openSession(id); void chat.refreshSessions();
+    } catch { notify('Could not start the side chat. Your message is still here.', 'error'); }
+    finally { setStartingSidechat(false); }
+  }
 
   useEffect(() => { if (chat.recoveredDraft !== undefined) { setDraft(current => current ? current + '\n\n' + chat.recoveredDraft : chat.recoveredDraft || ''); chat.clearRecoveredDraft(); } }, [chat.recoveredDraft, chat.clearRecoveredDraft]);
   useEffect(() => {
@@ -150,7 +181,7 @@ export function App() {
     };
   }, [isDrawer]);
   useEffect(() => {
-    const onPop = () => { setPanel(location.pathname === '/settings' ? 'settings' : location.pathname === '/tabs' ? 'browser' : undefined); setDrawer(false); setMenuSession(undefined); setDraft(''); setRevision(value => value + 1); changeAtBottom(true); };
+    const onPop = () => { setPanel(panelsByPath[location.pathname]); setFilesSessionId(new URLSearchParams(location.search).get('session') ?? undefined); setDrawer(false); setMenuSession(undefined); setDraft(''); setRevision(value => value + 1); changeAtBottom(true); };
     window.addEventListener('popstate', onPop); return () => window.removeEventListener('popstate', onPop);
   }, []);
   useEffect(() => {
@@ -179,6 +210,11 @@ export function App() {
     observer.observe(header);
     return () => observer.disconnect();
   }, []);
+  useLayoutEffect(() => {
+    const hasWorkspace = workspaceState?.sessionId === chat.sessionId && !!workspaceState && (workspaceState.agents.length > 0 || workspaceState.todos.length > 0 || workspaceState.outputs.length > 0 || !!workspaceState.summary);
+    const hasSuspension = workspaceState?.sessionId === chat.sessionId && !!workspaceState?.suspension;
+    viewportRef.current?.style.setProperty('--workspace-height', `${(hasWorkspace ? 40 : 0) + (hasSuspension ? 44 : 0)}px`);
+  }, [workspaceState, chat.sessionId]);
   useEffect(() => {
     const viewport = window.visualViewport;
     if (!viewport) return;
@@ -216,25 +252,27 @@ export function App() {
   }, []);
 
   return <MotionConfig reducedMotion="user"><div ref={viewportRef} {...stylex.props(styles.app)}><DialogBackdropReset />
-    <div {...stylex.props(styles.desktopSidebar)}><Sidebar chat={chat} onNew={newChat} onOpen={openSession} onSettings={() => openPanel('settings')} onBrowser={() => openPanel('browser')} onMenu={setMenuSession} /></div>
+    <div {...stylex.props(styles.desktopSidebar)}><Sidebar chat={chat} onNew={newChat} onNewIncognito={newIncognitoChat} onOpen={openSession} onSettings={() => openPanel('settings')} onBrowser={() => openPanel('browser')} onMenu={setMenuSession} /></div>
     <main aria-label="Chat" {...stylex.props(styles.main)}>
       <div className="sr-only" role="status" aria-atomic="true">{announcement}</div>
       <header ref={headerRef} id="header" {...stylex.props(styles.header)}>
-        <div {...stylex.props(styles.headerLeft)}><span {...stylex.props(ui.glass, styles.mobileMenu)}><IconButton label="Open conversations" style={{ width: 40, height: 40 }} aria-haspopup="dialog" aria-expanded={isDrawer} onClick={() => setDrawer(true)}><Menu size={24} strokeWidth={ICON_STROKE} aria-hidden="true" /></IconButton></span><div {...stylex.props(styles.heading)}><span title={sessionTitle} {...stylex.props(styles.title)}>{sessionTitle}</span><span {...stylex.props(styles.subtitle)}>{chat.isRunning ? 'Aside · Working…' : 'Aside'}</span></div></div>
+        <div {...stylex.props(styles.headerLeft)}><span {...stylex.props(ui.glass, styles.mobileMenu)}><IconButton label="Open conversations" style={{ width: 40, height: 40 }} aria-haspopup="dialog" aria-expanded={isDrawer} onClick={() => setDrawer(true)}><Menu size={24} strokeWidth={ICON_STROKE} aria-hidden="true" /></IconButton></span><div {...stylex.props(styles.heading)}><span title={sessionTitle} {...stylex.props(styles.title)}>{sessionTitle}</span><span {...stylex.props(styles.subtitle)}>{runOptions?.mode === 'incognito' && !chat.sessionId ? 'Incognito' : workspaceState && workspaceState.sessionId === chat.sessionId && workspaceState.suspension ? workspaceState.suspension.title : chat.isRunning ? 'Aside · Working…' : workspaceState?.sessionId === chat.sessionId && workspaceState?.status === 'errored' ? 'Aside · Task failed' : 'Aside'}</span></div></div>
         <div {...stylex.props(ui.glass, styles.headerActions)}><IconButton label="New chat" style={{ height: 40 }} onClick={newChat}><SquarePen size={23} strokeWidth={ICON_STROKE} aria-hidden="true" /></IconButton>{chat.sessionId && !chat.authError && <IconButton disabled={!chat.isReady || chat.isOpening} label={SESSION_MENU_LABEL} style={{ height: 40 }} aria-haspopup="menu" aria-expanded={menuSession?.id === chat.sessionId} onClick={event => { const id = chat.sessionId; if (menuSession) setMenuSession(undefined); else if (id) setMenuSession({ id, title: sessionTitle, anchor: event.currentTarget }); }}><Ellipsis aria-hidden="true" size={23} strokeWidth={ICON_STROKE} /></IconButton>}</div>
       </header>
       {chat.authError && <div role="alert" {...stylex.props(styles.notice)}><span>Connect to load your conversations.</span><button {...stylex.props(styles.noticeAction)} onClick={() => openPanel('settings')}>Settings</button></div>}
       {chat.isReady && !chat.isConnected && !chat.authError && <div role="status" {...stylex.props(styles.connectionIndicator)}><span className="sr-only">Reconnecting…</span><motion.span aria-hidden="true" {...stylex.props(styles.connectionSpinner)} animate={shouldReduceMotion ? undefined : { rotate: 360 }} transition={{ duration: .8, repeat: Infinity, ease: 'linear' }} /></div>}
       <div {...stylex.props(styles.scrollRegion)}>
-        {chat.isOpening || !chat.isReady ? <ConversationLoading /> : chat.messages.length || chat.pendingPrompt !== undefined || chat.isRunning || chat.liveAssistant?.text ? <Suspense fallback={<ConversationLoading />}><Messages key={chat.sessionId} chat={chat} listRef={listRef} onAtBottomChange={changeAtBottom} notify={notify} onZoom={setZoom} /></Suspense> : <div {...stylex.props(styles.empty)}><h1 {...stylex.props(styles.emptyTitle)}>What’s on your mind?</h1></div>}
+        {chat.isOpening || !chat.isReady ? <ConversationLoading /> : chat.messages.length || chat.pendingPrompt !== undefined || chat.isRunning || chat.liveAssistant?.text ? <Suspense fallback={<ConversationLoading />}><Messages key={chat.sessionId} chat={chat} listRef={listRef} onAtBottomChange={changeAtBottom} notify={notify} onZoom={setZoom} onOpenSession={openSession} onComposeContext={composeContext} onAskSidechat={askSidechat} agentIds={workspaceState?.sessionId === chat.sessionId ? workspaceState?.agents.map(agent => agent.id) : undefined} /></Suspense> : <div {...stylex.props(styles.empty)}><h1 {...stylex.props(styles.emptyTitle)}>What’s on your mind?</h1></div>}
         <AnimatePresence>{canJump && !chat.isOpening && <motion.button key="jump" aria-label="Scroll to latest message" {...stylex.props(styles.jump, ui.glass)} initial={{ opacity: 0, scale: .86, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .9, y: 6 }} transition={{ duration: .16 }} whileTap={{ scale: .9 }} onClick={() => listRef.current?.scrollToIndex(latestMessage)}><ArrowDown size={19} strokeWidth={ICON_STROKE} /></motion.button>}</AnimatePresence>
         {chat.sessionId && chat.isReady && !chat.isOpening && !chat.authError && <BrowserLive key={chat.sessionId} sessionId={chat.sessionId} request={chat.request} isBrowserOpen={panel === 'browser'} isVisible={!panel && !isDrawer && !menuSession && !deleteTarget && !zoom} onOpen={targetId => openPanel('browser', targetId)} />}
       </div>
-      <Composer chat={chat} onBrowser={() => openPanel('browser')} draft={draft} setDraft={setDraft} revision={revision} notify={notify} textSize={textSize} isKeyboardOpen={isKeyboardOpen} />
+      {chat.isReady && !chat.isOpening && !chat.authError && <SessionWorkspace chat={chat} notify={notify} onOpenSession={openSession} onOutputs={() => openPanel('files')} onStateChange={setWorkspaceState} />}
+      <Composer runOptions={runOptions} chat={chat} onBrowser={() => openPanel('browser')} draft={draft} setDraft={setDraft} revision={revision} notify={notify} textSize={textSize} isKeyboardOpen={isKeyboardOpen} />
     </main>
-    <AnimatePresence>{isDrawer && <Drawer key="drawer" onClose={() => { setMenuSession(undefined); setDrawer(false); }}><Sidebar chat={chat} isDrawer onClose={() => { setMenuSession(undefined); setDrawer(false); }} onNew={newChat} onOpen={openSession} onSettings={() => openPanel('settings')} onBrowser={() => openPanel('browser')} onMenu={setMenuSession} /></Drawer>}</AnimatePresence>
-    <AnimatePresence mode="wait">{panel === 'settings' ? <Dialog key="settings" title="Settings" onClose={closePanel}><Settings chat={chat} notifications={notifications} notify={notify} isDarkMode={theme === 'dark'} onThemeToggle={toggleTheme} textSize={textSize} onTextSizeChange={changeTextSize} /></Dialog> : panel === 'browser' ? <Sheet key={`browser:${browserTarget ?? "all"}`} title="Browser" isWide onClose={closePanel}><BrowserPanel initialTargetId={browserTarget} sessionId={chat.sessionId} request={chat.request} notify={notify} onClose={closePanel} onStart={prompt => { closePanel(); if (!chat.sessionId) newChat(); setDraft(prompt); }} /></Sheet> : undefined}</AnimatePresence>
-    {menuSession && !chat.authError && <SessionMenu key={menuSession.id} target={menuSession} chat={chat} onClose={() => setMenuSession(undefined)} notify={notify} onRename={setRenameTarget} onDelete={setDeleteTarget} />}
+    <AnimatePresence>{isDrawer && <Drawer key="drawer" onClose={() => { setMenuSession(undefined); setDrawer(false); }}><Sidebar chat={chat} isDrawer onClose={() => { setMenuSession(undefined); setDrawer(false); }} onNew={newChat} onNewIncognito={newIncognitoChat} onOpen={openSession} onSettings={() => openPanel('settings')} onBrowser={() => openPanel('browser')} onMenu={setMenuSession} /></Drawer>}</AnimatePresence>
+    <AnimatePresence mode="wait">{panel === 'settings' ? <Dialog key="settings" title="Settings" onClose={closePanel}><Settings chat={chat} notifications={notifications} notify={notify} isDarkMode={theme === 'dark'} onThemeToggle={toggleTheme} textSize={textSize} onTextSizeChange={changeTextSize} onWorkspace={() => openPanel('workspace')} /></Dialog> : panel === 'browser' ? <Sheet key={`browser:${browserTarget ?? "all"}`} title="Browser" isWide onClose={closePanel}><BrowserPanel initialTargetId={browserTarget} sessionId={chat.sessionId} request={chat.request} notify={notify} onClose={closePanel} onStart={prompt => { closePanel(); if (!chat.sessionId) newChat(); setDraft(prompt); }} /></Sheet> : panel === 'workspace' ? <Dialog key="workspace" title="Workspace & preferences" onClose={closePanel}><Suspense fallback={<DialogDescription>Loading workspace…</DialogDescription>}><Workspace chat={chat} notify={notify} onOpenSession={id => { closePanel(); openSession(id); }} onNewProjectChat={projectId => { closePanel(); newChat(); setRunOptions({ projectId }); }} /></Suspense></Dialog> : panel === 'files' && effectiveFilesSessionId ? <Suspense key={effectiveFilesSessionId} fallback={<Dialog title="Files & outputs" onClose={closePanel}><DialogDescription>Loading files…</DialogDescription></Dialog>}><Artifacts sessionId={effectiveFilesSessionId} request={chat.request} notify={notify} onZoom={setZoom} onClose={closePanel} /></Suspense> : undefined}</AnimatePresence>
+    {menuSession && !chat.authError && <SessionMenu key={menuSession.id} target={menuSession} chat={chat} onClose={() => setMenuSession(undefined)} notify={notify} onRename={setRenameTarget} onDelete={setDeleteTarget} onFiles={id => openPanel('files', id)} />}
+    <AnimatePresence>{sidechat && <Dialog key="sidechat" title="Ask in side chat" onClose={() => { if (!isStartingSidechat) setSidechat(undefined); }}><blockquote {...stylex.props(styles.sidechatQuote)}>{sidechat.text}</blockquote><label {...stylex.props(styles.sidechatLabel)}>Message<textarea autoFocus rows={3} value={sidechatPrompt} disabled={isStartingSidechat} onChange={event => setSidechatPrompt(event.currentTarget.value)} {...stylex.props(ui.field)} /></label><DialogActions><Button disabled={isStartingSidechat} onClick={() => setSidechat(undefined)}>Cancel</Button><Button variant="primary" disabled={isStartingSidechat || !sidechatPrompt.trim()} onClick={() => { void startSidechat(); }}>{isStartingSidechat ? 'Starting…' : 'Send'}</Button></DialogActions></Dialog>}</AnimatePresence>
     <AnimatePresence>{renameTarget && <RenameConversation key={renameTarget.id} session={renameTarget} chat={chat} onClose={() => setRenameTarget(undefined)} />}</AnimatePresence>
     <AnimatePresence>{deleteTarget && <Dialog key={deleteTarget.id} title={DELETE_CONVERSATION_TITLE} initialFocus={() => document.querySelector<HTMLElement>('[data-app-dialog] button[data-cancel]')} onClose={() => setDeleteTarget(undefined)}><p {...stylex.props(styles.deleteTitle)}>{deleteTarget.title}</p><DialogDescription>This also deletes the original conversation and its files in Aside. This cannot be undone.</DialogDescription><DialogActions><Button data-cancel="" onClick={() => setDeleteTarget(undefined)}>Cancel</Button><Button variant="danger" onClick={() => { setDeleteTarget(undefined); setDrawer(false); void chat.deleteSession(deleteTarget.id); }}>Delete</Button></DialogActions></Dialog>}</AnimatePresence>
     <AnimatePresence>{zoom && <ImagePreview key={zoom} src={zoom} onClose={() => setZoom(undefined)} />}</AnimatePresence>
@@ -306,6 +344,8 @@ function Drawer({ children, onClose }: { children: React.ReactNode; onClose: () 
 }
 
 const styles = stylex.create({
+  sidechatQuote: { margin: '0 0 14px', borderLeftWidth: 2, borderLeftStyle: 'solid', borderLeftColor: tokens.border, padding: '4px 12px', maxHeight: '25svh', overflowY: 'auto', color: tokens.muted, fontSize: '.875rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
+  sidechatLabel: { display: 'flex', flexDirection: 'column', gap: 8, fontSize: '.875rem' },
   app: { display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', position: 'fixed', top: 0, left: 0, color: tokens.text, backgroundColor: tokens.canvas },
   desktopSidebar: { width: 288, flexShrink: 0, height: '100%', borderRightWidth: 1, borderRightStyle: 'solid', borderRightColor: tokens.border, '@media (max-width: 820px)': { display: 'none' } },
   main: { display: 'flex', flexDirection: 'column', position: 'relative', height: '100%', minHeight: 0, minWidth: 0, flex: 1 },
@@ -322,7 +362,7 @@ const styles = stylex.create({
   conversationLoading: { display: 'flex', height: '100%', alignItems: 'flex-end', padding: '20px max(20px, env(safe-area-inset-right)) calc(var(--composer-height) + 28px) max(20px, env(safe-area-inset-left))', minWidth: 0 },
   messageSkeleton: { display: 'flex', flexDirection: 'column', gap: 12, width: '100%', maxWidth: 736, margin: '0 auto' },
   skeletonLine: { height: 12, borderRadius: 6, backgroundColor: tokens.bubble },
-  jump: { position: 'absolute', left: '50%', marginLeft: -20, bottom: 'calc(var(--composer-height) + 10px)', width: 40, height: 40, borderRadius: '50%', borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, backgroundColor: tokens.canvas, color: tokens.text, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgb(0 0 0 / .06)' },
+  jump: { position: 'absolute', left: '50%', marginLeft: -20, bottom: 'calc(var(--composer-height) + var(--workspace-height, 0px) + 10px)', width: 40, height: 40, borderRadius: '50%', borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, backgroundColor: tokens.canvas, color: tokens.text, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgb(0 0 0 / .06)' },
   notice: { display: 'flex', position: 'absolute', top: 'var(--header-height)', right: 16, left: 16, zIndex: 3, alignItems: 'center', justifyContent: 'space-between', gap: 10, margin: 0, padding: '10px 14px', borderRadius: 14, backgroundColor: tokens.surface, fontSize: '0.8125rem', lineHeight: 1.5, flexShrink: 0 },
   noticeAction: { backgroundColor: 'transparent', color: tokens.text, borderWidth: 0, minHeight: 32, fontSize: '0.8125rem', textDecoration: 'underline' },
   connectionIndicator: { position: 'absolute', top: 'calc(var(--header-height) + 4px)', left: '50%', marginLeft: -7, width: 14, height: 14, zIndex: 3, pointerEvents: 'none' },

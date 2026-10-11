@@ -23,7 +23,6 @@ from urllib.parse import urlparse
 import httpx
 
 import config
-import conversation_pins
 from daemon import ACCOUNT_ID, daemon
 
 log = logging.getLogger("aside-remote.sessions")
@@ -43,19 +42,22 @@ _MAGIC = [
 def session_dir(session_id: str) -> Path | None:
     global _dir_index, _dir_index_at
     hit = _dir_index.get(session_id)
-    if hit and hit.exists():
-        return hit
+    if hit:
+        if _safe_session_directory(hit):
+            return hit
+        _dir_index.pop(session_id, None)
     if time.time() - _dir_index_at > 2.0:
         _reindex()
-    return _dir_index.get(session_id)
+    hit = _dir_index.get(session_id)
+    return hit if hit and _safe_session_directory(hit) else None
 
 
 def _reindex() -> None:
     global _dir_index, _dir_index_at
     idx: dict[str, Path] = {}
-    if config.SESSIONS_DIR.exists():
+    if _safe_root(config.SESSIONS_DIR):
         for p in config.SESSIONS_DIR.iterdir():
-            if p.is_dir() and "_" in p.name:
+            if _safe_session_directory(p) and "_" in p.name:
                 idx[p.name.split("_", 1)[1]] = p
     _dir_index = idx
     _dir_index_at = time.time()
@@ -63,14 +65,36 @@ def _reindex() -> None:
 
 def snapshot_dirs() -> set[str]:
     """현재 존재하는 세션 디렉토리 이름 집합 (exec 스폰 전후 diff 용)."""
-    if not config.SESSIONS_DIR.exists():
+    if not _safe_root(config.SESSIONS_DIR):
         return set()
-    return {p.name for p in config.SESSIONS_DIR.iterdir() if p.is_dir()}
+    return {p.name for p in config.SESSIONS_DIR.iterdir() if _safe_session_directory(p)}
+
+
+def _safe_session_directory(path: Path) -> bool:
+    if path.is_symlink():
+        return False
+    try:
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(config.SESSIONS_DIR.resolve(strict=True))
+    except (OSError, ValueError):
+        return False
+    return resolved.is_dir()
+
+
+def _safe_root(path: Path) -> bool:
+    if path.is_symlink():
+        return False
+    try:
+        return path.resolve(strict=True).is_dir()
+    except OSError:
+        return False
 
 
 # --------------------------------------------------------------------- 미디어
 def store_media(b64: str) -> dict:
     """base64 이미지를 캐시 파일로 떨구고 참조만 돌려준다. 폰으로 base64를 보내지 않는다."""
+    if not _safe_root(config.MEDIA_DIR):
+        raise ValueError("Media cache is unavailable")
     raw = base64.b64decode(b64)
     digest = hashlib.sha256(raw).hexdigest()[:32]
     mime, ext = "application/octet-stream", "bin"
@@ -79,16 +103,34 @@ def store_media(b64: str) -> dict:
             mime, ext = m, e
             break
     path = config.MEDIA_DIR / f"{digest}.{ext}"
-    if not path.exists():
-        path.write_bytes(raw)
+    if path.is_symlink():
+        raise ValueError("Media cache path is unsafe")
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags, 0o600)
+    except FileExistsError:
+        if media_path(path.name) is None:
+            raise ValueError("Media cache path is unsafe")
+    else:
+        with os.fdopen(descriptor, "wb") as file:
+            file.write(raw)
     return {"type": "image", "mediaId": path.name, "mime": mime, "bytes": len(raw)}
 
 
 def media_path(media_id: str) -> Path | None:
-    if "/" in media_id or ".." in media_id:
+    if "/" in media_id or "\\" in media_id or ".." in media_id:
+        return None
+    if not _safe_root(config.MEDIA_DIR):
         return None
     p = config.MEDIA_DIR / media_id
-    return p if p.exists() else None
+    if p.is_symlink():
+        return None
+    try:
+        resolved = p.resolve(strict=True)
+        resolved.relative_to(config.MEDIA_DIR.resolve(strict=True))
+    except (OSError, ValueError):
+        return None
+    return resolved if resolved.is_file() else None
 
 
 # --------------------------------------------------------------------- 정규화
@@ -122,11 +164,21 @@ def session_file(session_id: str, rel: str) -> Path | None:
     d = session_dir(session_id)
     if not d:
         return None
+    relative = Path(rel)
+    if relative.is_absolute() or "\\" in rel or ".." in relative.parts:
+        return None
     try:
-        target = (d / rel).resolve()
-        target.relative_to(d.resolve())
+        root = d.resolve(strict=True)
+        candidate = d / relative
+        target = candidate.resolve(strict=True)
+        target.relative_to(root)
     except (ValueError, OSError):
         return None
+    current = candidate
+    while current != d:
+        if current.is_symlink():
+            return None
+        current = current.parent
     return target if target.is_file() else None
 
 
@@ -320,6 +372,71 @@ async def live_sessions() -> list[dict]:
     return items
 
 
+async def native_session_previews(*, limit: int = 50, cursor: int = 0,
+                                  q: str | None = None,
+                                  archived: str = "exclude",
+                                  parent: str = "root",
+                                  project_ids: list[str] | None = None,
+                                  statuses: list[str] | None = None,
+                                  order: str = "desc") -> dict:
+    """Aside's native session index, including full-history search and filters."""
+    value = {
+        "accountId": ACCOUNT_ID,
+        "limit": limit,
+        "cursor": cursor,
+        "order": order,
+        "parent": parent,
+        "archived": archived,
+        "ephemeral": "exclude",
+        "routines": "exclude",
+        "coders": "exclude",
+    }
+    if q:
+        value["q"] = q
+    if project_ids:
+        value["projectIds"] = project_ids
+    if statuses:
+        value["statuses"] = statuses
+    items = await daemon.call("sessions.listPreviewItems", value)
+    decorated = []
+    for item in items:
+        suspension = item.get("suspension") if isinstance(item.get("suspension"), dict) else None
+        suspension_kind = suspension.get("kind") if suspension else None
+        status = item.get("status") or "idle"
+        status_label = {
+            "approval": "Awaiting approval",
+            "action-confirmation": "Awaiting confirmation",
+            "ask-user-question": "Awaiting answer",
+        }.get(suspension_kind) or {
+            "running": "Running",
+            "suspended": "Waiting",
+            "interrupted": "Interrupted",
+            "errored": "Task failed",
+            "idle": "Idle",
+        }.get(status, status.capitalize())
+        decorated.append({
+            **item,
+            "statusLabel": status_label,
+            "suspensionKind": suspension_kind,
+        })
+    return {
+        "items": decorated,
+        "nextCursor": cursor + limit if len(items) == limit else None,
+    }
+
+
+async def native_child_sessions(session_id: str) -> list[dict]:
+    return await daemon.call("sessions.childSessions", {
+        "accountId": ACCOUNT_ID,
+        "parentId": session_id,
+        "archived": "exclude",
+    })
+
+
+async def native_projects() -> list[dict]:
+    return await daemon.call("projects.list", {"accountId": ACCOUNT_ID})
+
+
 def _texts(node) -> list[str]:
     """content 가 문자열이기도 하고 블록 배열이기도 해서 둘 다 받는다."""
     if node is None:
@@ -392,7 +509,7 @@ _meta: dict[str, tuple[int, int, str, str]] = {}       # id -> (mtime_ns, size, 
 _activity: dict[str, tuple[int, int, int]] = {}  # File metadata invalidates cached message timestamps.
 _TAIL_BYTES = 96 * 1024
 
-_ATT_BLOCK = re.compile(r"^\[첨부 이미지\]\n(?:- .*\n)+위 이미지를[^\n]*\n\n?")
+_ATT_BLOCK = re.compile(r"^\[첨부 (?:이미지|파일)\]\n(?:- .*\n)+위 (?:이미지|파일)을?를?[^\n]*\n\n?")
 
 
 def _last_message_ns(path: Path, size: int) -> int:
@@ -421,7 +538,7 @@ def _last_message_ns(path: Path, size: int) -> int:
 def _scan_index() -> list[tuple[int, str, int, Path | None]]:
     rows: list[tuple[int, str, int, Path | None]] = []
     base = config.SESSIONS_DIR
-    if not base.exists():
+    if not _safe_root(base):
         return rows
     try:
         it = os.scandir(base)
@@ -432,10 +549,14 @@ def _scan_index() -> list[tuple[int, str, int, Path | None]]:
             if "_" not in e.name:
                 continue
             try:
-                if not e.is_dir():
-                    continue
                 path = Path(e.path)
-                file = path / "messages.jsonl"
+                if e.is_symlink() or not _safe_session_directory(path):
+                    continue
+                candidate = path / "messages.jsonl"
+                if candidate.is_symlink():
+                    continue
+                file = candidate.resolve(strict=True)
+                file.relative_to(path.resolve(strict=True))
                 st = file.stat()
                 sid = e.name.split("_", 1)[1]
                 cached = _activity.get(sid)
@@ -572,19 +693,27 @@ async def list_sessions(client: httpx.AsyncClient, *, limit: int = 30,
                         cursor: str | None = None, q: str | None = None) -> dict:
     """키셋 페이지네이션. offset 이 아니라 (mtime, id) 로 잘라서,
     페이지를 넘기는 사이에 새 세션이 위에 끼어들어도 항목이 밀리거나 중복되지 않는다."""
-    live: dict[str, dict] = {}
-    page_size = 200
-    while True:
-        page = await daemon.call("sessions.listPreviewItems", {
-            "accountId": ACCOUNT_ID, "limit": page_size, "cursor": len(live),
-            "order": "desc", "parent": "root", "archived": "exclude",
-            "ephemeral": "exclude", "routines": "exclude", "coders": "exclude",
-        })
-        live.update({item["id"]: item for item in page})
-        if len(page) < page_size:
-            break
+    async def fetch_live(search_query: str | None = None) -> dict[str, dict]:
+        result: dict[str, dict] = {}
+        page_size = 200
+        while True:
+            value = {
+                "accountId": ACCOUNT_ID, "limit": page_size, "cursor": len(result),
+                "order": "desc", "parent": "root", "archived": "exclude",
+                "ephemeral": "exclude", "routines": "exclude", "coders": "exclude",
+            }
+            if search_query:
+                value["q"] = search_query
+            page = await daemon.call("sessions.listPreviewItems", value)
+            result.update({item["id"]: item for item in page})
+            if len(page) < page_size:
+                return result
+
+    all_live = await fetch_live()
+    needle = q.strip() if q and q.strip() else None
+    live = await fetch_live(needle) if needle else all_live
     rows = [row for row in _get_index() if row[1] in live]
-    pins = await asyncio.to_thread(conversation_pins.pinned_ids)
+    pins = {session_id for session_id, item in all_live.items() if item.get("pinned")}
 
     def sort_key(row):
         return (0 if row[1] in pins else 1, -row[0], row[1])
@@ -597,17 +726,7 @@ async def list_sessions(client: httpx.AsyncClient, *, limit: int = 30,
         rows = sorted(rows + ghosts, key=lambda r: (-r[0], r[1]))
     rows = sorted(rows, key=sort_key)
 
-    total = len(rows)
-
-    if q and q.strip():
-        needle = q.strip().lower()
-        keep = []
-        for r in rows:
-            t, p = _hydrate(*r)
-            title = live.get(r[1], {}).get("title") or t
-            if needle in title.lower() or needle in p.lower() or needle in r[1].lower():
-                keep.append(r)
-        rows = keep
+    total = len(all_live)
     matched = len(rows)
 
     cur = _cursor_dec(cursor) if cursor else None
@@ -624,12 +743,30 @@ async def list_sessions(client: httpx.AsyncClient, *, limit: int = 30,
         s = live.get(sid) or {}
         run = s.get("latestRun") or {}
         usage = run.get("tokenUsage") or {}
+        suspension = s.get("suspension") if isinstance(s.get("suspension"), dict) else None
+        suspension_kind = suspension.get("kind") if suspension else None
+        status = s.get("status") or "idle"
+        status_label = {
+            "approval": "Awaiting approval",
+            "action-confirmation": "Awaiting confirmation",
+            "ask-user-question": "Awaiting answer",
+        }.get(suspension_kind) or {
+            "running": "Running",
+            "suspended": "Waiting",
+            "interrupted": "Interrupted",
+            "errored": "Task failed",
+            "idle": "Idle",
+        }.get(status, status.capitalize())
         items.append({
             "id": sid,
             "title": (s.get("title") or title or "Untitled conversation")[:120],
-            "status": s.get("status") or "idle",
+            "status": status,
+            "statusLabel": status_label,
+            "suspensionKind": suspension_kind,
             "unread": bool(s.get("unread")),
             "isPinned": sid in pins,
+            "pinned": bool(s.get("pinned")),
+            "projectId": s.get("projectId"),
             "updatedAt": _iso(mtime),
             "mtime": mtime / 1e9,
             "preview": (_final_text(run)[:280] if run else "") or preview,

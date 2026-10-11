@@ -1,4 +1,4 @@
-"""첨부 이미지 저장/조회.
+"""첨부 파일 저장/조회.
 
 핵심 제약(실측):
   · `aside exec` 에는 첨부 옵션이 없다. 이미지를 프롬프트에 실어 보낼 방법이 없다.
@@ -12,8 +12,11 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import logging
+import os
 import time
+import zipfile
 from pathlib import Path
 
 import config
@@ -26,32 +29,92 @@ _MAGIC = [
     (b"\x89PNG\r\n\x1a\n", "image/png", "png"),
     (b"GIF8", "image/gif", "gif"),
     (b"RIFF", "image/webp", "webp"),
+    (b"%PDF-", "application/pdf", "pdf"),
+    (b"\x1aE\xdf\xa3", "video/webm", "webm"),
 ]
 
+_TEXT_EXTENSIONS = {
+    "c", "cc", "conf", "cpp", "css", "csv", "go", "h", "hpp", "html", "ini",
+    "java", "js", "json", "jsx", "kt", "log", "md", "mjs", "py", "rb", "rs",
+    "sh", "sql", "svg", "toml", "ts", "tsx", "txt", "xml", "yaml", "yml",
+}
+_TEXT_MIME = {
+    "csv": "text/csv", "css": "text/css", "html": "text/html", "js": "text/javascript",
+    "json": "application/json", "jsx": "text/javascript", "md": "text/markdown", "mjs": "text/javascript",
+    "py": "text/x-python", "sh": "text/x-shellscript", "svg": "image/svg+xml", "ts": "text/typescript",
+    "tsx": "text/typescript", "xml": "application/xml", "yaml": "application/yaml", "yml": "application/yaml",
+}
+_OFFICE_KINDS = {
+    "word/": ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"),
+    "xl/": ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"),
+    "ppt/": ("application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"),
+}
 
-def sniff(raw: bytes) -> tuple[str, str] | None:
+
+def sniff(raw: bytes, name: str | None = None) -> tuple[str, str] | None:
     for magic, mime, ext in _MAGIC:
         if raw.startswith(magic):
             if ext == "webp" and raw[8:12] != b"WEBP":
                 continue
             return mime, ext
-    return None
+    if len(raw) >= 12 and raw[4:8] == b"ftyp":
+        brand = raw[8:12]
+        return ("video/quicktime", "mov") if brand == b"qt  " else ("video/mp4", "mp4")
+    if raw.startswith(b"PK\x03\x04"):
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                names = archive.namelist()
+                if "[Content_Types].xml" not in names:
+                    return None
+                for prefix, kind in _OFFICE_KINDS.items():
+                    if any(item.startswith(prefix) for item in names):
+                        return kind
+        except (OSError, zipfile.BadZipFile):
+            return None
+    extension = Path(name or "").suffix.lower().lstrip(".")
+    if extension not in _TEXT_EXTENSIONS or b"\x00" in raw:
+        return None
+    try:
+        raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    return _TEXT_MIME.get(extension, "text/plain"), extension
 
 
 def save(raw: bytes, name: str | None = None) -> dict:
-    kind = sniff(raw)
+    if not raw or len(raw) > config.UPLOAD_MAX_BYTES:
+        raise ValueError("File is empty or exceeds the upload size limit")
+    kind = sniff(raw, name)
     if not kind:
-        raise ValueError("Choose a JPEG, PNG, GIF, or WebP image")
+        raise ValueError("Choose an image, PDF, video, Office document, or UTF-8 text/code file")
     mime, ext = kind
     digest = hashlib.sha256(raw).hexdigest()[:16]
     fid = f"{digest}.{ext}"
+    if not _safe_upload_root():
+        raise ValueError("Upload storage is unavailable")
     path = config.UPLOAD_DIR / fid
-    if not path.exists():
-        path.write_bytes(raw)
+    if path.is_symlink():
+        raise ValueError("Upload path is unsafe")
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags, 0o600)
+    except FileExistsError:
+        existing = path_of(fid)
+        try:
+            is_same_file = existing is not None and existing.stat().st_size == len(raw) and existing.read_bytes() == raw
+        except OSError:
+            is_same_file = False
+        if not is_same_file:
+            raise ValueError("Upload path is unsafe")
+    except OSError as error:
+        raise ValueError("Upload path is unsafe") from error
+    else:
+        with os.fdopen(descriptor, "wb") as file:
+            file.write(raw)
     return {
         "id": fid,
         "path": str(path),        # 에이전트가 읽을 절대경로
-        "name": (name or fid)[:120],
+        "name": _safe_name(name) or fid,
         "mime": mime,
         "bytes": len(raw),
         "url": f"/api/upload/{fid}",
@@ -59,14 +122,58 @@ def save(raw: bytes, name: str | None = None) -> dict:
 
 
 def path_of(fid: str) -> Path | None:
-    if "/" in fid or ".." in fid:
+    if "/" in fid or "\\" in fid or ".." in fid:
         return None
-    p = config.UPLOAD_DIR / fid
+    if not _safe_upload_root():
+        return None
+    base = config.UPLOAD_DIR
+    candidate = base / fid
+    if base.is_symlink() or candidate.is_symlink():
+        return None
+    p = candidate.resolve()
+    try:
+        p.relative_to(base.resolve())
+    except ValueError:
+        return None
     return p if p.is_file() else None
 
 
+def _safe_upload_root() -> bool:
+    root = config.UPLOAD_DIR
+    if root.is_symlink():
+        return False
+    try:
+        return root.resolve(strict=True).is_dir()
+    except OSError:
+        return False
+
+
+def metadata(fid: str, name: str | None = None) -> dict | None:
+    path = path_of(fid)
+    if path is None:
+        return None
+    try:
+        if path.stat().st_size > config.UPLOAD_MAX_BYTES:
+            return None
+        raw = path.read_bytes()
+        clean_name = _safe_name(name)
+        kind = sniff(raw, clean_name or path.name)
+    except OSError:
+        return None
+    if kind is None:
+        return None
+    mime, _extension = kind
+    return {
+        "id": fid,
+        "name": clean_name or path.name,
+        "mime": mime,
+        "bytes": len(raw),
+        "url": f"/api/upload/{fid}",
+    }
+
+
 # 프롬프트 앞에 붙는 첨부 블록. 사람이 읽어도 자연스럽고, UI 가 파싱하기도 쉽게.
-MARK = "[첨부 이미지]"
+MARK = "[첨부 파일]"
 
 
 def prompt_prefix(atts: list[dict]) -> str:
@@ -75,9 +182,18 @@ def prompt_prefix(atts: list[dict]) -> str:
     lines = [MARK]
     for a in atts:
         lines.append(f"- {a['name']} → {a['path']}")
-    lines.append("위 이미지를 repl 에서 fs.readFile 로 읽고 display() 로 먼저 확인한 뒤 답해줘.")
+    lines.append("위 파일을 필요한 도구로 먼저 확인한 뒤 답해줘.")
     lines.append("")
     return "\n".join(lines)
+
+
+def _safe_name(name: str | None) -> str:
+    if not isinstance(name, str) or not name:
+        return ""
+    normalized = name.replace("\\", "/")
+    parts = [part.strip() for part in normalized.split("/") if part.strip() not in ("", ".", "..")]
+    clean = "/".join("".join(character for character in part if character >= " " and character != "\x7f") for part in parts)
+    return clean[:120]
 
 
 def sweep(max_age_days: int = 30) -> int:

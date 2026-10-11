@@ -2,7 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 import { ExternalLink, Maximize2, Minus, X } from 'lucide-react';
 import { AnimatePresence, motion, useDragControls, useMotionValue, useReducedMotion } from 'motion/react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { getWebsiteUrl, isTabResponse, OPEN_IN_BROWSER_LABEL } from './browser';
+import { getBrowserStreamUrl, getWebsiteUrl, isTabResponse, OPEN_IN_BROWSER_LABEL } from './browser';
 import type { BrowserTab } from './types';
 import { tokens } from './tokens.stylex';
 import { ICON_STROKE } from './ui';
@@ -20,6 +20,8 @@ export function BrowserLive({ sessionId, request, onOpen, isVisible, isBrowserOp
 }) {
   const [tab, setTab] = useState<BrowserTab>();
   const [imageUrl, setImageUrl] = useState<string>();
+  const [isStreamUnavailable, setStreamUnavailable] = useState(false);
+  const [isPreviewReady, setPreviewReady] = useState(false);
   const [isMinimized, setMinimized] = useState(false);
   const [dismissedTarget, setDismissedTarget] = useState<string>();
   const boundsRef = useRef<HTMLDivElement>(null);
@@ -35,6 +37,8 @@ export function BrowserLive({ sessionId, request, onOpen, isVisible, isBrowserOp
   const sessionQuery = `&session=${encodeURIComponent(sessionId)}`;
   const targetId = tab?.targetId;
   const websiteUrl = tab && getWebsiteUrl(tab.url);
+  const streamUrl = targetId ? getBrowserStreamUrl(targetId, sessionId) : undefined;
+  const previewSource = !isStreamUnavailable ? streamUrl : imageUrl;
   const shouldShow = !!targetId && dismissedTarget !== targetId;
 
   useEffect(() => {
@@ -116,22 +120,27 @@ export function BrowserLive({ sessionId, request, onOpen, isVisible, isBrowserOp
   }, [request, sessionQuery, targetId]);
   useEffect(() => {
     setImageUrl(undefined);
+    setStreamUnavailable(false);
+    setPreviewReady(false);
     return () => {
       if (imageRef.current) URL.revokeObjectURL(imageRef.current);
       imageRef.current = undefined;
     };
   }, [targetId]);
-  useAutoRefresh(capture, 1_000, isVisible && shouldShow && !isMinimized && tab?.loaded !== false);
+  useAutoRefresh(capture, 1_000, isVisible && shouldShow && !isMinimized && isStreamUnavailable && tab?.loaded !== false);
 
-  return <div ref={boundsRef} inert={!isVisible} style={{ visibility: isVisible ? 'visible' : 'hidden' }} {...stylex.props(styles.bounds)}><AnimatePresence>{shouldShow && tab && <motion.div ref={previewRef} role="region" aria-label="Live browser preview" {...stylex.props(styles.preview)} style={{ x, y }} initial={{ scale: shouldReduceMotion ? 1 : .92 }} animate={{ scale: 1 }} exit={{ scale: shouldReduceMotion ? 1 : .92 }} transition={{ duration: .18 }} drag dragControls={dragControls} dragListener={false} dragConstraints={boundsRef} dragElastic={0} dragMomentum={false} onDragStart={() => { isDraggingRef.current = true; }} onDragEnd={savePosition}>
+  return <div ref={boundsRef} inert={!isVisible} style={{ visibility: isVisible ? 'visible' : 'hidden' }} {...stylex.props(styles.bounds)}><AnimatePresence>{shouldShow && tab && <motion.div ref={previewRef} role="region" aria-label="Browser preview" {...stylex.props(styles.preview)} style={{ x, y }} initial={{ scale: shouldReduceMotion ? 1 : .92 }} animate={{ scale: 1 }} exit={{ scale: shouldReduceMotion ? 1 : .92 }} transition={{ duration: .18 }} drag dragControls={dragControls} dragListener={false} dragConstraints={boundsRef} dragElastic={0} dragMomentum={false} onDragStart={() => { isDraggingRef.current = true; }} onDragEnd={savePosition}>
     <div {...stylex.props(styles.top)}>
-      <button type="button" aria-label={`Open live browser preview: ${tab.title || 'Browser'}`} aria-description="Drag to move, or use the arrow keys." aria-haspopup="dialog" {...stylex.props(styles.handle)} onPointerDown={startDrag} onKeyDown={moveWithKeyboard} onClick={openPreview}><span {...stylex.props(styles.title)}>{tab.title || 'Browser'}</span></button>
+      <button type="button" aria-label={`Open browser preview: ${tab.title || 'Browser'}`} aria-description="Drag to move, or use the arrow keys." aria-haspopup="dialog" {...stylex.props(styles.handle)} onPointerDown={startDrag} onKeyDown={moveWithKeyboard} onClick={openPreview}><span {...stylex.props(styles.title)}>{tab.title || 'Browser'}</span></button>
       {websiteUrl && <a href={websiteUrl} target="_blank" rel="noopener noreferrer external" aria-label={OPEN_IN_BROWSER_LABEL} title={OPEN_IN_BROWSER_LABEL} {...stylex.props(styles.control)}><ExternalLink size={15} strokeWidth={ICON_STROKE} aria-hidden="true" /></a>}
       <button type="button" aria-label={isMinimized ? 'Restore browser preview' : 'Minimize browser preview'} aria-expanded={!isMinimized} {...stylex.props(styles.control)} onClick={() => setMinimized(current => !current)}>{isMinimized ? <Maximize2 size={15} strokeWidth={ICON_STROKE} aria-hidden="true" /> : <Minus size={17} strokeWidth={ICON_STROKE} aria-hidden="true" />}</button>
       <button type="button" aria-label="Close browser preview" {...stylex.props(styles.control)} onClick={() => { setDismissedTarget(tab.targetId); document.querySelector<HTMLButtonElement>('button[aria-label="Open conversations"]')?.focus({ preventScroll: true }); }}><X size={17} strokeWidth={ICON_STROKE} aria-hidden="true" /></button>
     </div>
     {!isMinimized &&
-      <button type="button" aria-label="Expand live browser preview" aria-haspopup="dialog" {...stylex.props(styles.frame)} onPointerDown={startDrag} onClick={openPreview}>{imageUrl ? <img src={imageUrl} alt="" draggable={false} {...stylex.props(styles.image)} /> : <span {...stylex.props(styles.placeholder)}>{tab.loaded === false ? 'Tab asleep' : 'Connecting…'}</span>}</button>
+      <button type="button" aria-label="Expand browser preview" aria-haspopup="dialog" {...stylex.props(styles.frame)} onPointerDown={startDrag} onClick={openPreview}>
+        {previewSource && tab.loaded !== false && <img src={previewSource} alt="" draggable={false} {...stylex.props(styles.image)} onLoad={() => setPreviewReady(true)} onError={() => { setPreviewReady(false); setStreamUnavailable(true) }} />}
+        {tab.loaded === false ? <span {...stylex.props(styles.placeholder)}>Tab asleep</span> : !isPreviewReady && <span role="status" aria-live="polite" {...stylex.props(styles.previewActivity)}><span aria-hidden="true" {...stylex.props(styles.spinner)} /><span {...stylex.props(styles.srOnly)}>Loading browser preview</span></span>}
+      </button>
     }
   </motion.div>}</AnimatePresence></div>;
 
@@ -160,7 +169,10 @@ const styles = stylex.create({
   handle: { display: 'flex', flex: 1, alignItems: 'center', alignSelf: 'stretch', minWidth: 0, padding: '0 6px 0 0', borderWidth: 0, backgroundColor: 'transparent', color: tokens.text, touchAction: 'none', cursor: { default: 'grab', ':active': 'grabbing' } },
   control: { display: 'grid', placeItems: 'center', width: 32, height: 36, flexShrink: 0, padding: 0, borderWidth: 0, borderRadius: 10, color: tokens.text, backgroundColor: { default: 'transparent', ':hover': tokens.hover }, textDecoration: 'none' },
   title: { flex: 1, minWidth: 0, fontSize: '0.625rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 600 },
-  frame: { display: 'flex', width: '100%', minHeight: 0, aspectRatio: '4 / 3', padding: 0, borderWidth: 0, overflow: 'hidden', backgroundColor: tokens.surface, touchAction: 'none', cursor: 'grab' },
+  frame: { position: 'relative', display: 'flex', width: '100%', minHeight: 0, aspectRatio: '4 / 3', padding: 0, borderWidth: 0, overflow: 'hidden', backgroundColor: tokens.surface, touchAction: 'none', cursor: 'grab' },
   image: { width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'top' },
   placeholder: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', fontSize: '0.6875rem', color: tokens.muted },
+  previewActivity: { position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' },
+  spinner: { width: 20, height: 20, borderRadius: 999, borderWidth: 2, borderStyle: 'solid', borderColor: tokens.border, borderTopColor: tokens.text, animationName: stylex.keyframes({ to: { transform: 'rotate(360deg)' } }), animationDuration: '800ms', animationTimingFunction: 'linear', animationIterationCount: 'infinite' },
+  srOnly: { position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', borderWidth: 0 },
 });

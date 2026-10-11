@@ -189,7 +189,7 @@ function installFetch(targetWindow) {
       items: [{ id: 'test-model', name: 'Test model', provider: 'test', thinkingLevels: ['high'], supportsFastMode: false }],
       current: { provider: 'test', modelId: 'test-model', thinkingLevel: 'high', fastMode: false },
     });
-    if (url.pathname === '/api/sessions' && method === 'GET') {
+    if ((url.pathname === '/api/sessions' || url.pathname === '/api/native/sessions') && method === 'GET') {
       const query = (url.searchParams.get('q') || '').toLowerCase();
       const items = sessions.filter(item => !query || item.title.toLowerCase().includes(query) || item.preview.toLowerCase().includes(query));
       return response({ items, nextCursor: null, total: sessions.length, matched: items.length });

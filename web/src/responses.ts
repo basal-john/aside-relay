@@ -132,6 +132,9 @@ function session(value: unknown): ChatSession {
     hasLog: boolean(item.hasLog),
     cost: optionalNumber(item.cost),
     tokens: optionalNumber(item.tokens),
+    projectId: optionalText(item.projectId),
+    statusLabel: optionalText(item.statusLabel),
+    suspensionKind: optionalText(item.suspensionKind),
   };
 }
 

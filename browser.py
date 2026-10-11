@@ -301,3 +301,70 @@ async def focus_tab(target_id: str, session_id: str | None = None, *, show_all: 
     out = await mcp.repl_json(code, title="Focusing tab", timeout=60)
     await list_tabs(force=True, session_id=session_id, show_all=show_all)
     return out
+
+
+async def control_tab(target_id: str, action: str, *, session_id: str | None = None,
+                      show_all: bool = False, x: float | None = None,
+                      y: float | None = None, delta_x: int = 0, delta_y: int = 0,
+                      text: str = "", key: str = "", url: str = "") -> dict:
+    """Control an awake tab through the already attached Playwright page.
+
+    Pointer coordinates are normalized to the page viewport so the phone preview
+    remains accurate when its rendered size differs from the desktop tab.
+    """
+    await _require_awake(target_id, session_id, show_all=show_all)
+    action_code = {
+        "click": f"""
+          const viewport = await pg.evaluate(() => ({{ width: innerWidth, height: innerHeight }}));
+          await pg.mouse.click(viewport.width * {json.dumps(x)}, viewport.height * {json.dumps(y)});
+        """,
+        "scroll": f"await pg.mouse.wheel({int(delta_x)}, {int(delta_y)});",
+        "type": f"await pg.keyboard.insertText({_jsq(text)});",
+        "key": f"await pg.keyboard.press({_jsq(key)});",
+        "back": "await pg.goBack({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null);",
+        "forward": "await pg.goForward({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null);",
+        "reload": "await pg.reload({ waitUntil: 'domcontentloaded', timeout: 15000 });",
+        "navigate": f"await pg.goto({_jsq(url)}, {{ waitUntil: 'domcontentloaded', timeout: 20000 }});",
+    }[action]
+    code = _ATTACH + f"""
+  const pg = await __attach({_jsq(target_id)});
+  {action_code}
+  const state = await pg.evaluate(() => ({{
+    title: document.title.trim(),
+    viewport: {{ width: innerWidth, height: innerHeight }},
+  }}));
+  console.log(JSON.stringify({{ ok: true, url: pg.url(), ...state }}));
+"""
+    out = await mcp.repl_json(code, title="Controlling browser tab", timeout=45)
+    if action in {"back", "forward", "reload", "navigate"}:
+        await list_tabs(force=True, session_id=session_id, show_all=show_all)
+    return out
+
+
+async def browser_library(kind: str, *, session_id: str | None = None,
+                          query: str = "", max_results: int = 100) -> dict:
+    binding_session = session_id or (await mcp.repl_json(CURRENT_SESSION_CODE))["id"]
+    await repair_browser_binding(binding_session)
+    session = await daemon.call("sessions.get", {"accountId": ACCOUNT_ID, "sessionId": binding_session})
+    binding = session["browserBinding"]
+    if kind == "history":
+        return await daemon.extension("Aside.searchHistory", {
+            "query": query,
+            "maxResults": max_results,
+        }, binding)
+    method, args = {
+        "bookmarks": ("chrome.bookmarks.search", [query] if query else [{}]),
+        "groups": ("chrome.tabGroups.query", [{"windowId": binding["windowId"]}]),
+    }[kind]
+    items = await daemon.extension("Aside.callExtensionMV3Api", {"method": method, "args": args}, binding)
+    return {"items": items}
+
+
+async def clear_agent_tabs(*, session_id: str | None = None,
+                           keep_target_ids: list[str] | None = None) -> dict:
+    binding_session = session_id or (await mcp.repl_json(CURRENT_SESSION_CODE))["id"]
+    await repair_browser_binding(binding_session)
+    session = await daemon.call("sessions.get", {"accountId": ACCOUNT_ID, "sessionId": binding_session})
+    return await daemon.extension("Aside.clearAiTabsGroup", {
+        "keepTargetIds": keep_target_ids or [],
+    }, session["browserBinding"])

@@ -1,7 +1,8 @@
 import * as stylex from '@stylexjs/stylex';
-import { ChevronDown, ChevronRight, CodeXml, File, FilePenLine, Globe, History, ListTodo, NotebookPen, Search, Terminal } from 'lucide-react';
+import { ChevronDown, ChevronRight, CodeXml, ExternalLink, File, FilePenLine, Globe, History, ListTodo, NotebookPen, Search, Terminal } from 'lucide-react';
 import type { ChatMessage, ToolCallBlock } from './types';
 import { isRecord } from './responses';
+import { SubagentIcon, subagentColors, type SubagentColor } from './SubagentIcon';
 import { tokens } from './tokens.stylex';
 import { AsideIcon, ICON_STROKE } from './ui';
 
@@ -21,17 +22,19 @@ function toolKind(name: string) {
   return 'code';
 }
 
-function ToolIcon({ name }: { name: string }) {
+function ToolIcon({ name, sessionId, subagentColor }: { name: string; sessionId?: string; subagentColor?: SubagentColor }) {
   const kind = toolKind(name);
+  if (kind === 'agent' && sessionId) return <span {...stylex.props(styles.icon)} aria-hidden="true"><SubagentIcon sessionId={sessionId} color={subagentColor} /></span>;
   const Icon = { search: Search, web: Globe, file: File, edit: FilePenLine, history: History, memory: NotebookPen, tasks: ListTodo, command: Terminal, code: CodeXml, agent: AsideIcon }[kind];
   return <span {...stylex.props(styles.icon, kind === 'agent' && styles.agentIcon)} aria-hidden="true"><Icon size={18} strokeWidth={ICON_STROKE} /></span>;
 }
 
-export function Activity({ messages, results, onZoom, expanded, onExpandedChange }: { messages: ChatMessage[]; results: Map<string, ChatMessage>; onZoom: (src: string) => void; expanded: Record<string, boolean>; onExpandedChange: (id: string, isOpen: boolean) => void }) {
+export function Activity({ messages, results, onZoom, expanded, onExpandedChange, onOpenSession, agentIds = [] }: { messages: ChatMessage[]; results: Map<string, ChatMessage>; onZoom: (src: string) => void; expanded: Record<string, boolean>; onExpandedChange: (id: string, isOpen: boolean) => void; onOpenSession?: (sessionId: string) => void; agentIds?: string[] }) {
   const calls = messages.flatMap(message => message.blocks.flatMap((block, index) => block.type === 'toolCall' ? [{ block, key: `${message.seq}-${index}`, result: block.id ? results.get(block.id) : undefined }] : []));
   const notes = messages.flatMap(message => message.blocks.flatMap((block, index) => block.type === 'thinking' && block.text.trim() ? [{ text: block.text, key: `${message.seq}-${index}` }] : []));
   const standalone = messages.filter(message => message.role === 'toolResult' || message.role === 'system');
   const rootId = 'activity-' + messages[0].seq;
+  const agentColors = subagentColors(agentIds);
   const kinds = calls.map(call => toolKind(call.block.name ?? ''));
   const labels = [...new Set(kinds)].map(kind => {
     const count = kinds.filter(value => value === kind).length;
@@ -45,13 +48,13 @@ export function Activity({ messages, results, onZoom, expanded, onExpandedChange
   return <details open={expanded[rootId] ?? false} onToggle={event => { if (event.target === event.currentTarget) onExpandedChange(rootId, event.currentTarget.open); }} {...stylex.props(styles.activity)}><summary {...stylex.props(styles.summary)}><ToolIcon name={calls[0]?.block.name ?? standalone[0]?.toolName ?? ''} /><span>{summary}</span>{expanded[rootId] ? <ChevronDown size={14} strokeWidth={ICON_STROKE} aria-hidden="true" /> : <ChevronRight size={14} strokeWidth={ICON_STROKE} aria-hidden="true" />}</summary>
     {expanded[rootId] && <div {...stylex.props(styles.body)}>
       {notes.map(note => <details key={note.key} open={expanded[note.key] ?? false} onToggle={event => onExpandedChange(note.key, event.currentTarget.open)} {...stylex.props(styles.notes)}><summary {...stylex.props(styles.summary)}><ChevronRight size={14} aria-hidden="true" />Notes</summary><p {...stylex.props(styles.description)}>{note.text}</p></details>)}
-      {calls.map(call => <Action key={call.key} call={call.block} result={call.result} onZoom={onZoom} isExpanded={expanded[call.key] ?? false} onExpandedChange={isOpen => onExpandedChange(call.key, isOpen)} />)}
+      {calls.map(call => <Action key={call.key} call={call.block} result={call.result} onZoom={onZoom} isExpanded={expanded[call.key] ?? false} onExpandedChange={isOpen => onExpandedChange(call.key, isOpen)} onOpenSession={onOpenSession} agentColors={agentColors} />)}
       {standalone.map(message => <Action key={message.seq} result={message} onZoom={onZoom} isExpanded={expanded[String(message.seq)] ?? false} onExpandedChange={isOpen => onExpandedChange(String(message.seq), isOpen)} />)}
     </div>}
   </details>;
 }
 
-function Action({ call, result, onZoom, isExpanded, onExpandedChange }: { call?: ToolCallBlock; result?: ChatMessage; onZoom: (src: string) => void; isExpanded: boolean; onExpandedChange: (isOpen: boolean) => void }) {
+function Action({ call, result, onZoom, isExpanded, onExpandedChange, onOpenSession, agentColors }: { call?: ToolCallBlock; result?: ChatMessage; onZoom: (src: string) => void; isExpanded: boolean; onExpandedChange: (isOpen: boolean) => void; onOpenSession?: (sessionId: string) => void; agentColors?: Map<string, SubagentColor> }) {
   const args = isRecord(call?.args) ? call.args : undefined;
   const name = call?.name ?? result?.toolName ?? '';
   const isSubagent = toolKind(name) === 'agent';
@@ -59,8 +62,10 @@ function Action({ call, result, onZoom, isExpanded, onExpandedChange }: { call?:
   const filePath = typeof args?.path === 'string' ? args.path : typeof args?.file_path === 'string' ? args.file_path : undefined;
   const fileMatch = filePath?.match(/^\/Users\/[^/]+\/\.aside\/u\/\d+\/sessions\/[^/]+_([^/]+)\/(.+)$/);
   const fileUrl = fileMatch ? `/api/sessions/${encodeURIComponent(fileMatch[1])}/file/${fileMatch[2].split('/').map(encodeURIComponent).join('/')}` : undefined;
-  const output = result?.blocks.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n').trim() ?? '';
-  const model = isSubagent ? output.match(/^model:\s*(.+)$/m)?.[1] : undefined;
+  const rawOutput = result?.blocks.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n').trim() ?? '';
+  const output = normalizeToolOutput(rawOutput);
+  const model = isSubagent ? rawOutput.match(/^model:\s*(.+)$/m)?.[1] : undefined;
+  const childSessionId = isSubagent ? getString(args, 'session_id', 'task_id') ?? rawOutput.match(/^(?:session_id|task_id):\s*([A-Za-z0-9_-]+)/m)?.[1] : undefined;
   const isSkipped = /\b(?:was skipped|not a completed search)\b/i.test(output);
   const status = result?.isError ? 'Failed' : isSkipped ? 'Unavailable' : result?.role === 'system' ? 'Notice' : isSubagent && args?.action === 'spawn' ? 'Started' : result ? 'Completed' : 'Started';
   const page = output.match(/(?:^|\n)[+-]?\s*-\s*title:\s*"([^"\n]+)"\s*\[url=(https?:\/\/[^\]]+)\]/) ?? output.match(/→\s*([^\n]+?)\s*\((https?:\/\/[^\s)]+)\)/);
@@ -78,19 +83,20 @@ function Action({ call, result, onZoom, isExpanded, onExpandedChange }: { call?:
   const hasInput = input && Object.keys(input).length > 0;
   return <section aria-label={title} {...stylex.props(styles.action)}>
     <span {...stylex.props(styles.branch)} aria-hidden="true" />
-    <div {...stylex.props(styles.heading)}><ToolIcon name={name} /><strong {...stylex.props(styles.title)}>{title}</strong><span {...stylex.props(styles.status, (result?.isError || isSkipped) && styles.error)}>{status}</span></div>
+    <div {...stylex.props(styles.heading)}><ToolIcon name={name} sessionId={childSessionId} subagentColor={childSessionId ? agentColors?.get(childSessionId) : undefined} /><strong {...stylex.props(styles.title)}>{title}</strong><span {...stylex.props(styles.status, (result?.isError || isSkipped) && styles.error)}>{status}</span></div>
     {filePath && <div {...stylex.props(styles.path)} title={filePath}><File size={13} strokeWidth={ICON_STROKE} aria-hidden="true" />{fileUrl ? <a href={fileUrl} target="_blank" rel="noopener noreferrer" {...stylex.props(styles.fileLink)}>{filePath.split('/').filter(Boolean).slice(-3).join(' / ')}</a> : <span {...stylex.props(styles.pathText)}>{filePath.split('/').filter(Boolean).slice(-3).join(' / ')}</span>}</div>}
     {model && <p {...stylex.props(styles.model)}>{model}</p>}
+    {childSessionId && onOpenSession && <button type="button" {...stylex.props(styles.openSession)} onClick={() => onOpenSession(childSessionId)}><ExternalLink size={13} strokeWidth={ICON_STROKE} aria-hidden="true" />Open subagent</button>}
     {queries.length > 0 && <p {...stylex.props(styles.query)}>{queries.join(' · ')}</p>}
     {page && pageUrl && <a href={pageUrl.href} target="_blank" rel="noopener noreferrer" {...stylex.props(styles.page)}>{page[1]}<span {...stylex.props(styles.domain)}>{pageUrl.hostname}</span></a>}
     {description && <p {...stylex.props(styles.description)}>{description.slice(0, 600)}</p>}
     {observed.length > 0 && <ul {...stylex.props(styles.changes)}>{observed.map(text => <li key={text}>{text.slice(0, 180)}</li>)}</ul>}
     {images.map((block, index) => block.type === 'image' ? <button key={index} type="button" aria-label="View activity screenshot" {...stylex.props(styles.imageButton)} onClick={() => onZoom('/api/media/' + block.mediaId)}><img src={'/api/media/' + block.mediaId} alt="Activity screenshot" loading="lazy" {...stylex.props(styles.image)} /></button> : undefined)}
-    {(output || args) && <details open={isExpanded} onToggle={event => onExpandedChange(event.currentTarget.open)} {...stylex.props(styles.technical)}><summary {...stylex.props(styles.summary)}><ChevronRight size={13} aria-hidden="true" />Technical details</summary>
+    {(rawOutput || args) && <details open={isExpanded} onToggle={event => onExpandedChange(event.currentTarget.open)} {...stylex.props(styles.technical)}><summary {...stylex.props(styles.summary)}><ChevronRight size={13} aria-hidden="true" />Technical details</summary>
       {isExpanded && <>{name && <span {...stylex.props(styles.label)}>Tool · {name}</span>}
       {hasInput && <><span {...stylex.props(styles.label)}>Input</span><pre {...stylex.props(styles.output)}>{JSON.stringify(input, undefined, 2)}</pre></>}
       {typeof args?.code === 'string' && <><span {...stylex.props(styles.label)}>Code</span><pre {...stylex.props(styles.output)}>{args.code}</pre></>}
-      {output && <><span {...stylex.props(styles.label)}>Result</span><pre {...stylex.props(styles.output)}>{output}</pre></>}</>}
+      {rawOutput && <><span {...stylex.props(styles.label)}>Result</span><pre {...stylex.props(styles.output)}>{rawOutput}</pre></>}</>}
     </details>}
   </section>;
 
@@ -105,6 +111,17 @@ function Action({ call, result, onZoom, isExpanded, onExpandedChange }: { call?:
     if (page) return;
     return lines.filter(line => !/^[\[\]{}]/.test(line)).slice(0, 3).join('\n');
   }
+}
+
+function getString(value: Record<string, unknown> | undefined, ...keys: string[]) {
+  return keys.map(key => value?.[key]).find((item): item is string => typeof item === 'string' && item.length > 0);
+}
+
+function normalizeToolOutput(value: string) {
+  return value
+    .replace(/<\/?(?:webfetch-)?citation\b[^>]*>/gi, '')
+    .replace(/^\s*(?:webfetch-citation|citation)\s*:\s*/gim, '')
+    .trim();
 }
 
 const styles = stylex.create({
@@ -123,6 +140,7 @@ const styles = stylex.create({
   pathText: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   fileLink: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: tokens.primary, textDecoration: 'none', ':hover': { textDecoration: 'underline' } },
   model: { margin: '3px 0 0 25px', color: tokens.muted, fontSize: '0.6875rem', overflowWrap: 'anywhere' },
+  openSession: { display: 'inline-flex', alignItems: 'center', gap: 5, minHeight: 30, margin: '5px 0 0 22px', padding: '4px 9px', borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, borderRadius: 10, backgroundColor: tokens.surface, color: tokens.text, fontSize: '0.75rem' },
   query: { margin: '4px 0 0 22px', overflowWrap: 'anywhere', lineHeight: 1.5 },
   page: { display: 'block', margin: '4px 0 0 22px', color: tokens.text, overflowWrap: 'anywhere', lineHeight: 1.5 },
   domain: { display: 'block', color: tokens.muted, fontSize: '0.6875rem', textDecoration: 'none' },

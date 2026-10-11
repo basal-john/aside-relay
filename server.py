@@ -36,6 +36,11 @@ import uploads
 import runner
 import sessions
 import web_push
+import native_sessions
+import native_files
+import native_browser
+import native_queue
+import native_workspace
 from daemon import ACCOUNT_ID, daemon
 from mcp_client import ReplError, mcp
 
@@ -87,6 +92,16 @@ async def require_auth(request: Request) -> None:
 
 
 Auth = Depends(require_auth)
+app.include_router(native_sessions.router, dependencies=[Auth])
+app.include_router(native_sessions.projects_router, dependencies=[Auth])
+app.include_router(native_files.router, dependencies=[Auth])
+app.include_router(native_browser.router, dependencies=[Auth])
+app.include_router(native_workspace.router, dependencies=[Auth])
+
+
+@app.exception_handler(native_queue.NativeQueueError)
+async def native_queue_error(_request: Request, _error: native_queue.NativeQueueError):
+    return JSONResponse({"detail": "Could not update the Aside queue. Review your queued messages and try again."}, status_code=502)
 
 
 @app.get("/api/sessions/{session_id}/details", dependencies=[Auth])
@@ -95,9 +110,11 @@ async def api_session_details(session_id: str):
         raise HTTPException(404, "unknown session")
     try:
         session = await daemon.call("sessions.get", {"accountId": ACCOUNT_ID, "sessionId": session_id})
-        pins = await asyncio.to_thread(conversation_pins.pinned_ids)
+        previews = await daemon.call("sessions.listPreviewItems", {"accountId": ACCOUNT_ID,
+            "sessionIds": [session_id], "limit": 1, "archived": "include"})
+        preview = previews[0] if previews else {}
         return {"id": session_id, "title": session.get("title") or "Conversation",
-                "status": session["status"], "isPinned": session_id in pins}
+                "status": session["status"], "isPinned": bool(preview.get("pinned"))}
     except Exception:
         log.exception("conversation details failed session=%s", session_id)
         raise HTTPException(502, "Could not load conversation options.")
@@ -120,7 +137,8 @@ async def api_update_session(session_id: str, payload: dict):
                 await daemon.call("sessions.update", {"accountId": ACCOUNT_ID, "sessionId": session_id,
                     "title": title.strip()}, mutation=True)
             if "isPinned" in payload:
-                await asyncio.to_thread(conversation_pins.set_pinned, session_id, payload["isPinned"])
+                await daemon.call("sessions.update", {"accountId": ACCOUNT_ID, "sessionId": session_id,
+                    "pinned": payload["isPinned"]}, mutation=True)
             return await api_session_details(session_id)
         except HTTPException:
             raise
@@ -540,6 +558,11 @@ def _with_attachments(payload: dict) -> str:
         value = payload.get(name)
         if value is not None and not isinstance(value, str):
             raise HTTPException(400, "invalid run options")
+    if payload.get("mode", "default") not in ("default", "incognito"):
+        raise HTTPException(400, "invalid conversation mode")
+    project_id = payload.get("projectId")
+    if project_id is not None and (not isinstance(project_id, str) or not project_id.strip()):
+        raise HTTPException(400, "invalid project")
     prompt = prompt.strip()
     clean = [{"name": attachment["name"], "path": str(config.UPLOAD_DIR / attachment["id"])}
              for attachment in _validated_attachments(payload)]
@@ -561,6 +584,8 @@ async def api_run(payload: dict):
             provider=payload.get("provider"),
             permission=payload.get("permission"),
             host=payload.get("host"),
+            incognito=payload.get("mode") == "incognito",
+            project_id=payload.get("projectId"),
         )
     except Exception as exc:
         log.exception("conversation start failed")
@@ -621,12 +646,23 @@ async def api_followup_create(session_id: str, payload: dict):
     item_id = _followup_id(payload.get("id"))
     item = _followup_content(payload)
     item["id"] = item_id
-    return await followup_queue.enqueue(session_id, item)
+    delivery = payload.get("delivery", "queue")
+    if delivery not in {"queue", "steer"}:
+        raise HTTPException(400, "Invalid follow-up behavior.")
+    state = await followup_queue.enqueue(session_id, item)
+    if delivery == "steer" and any(queued["id"] == item_id for queued in state["items"]):
+        return await followup_queue.steer(session_id, item_id, _deliver_steer)
+    return state
 
 
 @app.post("/api/sessions/{session_id}/followups/resume", dependencies=[Auth])
 async def api_followup_resume(session_id: str):
     _require_session(session_id)
+    if await sessions.session_status(_http, session_id) == "interrupted" and await native_followups.list(session_id):
+        run = await runner.resume_queue(session_id)
+        hub.ensure_stream(run)
+        asyncio.create_task(hub.watch_run(run))
+        await hub.broadcast(session_id, {"op": "run.started", "sessionId": session_id, "runId": run.stream_id})
     return await followup_queue.resume(session_id)
 
 
@@ -716,30 +752,16 @@ def _validated_attachments(payload: dict) -> list[dict]:
     raw = payload.get("attachments", [])
     if not isinstance(raw, list):
         raise HTTPException(400, "invalid attachments")
+    if len(raw) > 12:
+        raise HTTPException(400, "Use no more than 12 attachments.")
     attachments = []
     for value in raw:
         if not isinstance(value, dict) or not isinstance(value.get("id"), str):
             raise HTTPException(400, "invalid attachment")
-        path = uploads.path_of(value["id"])
-        if path is None:
-            raise HTTPException(400, "attachment not found")
-        try:
-            with path.open("rb") as file:
-                kind = uploads.sniff(file.read(12))
-            size = path.stat().st_size
-        except OSError:
-            raise HTTPException(400, "attachment not found")
-        if kind is None:
-            raise HTTPException(400, "invalid attachment")
-        mime, _extension = kind
-        name = value.get("name")
-        attachments.append({
-            "id": value["id"],
-            "name": (name.strip() if isinstance(name, str) and name.strip() else path.name)[:120],
-            "mime": mime,
-            "bytes": size,
-            "url": f"/api/upload/{value['id']}",
-        })
+        attachment = uploads.metadata(value["id"], value.get("name"))
+        if attachment is None:
+            raise HTTPException(400, "attachment not found or unsupported")
+        attachments.append(attachment)
     return attachments
 
 
@@ -758,32 +780,8 @@ async def api_session_file(session_id: str, rel: str):
     p = sessions.session_file(session_id, rel)
     if not p:
         raise HTTPException(404, "not found")
-    return FileResponse(p)
-
-
-@app.get("/api/sessions/{session_id}/artifacts", dependencies=[Auth])
-async def api_artifacts(session_id: str):
-    d = sessions.session_dir(session_id)
-    if not d:
-        raise HTTPException(404, "unknown session")
-    adir = d / "artifacts"
-    if not adir.exists():
-        return []
-    return [
-        {"name": f.name, "bytes": f.stat().st_size, "mtime": int(f.stat().st_mtime)}
-        for f in sorted(adir.iterdir()) if f.is_file()
-    ]
-
-
-@app.get("/api/sessions/{session_id}/artifacts/{name}", dependencies=[Auth])
-async def api_artifact(session_id: str, name: str):
-    d = sessions.session_dir(session_id)
-    if not d or "/" in name or ".." in name:
-        raise HTTPException(404, "not found")
-    p = d / "artifacts" / name
-    if not p.exists():
-        raise HTTPException(404, "not found")
-    return FileResponse(p)
+    return FileResponse(p, headers={"Cache-Control": "private", "X-Content-Type-Options": "nosniff",
+                                   "Content-Security-Policy": "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'"})
 
 
 # ------------------------------------------------------------------ 첨부
@@ -794,7 +792,14 @@ async def api_upload(request: Request):
     파일명은 X-Filename 헤더로 받는다. 저장 위치는 Aside 유저 루트 안이어야
     에이전트의 repl 이 읽을 수 있다 (uploads.py 주석 참조).
     """
-    raw = await request.body()
+    chunks = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > config.UPLOAD_MAX_BYTES:
+            raise HTTPException(413, "File is too large.")
+        chunks.append(chunk)
+    raw = b"".join(chunks)
     if not raw:
         raise HTTPException(400, "empty body")
     if len(raw) > config.UPLOAD_MAX_BYTES:
@@ -813,10 +818,16 @@ async def api_upload(request: Request):
 
 @app.get("/api/upload/{fid}", dependencies=[Auth])
 async def api_upload_get(fid: str):
+    attachment = uploads.metadata(fid)
     p = uploads.path_of(fid)
-    if not p:
+    if not p or not attachment:
         raise HTTPException(404, "not found")
-    return FileResponse(p, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+    is_active_content = attachment["mime"] in {"text/html", "image/svg+xml", "text/javascript", "application/javascript"}
+    return FileResponse(p, media_type=attachment["mime"], filename=attachment["name"] if is_active_content else None,
+                        headers={"Cache-Control": "private, max-age=31536000, immutable",
+                                 "X-Content-Type-Options": "nosniff",
+                                 "Content-Security-Policy": "sandbox; default-src 'none'"} if is_active_content else
+                        {"Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"})
 
 
 # ------------------------------------------------------------------ 탭
@@ -1179,11 +1190,13 @@ async def _deliver_steer(session_id: str, item: dict) -> bool:
         return await runner.steer(session_id, prompt)
 
 
+native_followups = native_queue.NativeQueue(_with_attachments)
 followup_queue = followups.FollowupQueue(
     config.FOLLOWUPS_FILE,
     _queue_is_running,
     _start_followup,
     _queue_changed,
+    native_followups,
 )
 
 _RUN_REQUEST_TTL_SEC = 10 * 60
@@ -1376,7 +1389,9 @@ async def _handle_ws(ws: WebSocket, msg: dict) -> None:
                                          effort=msg.get("effort"), speed=msg.get("speed"),
                                          provider=msg.get("provider"),
                                          permission=msg.get("permission"),
-                                         host=msg.get("host"))
+                                         host=msg.get("host"),
+                                         incognito=msg.get("mode") == "incognito",
+                                         project_id=msg.get("projectId"))
         except Exception as exc:
             log.exception("websocket conversation start failed")
             message = runner.safe_run_error(exc)
@@ -1472,7 +1487,7 @@ async def _handle_ws(ws: WebSocket, msg: dict) -> None:
 # 매칭하므로, 위에 두면 /api/* 를 전부 삼킨다.
 # 느슨한 catch-all 대신 화이트리스트를 쓴다. /api 오타가 200 HTML 로 돌아오면
 # 디버깅이 괴로워진다 — 없는 주소는 정직하게 404 여야 한다.
-_SPA_PATHS = re.compile(r"tabs|settings|c/[A-Za-z0-9_-]{1,64}")
+_SPA_PATHS = re.compile(r"tabs|settings|workspace|files|c/[A-Za-z0-9_-]{1,64}")
 
 
 @app.get("/{path:path}")

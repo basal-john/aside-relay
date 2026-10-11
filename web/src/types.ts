@@ -82,6 +82,9 @@ export type ChatSession = {
   tokens?: number
   bytes: number
   hasLog: boolean
+  projectId?: string
+  statusLabel?: string
+  suspensionKind?: string
 }
 
 export type UploadAttachment = {
@@ -93,6 +96,7 @@ export type UploadAttachment = {
 }
 
 export type ModelConfig = { provider: string; modelId: string; thinkingLevel: string; fastMode: boolean }
+export type RunOptions = { mode?: 'default' | 'incognito'; projectId?: string }
 export type AvailableModel = { id: string; name: string; provider: string; thinkingLevels: string[]; supportsFastMode: boolean }
 
 export type QueuedMessage = {
@@ -141,11 +145,12 @@ export type UseChat = {
   saveToken: (token: string) => Promise<boolean>
   request: (path: string, init?: RequestInit) => Promise<Response>
   refreshSessions: () => Promise<void>
+  refreshMessages: () => Promise<boolean>
   loadMore: () => Promise<void>
   openSession: (sessionId: string) => Promise<boolean>
   newChat: () => void
-  send: (prompt: string, attachments?: UploadAttachment[], model?: ModelConfig) => Promise<boolean>
-  queue: (prompt: string, attachments?: UploadAttachment[]) => Promise<boolean>
+  send: (prompt: string, attachments?: UploadAttachment[], model?: ModelConfig, options?: RunOptions) => Promise<boolean>
+  queue: (prompt: string, attachments?: UploadAttachment[], shouldSteer?: boolean) => Promise<boolean>
   editQueuedMessage: (id: string, prompt: string, attachments?: UploadAttachment[]) => Promise<boolean>
   beginEditQueuedMessage: (id: string) => Promise<boolean>
   cancelEditQueuedMessage: (id: string) => Promise<boolean>

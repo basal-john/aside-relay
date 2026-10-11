@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { Check } from 'lucide-react';
+import { Check, ChevronRight, SlidersHorizontal } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
 import type { UseChat } from './types';
 import { ICON_STROKE, styles as ui } from './ui';
@@ -14,7 +14,7 @@ import { parseHealth } from './responses';
 
 type Health = ReturnType<typeof parseHealth>;
 
-export function Settings({ chat, notify, notifications, isDarkMode, onThemeToggle, textSize, onTextSizeChange }: { chat: UseChat; notify: (text: string, kind?: 'error' | 'success') => void; notifications: PushNotifications; isDarkMode: boolean; onThemeToggle: () => void; textSize: number; onTextSizeChange: (size: number) => void }) {
+export function Settings({ chat, notify, notifications, isDarkMode, onThemeToggle, textSize, onTextSizeChange, onWorkspace }: { chat: UseChat; notify: (text: string, kind?: 'error' | 'success') => void; notifications: PushNotifications; isDarkMode: boolean; onThemeToggle: () => void; textSize: number; onTextSizeChange: (size: number) => void; onWorkspace?: () => void }) {
   const shouldReduceMotion = useReducedMotion();
   const [token, setToken] = useState(''); const [isSaving, setSaving] = useState(false); const [health, setHealth] = useState<Health>(); const [error, setError] = useState('');
   const [browserStatus, setBrowserStatus] = useState<'checking' | 'connected' | 'unavailable'>('checking');
@@ -32,6 +32,7 @@ export function Settings({ chat, notify, notifications, isDarkMode, onThemeToggl
   }, [chat.request]);
   useAutoRefresh(refresh, 5_000);
   return <div {...stylex.props(styles.content)}>
+    {onWorkspace ? <section><h3 {...stylex.props(styles.heading)}>Aside</h3><button type="button" {...stylex.props(styles.workspace)} onClick={onWorkspace}><SlidersHorizontal size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /><span {...stylex.props(styles.workspaceText)}><strong>Workspace & preferences</strong><span {...stylex.props(ui.muted)}>Projects, routines, memory, connections, providers and native preferences</span></span><ChevronRight size={18} strokeWidth={ICON_STROKE} aria-hidden="true" /></button></section> : undefined}
     <section><h3 {...stylex.props(styles.heading)}>Connection</h3><div {...stylex.props(styles.statusRow)}><span>Bridge</span><span {...stylex.props(ui.muted)}>{chat.isConnected ? 'Connected' : 'Reconnecting…'}</span></div>
       <div {...stylex.props(styles.statusRow)}><span>Aside</span><span {...stylex.props(ui.muted)}>{health ? health.asideApp ? 'Running' : 'Not running' : error ? 'Unavailable' : 'Checking…'}</span></div>
       <div {...stylex.props(styles.statusRow)}><span>Browser</span><span {...stylex.props(ui.muted)}>{browserStatus === 'connected' ? 'Connected' : browserStatus === 'unavailable' ? 'Unavailable' : 'Checking…'}</span></div>
@@ -63,4 +64,6 @@ const styles = stylex.create({
   themeSwitch: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 52, height: 44, borderWidth: 0, padding: 0, backgroundColor: 'transparent' },
   switchTrack: { display: 'flex', alignItems: 'center', width: 48, height: 28, padding: 4, borderRadius: 20, backgroundColor: tokens.hover },
   switchThumb: { width: 20, height: 20, borderRadius: '50%', backgroundColor: tokens.primaryForeground, boxShadow: '0 1px 3px rgb(0 0 0 / .2)' },
+  workspace: { display: 'flex', alignItems: 'center', gap: 12, width: '100%', minHeight: 64, padding: '10px 12px', borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, borderRadius: 16, backgroundColor: { default: tokens.surface, ':hover': tokens.hover }, color: tokens.text, textAlign: 'left' },
+  workspaceText: { display: 'flex', flex: 1, minWidth: 0, flexDirection: 'column', gap: 2, overflowWrap: 'anywhere' },
 });

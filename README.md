@@ -83,18 +83,38 @@ Click any image to view it at full size.
 
 - Live streamed responses, searchable and virtualized history, Markdown,
   compact D2Coding code blocks, linked citations, and expandable tool activity.
-- Interactive HTML visuals with preview/source switching and image attachments.
+- Interactive HTML visuals with preview/source switching, image zoom/pan, and
+  file attachments. Browse conversation outputs and project files, preview
+  documents and source, and rename or delete files within the permitted roots.
 - Model, provider, and reasoning-effort selection.
 - Follow-up queue with **Edit message**, **Steer instead**, and **Cancel message**.
+  It shares Aside's native queue and follows its queue/steer preference.
   Stopping a response pauses its queue until resumed.
+- Message menus offer copy, edit sent messages, branch, quote into the composer,
+  start a side chat, and jump to an earlier turn. Long-press opens the menu on
+  phones; releasing the touch keeps it open.
+- Native approval, confirmation, and question prompts; task progress, outputs,
+  and subagent status/model/duration. Subagents use Aside's eight-color icons
+  consistently in activity and agent lists.
 - Automatically updated browser tabs, a preview sheet, and a draggable PiP that
   remembers its position. Previews can be expanded, zoomed, panned, and dismissed
-  with a gesture; pages can also open in your own browser.
-- Pin, rename, share, delete, and copy conversation links or session IDs.
+  with a gesture; pages can also open in your own browser. Live frames, page
+  clicks, scrolling, typing, navigation, history, and bookmarks are available
+  from the browser sheet.
+- Pin, rename, share, archive, delete, mark read/unread, move to a project, and
+  copy conversation links or session IDs. Pins and read state sync with Aside.
   Pins appear first; other conversations sort by their latest activity.
 - Recent conversations with **Show all**, using Aside's ordinary-chat visibility
-  rules. Subagents, archived chats, and temporary CLI sessions stay out of both
-  the list and search results.
+  rules. Subagents and temporary CLI sessions stay out of the ordinary list.
+  Search covers conversation history; Show all also offers project, status,
+  archive, and ordering filters. Running chats show activity indicators;
+  unread completed chats show dots.
+- New incognito and project conversations, plus tab, file, folder, and skill
+  references in the composer. Dictation is offered where the browser supports it.
+- **Settings → Workspace** connects projects and project instructions,
+  routines and run history, memory, context awareness, installed skills,
+  MCP connections and tool permissions, custom providers, account/devices,
+  and native preferences. Controls follow the connected daemon's capabilities.
 - Browser lists switch between **Chat tabs** (including tabs owned by its child
   agents) and **Show all** (web tabs in the conversation's browser window).
   Sleeping tabs stay visible with their state.
@@ -1206,6 +1226,10 @@ an HTTP 200 from the UI or `/api/health` as the entire test.
 | Browser | Agent opens a public test page; title, sheet, and PiP preview update; “Open in your browser” opens the URL |
 | Content | Code stays within its block; an HTML visual renders; uploaded image opens and can zoom/pan |
 | History controls | Pin and rename survive reload; drawer sorts unpinned chats by latest activity |
+| Native session controls | Archive/read state sync with Aside; a side chat opens separately; sent-message edit and branch target the selected turn |
+| Agent interaction | Approval/question controls resume the correct session; tasks, outputs, and colored child agents update without moving the composer |
+| Files and context | Uploaded files reach the agent; output previews open; files cannot escape their permitted root through a path or symlink |
+| Workspace | Connected sections load; a project chat inherits its project; preference changes reach the native app and queue behavior |
 | Phone layout | Keyboard/send, multiline drafts, anchored header/composer, and long responses do not cause horizontal page overflow |
 | Notification | While away from the Home Screen app, a completed reply produces its answer preview; tapping opens that conversation |
 | Services | After user login or a controlled service restart, bridge and selected proxy/tunnel recover without a manual terminal |
@@ -1267,9 +1291,46 @@ agent can read them within Aside's permitted roots.
 Conversation visibility and titles come from `sessions.listPreviewItems`, the
 same daemon query used by Aside's chat list. Disk messages supply activity times
 and previews for those visible conversations. The sidebar starts with pinned
-chats and the latest three unpinned chats; **Show all** expands the virtualized
-list, and search covers every visible conversation. Show all retains the same
-visibility rules rather than exposing internal agent sessions.
+chats and the number of recent unpinned chats configured in Aside (three by
+default); **Show all** expands the virtualized list. Search queries native
+conversation history, including message content. Archived conversations stay
+hidden by default and can be selected explicitly in Show all. Internal child
+sessions remain available through their parent conversation's agent list.
+
+Authenticated `/api/native` routes use the installed daemon's session, queue,
+project, workspace, and browser contracts. Approvals, questions, branches,
+side chats, pins, and read state therefore use the same underlying sessions as
+the native app. File routes enforce canonical roots and reject escaping
+symlinks; active file previews are sandboxed. Workspace responses remove
+credentials, and provider/MCP secrets are write-only in forms.
+
+Browser previews stream JPEG frames with polling fallback; they are not a
+remote video/audio stream. Direct controls operate on the conversation's bound
+browser page. Native history, bookmarks, and tab-group information come from
+the matching browser profile.
+
+### Native integration boundaries
+
+The implementation was compared with Aside `1.26.1010.2149`. These native-only
+operations still require Aside on the Mac because the installed daemon or
+extension does not expose an applicable remote operation:
+
+- Granting macOS context-awareness permissions, switching accounts/browser
+  profiles, signing out the bridge's current device, or changing the avatar.
+- Completing provider/MCP browser OAuth callbacks, managing subscriptions,
+  and native Vault/Inbox screens.
+- Reordering or automatically organizing browser tabs through restricted
+  extension operations, capturing native tab video/audio, and restoring an
+  archived project.
+- Running project/incognito creation through a remote-host CLI connection;
+  these creation paths currently require the local signed daemon.
+
+Installed skills can be read, imported, edited, toggled, and copied for
+customization. A remote skill marketplace is not exposed. Browser references
+and composer context are sent as readable references rather than native binary
+attachment metadata. Multi-key preference changes roll back on a failed write;
+the native daemon does not provide a transaction that isolates simultaneous
+changes made by another client.
 
 Chat tabs use `sessions.tabs.list` so the parent chat includes its child agents'
 owned tabs. Closed targets are omitted. **Show all** follows the browser window's

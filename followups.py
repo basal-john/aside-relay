@@ -8,7 +8,10 @@ import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
+
+if TYPE_CHECKING:
+    from native_queue import NativeQueue
 
 log = logging.getLogger("aside-remote.followups")
 EDIT_LEASE_SEC = 300
@@ -38,11 +41,12 @@ class RetryLater(Exception):
 
 class FollowupQueue:
     def __init__(self, path: Path, is_running: IsRunning, start_prompt: StartPrompt,
-                 queue_changed: QueueChanged) -> None:
+                 queue_changed: QueueChanged, native_queue: NativeQueue | None = None) -> None:
         self.path = path
         self.is_running = is_running
         self.start_prompt = start_prompt
         self.queue_changed = queue_changed
+        self.native_queue = native_queue
         self._sessions: dict[str, dict] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._wake = asyncio.Event()
@@ -88,6 +92,12 @@ class FollowupQueue:
                     clean["acceptanceSeq"] = item["acceptanceSeq"]
                 if isinstance(item.get("acceptanceText"), str):
                     clean["acceptanceText"] = item["acceptanceText"]
+                if isinstance(item.get("nativePrompt"), str):
+                    clean["nativePrompt"] = item["nativePrompt"]
+                native = item.get("native")
+                if (isinstance(native, dict) and isinstance(native.get("key"), str)
+                        and isinstance(native.get("message"), dict)):
+                    clean["native"] = native
                 if status == "sending":
                     clean["status"] = "error"
                     clean["error"] = "Delivery was interrupted. Review the message and resume the queue."
@@ -134,7 +144,8 @@ class FollowupQueue:
     @staticmethod
     def _public_item(item: QueueItem) -> dict:
         public = {key: value for key, value in item.items()
-                  if key not in ("heldUntil", "acceptanceSeq", "acceptanceText")}
+                  if key not in ("heldUntil", "acceptanceSeq", "acceptanceText",
+                                 "native", "nativePrompt")}
         public["isEditing"] = bool(
             isinstance(item.get("heldUntil"), (int, float))
             and item["heldUntil"] > time.time()
@@ -142,10 +153,13 @@ class FollowupQueue:
         return public
 
     async def get(self, session_id: str) -> dict:
+        await self._sync_native(session_id)
         async with self._lock(session_id):
             return self._public(session_id)
 
     async def enqueue(self, session_id: str, item: QueueItem) -> dict:
+        if self.native_queue is not None and await self.is_running(session_id):
+            return await self._enqueue_native(session_id, item)
         async with self._lock(session_id):
             state = self._state(session_id)
             is_known = item["id"] in state["completedIds"] or any(
@@ -165,6 +179,7 @@ class FollowupQueue:
             item = self._find(session_id, item_id)
             if item["status"] == "sending":
                 raise ItemSending
+            original = dict(item)
             if update is not None:
                 prompt = update.get("prompt", item["prompt"])
                 attachments = update.get("attachments", item["attachments"])
@@ -182,6 +197,37 @@ class FollowupQueue:
             self._save()
             result = self._public(session_id)
         await self.queue_changed(session_id, result)
+        if update is not None and self.native_queue is not None and "native" in original:
+            try:
+                native = await self.native_queue.update(session_id, original, item)
+            except Exception:
+                if not await self._native_contains(session_id, original):
+                    async with self._lock(session_id):
+                        state = self._state(session_id)
+                        try:
+                            current = self._find(session_id, item_id)
+                        except ItemNotFound:
+                            return self._public(session_id)
+                        state["items"].remove(current)
+                        self._remember_completed(state, item_id)
+                        self._drop_empty(session_id)
+                        self._save()
+                        result = self._public(session_id)
+                    await self.queue_changed(session_id, result)
+                    return result
+                async with self._lock(session_id):
+                    current = self._find(session_id, item_id)
+                    current.clear()
+                    current.update(original)
+                    self._save()
+                    result = self._public(session_id)
+                await self.queue_changed(session_id, result)
+                raise
+            async with self._lock(session_id):
+                current = self._find(session_id, item_id)
+                current["native"] = native["native"]
+                current["nativePrompt"] = native["prompt"]
+                self._save()
         self._wake.set()
         return result
 
@@ -191,12 +237,28 @@ class FollowupQueue:
             if item["status"] == "sending":
                 raise ItemSending
             state = self._state(session_id)
+            index = state["items"].index(item)
             state["items"].remove(item)
             self._remember_completed(state, item_id)
             self._drop_empty(session_id)
             self._save()
             result = self._public(session_id)
         await self.queue_changed(session_id, result)
+        if self.native_queue is not None and "native" in item:
+            try:
+                await self.native_queue.delete(session_id, item)
+            except Exception:
+                if not await self._native_contains(session_id, item):
+                    return result
+                async with self._lock(session_id):
+                    state = self._state(session_id)
+                    state["items"].insert(min(index, len(state["items"])), item)
+                    state["completedIds"] = [value for value in state["completedIds"]
+                                             if value != item_id]
+                    self._save()
+                    result = self._public(session_id)
+                await self.queue_changed(session_id, result)
+                raise
         return result
 
     async def steer(self, session_id: str, item_id: str,
@@ -215,21 +277,47 @@ class FollowupQueue:
             sending = self._public(session_id)
             delivery_item = dict(item)
         await self.queue_changed(session_id, sending)
+        native_queue = self.native_queue
+        is_native_delivery = native_queue is not None and "native" in delivery_item
+        delivery_error: Exception | None = None
         try:
-            is_delivered = await deliver(session_id, delivery_item)
-        except Exception:
+            if native_queue is not None and "native" in delivery_item:
+                is_delivered = await native_queue.steer(session_id, delivery_item)
+            else:
+                is_delivered = await deliver(session_id, delivery_item)
+        except Exception as error:
+            delivery_error = error
             is_delivered = False
+            was_removed = getattr(error, "queue_removed", False)
             log.exception("follow-up steering failed session=%s item=%s", session_id, item_id)
+        else:
+            was_removed = False
         async with self._lock(session_id):
             state = self._state(session_id)
             try:
                 item = self._find(session_id, item_id)
             except ItemNotFound:
+                if delivery_error is not None and is_native_delivery:
+                    raise delivery_error
                 return self._public(session_id)
+            is_native = "native" in item
             if is_delivered:
                 state["items"].remove(item)
                 self._remember_completed(state, item_id)
                 self._drop_empty(session_id)
+            elif was_removed:
+                item.pop("native", None)
+                item.pop("nativePrompt", None)
+                item["status"] = "error"
+                item["error"] = "The message is saved here. Resume the queue to retry it."
+                state["paused"] = True
+            elif is_native:
+                if isinstance(delivery_item.get("native"), dict):
+                    item["native"] = delivery_item["native"]
+                if isinstance(delivery_item.get("nativePrompt"), str):
+                    item["nativePrompt"] = delivery_item["nativePrompt"]
+                item["status"] = "queued"
+                item.pop("error", None)
             else:
                 item["status"] = "error"
                 item["error"] = "The message could not be delivered. Review it and resume the queue."
@@ -237,6 +325,8 @@ class FollowupQueue:
             self._save()
             result = self._public(session_id)
         await self.queue_changed(session_id, result)
+        if delivery_error is not None and is_native_delivery:
+            raise delivery_error
         return result
 
     async def pause(self, session_id: str) -> None:
@@ -339,6 +429,120 @@ class FollowupQueue:
         except Exception:
             log.exception("follow-up queue check failed session=%s", session_id)
 
+    async def _enqueue_native(self, session_id: str, item: QueueItem) -> dict:
+        async with self._lock(session_id):
+            state = self._state(session_id)
+            if item["id"] in state["completedIds"]:
+                return self._public(session_id)
+            existing = next((value for value in state["items"]
+                             if value["id"] == item["id"]), None)
+            if existing is not None:
+                return self._public(session_id)
+            pending = {**item, "status": "sending",
+                       "nativePrompt": self.native_queue.prompt(item)}
+            state["items"].append(pending)
+            self._save()
+            sending = self._public(session_id)
+        await self.queue_changed(session_id, sending)
+        try:
+            native = await self.native_queue.enqueue(session_id, pending)
+        except Exception:
+            async with self._lock(session_id):
+                pending = self._find(session_id, str(item["id"]))
+                pending["status"] = "error"
+                pending["error"] = "The message could not be queued in Aside."
+                self._state(session_id)["paused"] = True
+                self._save()
+                result = self._public(session_id)
+            await self.queue_changed(session_id, result)
+            raise
+        async with self._lock(session_id):
+            state = self._state(session_id)
+            try:
+                pending = self._find(session_id, str(item["id"]))
+            except ItemNotFound:
+                return self._public(session_id)
+            if native is None:
+                state["items"].remove(pending)
+                self._remember_completed(state, str(item["id"]))
+                self._drop_empty(session_id)
+            else:
+                pending["status"] = "queued"
+                pending["native"] = native["native"]
+                pending["nativePrompt"] = native["prompt"]
+            self._save()
+            result = self._public(session_id)
+        await self.queue_changed(session_id, result)
+        return result
+
+    async def _sync_native(self, session_id: str) -> None:
+        if self.native_queue is None:
+            return
+        try:
+            native_items = await self.native_queue.list(session_id)
+        except Exception:
+            log.warning("native queue refresh failed session=%s", session_id, exc_info=True)
+            return
+        async with self._lock(session_id):
+            state = self._state(session_id)
+            native_by_key = {
+                item["native"]["key"]: item for item in native_items
+                if isinstance(item.get("native"), dict)
+            }
+            changed = False
+            for item in list(state["items"]):
+                native = item.get("native")
+                if not isinstance(native, dict):
+                    continue
+                key = native.get("key")
+                current = native_by_key.pop(key, None)
+                if current is None:
+                    state["items"].remove(item)
+                    self._remember_completed(state, str(item["id"]))
+                    changed = True
+                    continue
+                expected_prompt = item.get("nativePrompt")
+                if (expected_prompt != current["prompt"] or native != current["native"]
+                        or item.get("status") != "queued" or "error" in item):
+                    if not isinstance(expected_prompt, str):
+                        item["prompt"] = current["prompt"]
+                    item["nativePrompt"] = current["prompt"]
+                    item["native"] = current["native"]
+                    item["status"] = "queued"
+                    item.pop("error", None)
+                    changed = True
+            unbound = [item for item in state["items"] if "native" not in item]
+            for current in native_by_key.values():
+                match = next((item for item in unbound
+                              if item.get("status") in ("queued", "error")
+                              and (item.get("nativePrompt") == current["prompt"]
+                                   or item.get("prompt") == current["prompt"])), None)
+                if match is not None:
+                    match["native"] = current["native"]
+                    match["nativePrompt"] = current["prompt"]
+                    match["status"] = "queued"
+                    match.pop("error", None)
+                    unbound.remove(match)
+                else:
+                    state["items"].append(current)
+                changed = True
+            self._drop_empty(session_id)
+            if changed:
+                self._save()
+                result = self._public(session_id)
+            else:
+                result = None
+        if result is not None:
+            await self.queue_changed(session_id, result)
+
+    async def _native_contains(self, session_id: str, item: QueueItem) -> bool:
+        try:
+            return await self.native_queue.contains(session_id, item)
+        except Exception:
+            log.warning("native queue verification failed session=%s", session_id,
+                        exc_info=True)
+            return True
+
     async def _drain_one(self, session_id: str) -> None:
         async with self._lock(session_id):
             state = self._sessions.get(session_id)
@@ -357,6 +561,8 @@ class FollowupQueue:
                 expired = None
             if item["status"] != "queued":
                 return
+            if "native" in item:
+                return
             item_id = str(item["id"])
         if expired:
             await self.queue_changed(session_id, expired)
@@ -370,6 +576,8 @@ class FollowupQueue:
             item = state["items"][0]
             held_until = item.get("heldUntil")
             if item["id"] != item_id or item["status"] != "queued":
+                return
+            if "native" in item:
                 return
             if isinstance(held_until, (int, float)):
                 if held_until > time.time():
