@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
+import { motion, useReducedMotion } from 'motion/react';
 import { Virtuoso } from 'react-virtuoso';
 import { Ellipsis, Pin, Plus, Search, Settings2, X, ChevronRight } from 'lucide-react';
 import type { UseChat } from './types';
@@ -13,6 +14,7 @@ const RECENT_CONVERSATION_LIMIT = 3;
 export function Sidebar({ chat, isDrawer, onClose, onNew, onOpen, onSettings, onBrowser, onMenu }: {
   chat: UseChat; isDrawer?: boolean; onClose?: () => void; onNew: () => void; onOpen: (id: string) => void; onSettings: () => void; onBrowser: () => void; onMenu: (target: SessionMenuTarget) => void;
 }) {
+  const shouldReduceMotion = useReducedMotion();
   const [isShowingAll, setShowingAll] = useState(false);
   const isExpanded = isShowingAll || !!chat.searchQuery.trim();
   const pinnedSessions = chat.sessions.filter(session => session.isPinned);
@@ -54,8 +56,9 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onOpen, onSettings, on
       {rows.length > 0 && <Virtuoso data={rows} initialItemCount={12} defaultItemHeight={50} increaseViewportBy={150} style={{ height: '100%' }} computeItemKey={(_, row) => row.kind === 'heading' ? row.group : row.session.id} components={isExpanded ? sessionListComponents : recentSessionListComponents} context={chat} itemContent={(_, row) => {
         if (row.kind === 'heading') return <h2 {...stylex.props(styles.group)}>{row.group}</h2>;
         const session = row.session;
+        const isRunning = session.status === 'running' || session.id === chat.sessionId && chat.isRunning;
         return <div {...stylex.props(styles.session, session.id === chat.sessionId && styles.selected)}>
-          <button data-session-id={session.id} {...stylex.props(styles.sessionButton)} title={session.title || 'Untitled conversation'} aria-current={session.id === chat.sessionId ? 'page' : undefined} onClick={() => onOpen(session.id)}><span {...stylex.props(styles.sessionTitle)}>{session.title || 'Untitled conversation'}</span>{session.isPinned && <Pin {...stylex.props(styles.pin)} size={13} strokeWidth={ICON_STROKE} aria-label="Pinned" />}{(session.status === 'running' || session.unread && session.id !== chat.sessionId) && <span {...stylex.props(styles.indicator)} role="img" aria-label={session.status === 'running' ? 'Running' : 'Unread'} />}</button>
+          <button data-session-id={session.id} {...stylex.props(styles.sessionButton)} title={session.title || 'Untitled conversation'} aria-current={session.id === chat.sessionId ? 'page' : undefined} onClick={() => onOpen(session.id)}><span {...stylex.props(styles.sessionTitle)}>{session.title || 'Untitled conversation'}</span>{session.isPinned && <Pin {...stylex.props(styles.pin)} size={13} strokeWidth={ICON_STROKE} aria-label="Pinned" />}{isRunning ? <span {...stylex.props(styles.status)} role="img" aria-label="Running"><motion.span {...stylex.props(styles.spinner)} aria-hidden="true" animate={shouldReduceMotion ? undefined : { rotate: 360 }} transition={{ duration: .8, repeat: Infinity, ease: 'linear' }} /></span> : session.status === 'idle' && session.unread && session.id !== chat.sessionId ? <span {...stylex.props(styles.status)} role="img" aria-label="Unread"><span {...stylex.props(styles.indicator)} /></span> : undefined}</button>
           <button type="button" {...stylex.props(styles.options)} aria-label={'Options for ' + (session.title || 'conversation')} aria-haspopup="menu" onClick={event => onMenu({ id: session.id, title: session.title, anchor: event.currentTarget })}><Ellipsis size={17} strokeWidth={ICON_STROKE} aria-hidden="true" /></button>
         </div>;
       }} />}
@@ -95,6 +98,8 @@ const styles = stylex.create({
   sessionTitle: { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   options: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 36, height: 44, flexShrink: 0, borderWidth: 0, backgroundColor: 'transparent', color: tokens.muted },
   pin: { color: tokens.primary, flexShrink: 0 },
+  status: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 14, height: 14, flexShrink: 0 },
+  spinner: { width: '100%', height: '100%', borderRadius: '50%', borderWidth: 2, borderStyle: 'solid', borderColor: tokens.primary, borderTopColor: 'transparent' },
   indicator: { width: 6, height: 6, borderRadius: '50%', backgroundColor: tokens.primary, flexShrink: 0 },
   bottom: { borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: tokens.border, padding: '10px 14px', flexShrink: 0 },
   nav: { display: 'flex', alignItems: 'center', gap: 12, minHeight: 48, width: '100%', borderWidth: 0, backgroundColor: { default: 'transparent', ':hover': tokens.hover }, color: tokens.text, padding: '0 12px', borderRadius: 12, fontSize: '0.875rem', textAlign: 'left' },
