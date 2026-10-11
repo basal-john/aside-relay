@@ -18,6 +18,21 @@ test('workspace exposes every native section and keeps project edits in sync', a
   await expect(workspace.getByRole('button', { name: /Account & devices/ })).toBeVisible();
   await expect(workspace.getByRole('button', { name: /Native preferences/ })).toBeVisible();
 
+  const viewport = page.viewportSize()!;
+  await page.setViewportSize({ width: viewport.width, height: 640 });
+  const title = workspace.getByRole('heading', { name: 'Workspace & preferences', exact: true });
+  const close = workspace.getByRole('button', { name: 'Close', exact: true });
+  const body = workspace.locator('[data-app-dialog-body]');
+  const titleBefore = await title.boundingBox();
+  const closeBefore = await close.boundingBox();
+  await body.evaluate(element => element.scrollTo(0, element.scrollHeight));
+  await expect.poll(() => body.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  expect(await title.boundingBox()).toEqual(titleBefore);
+  expect(await close.boundingBox()).toEqual(closeBefore);
+  expect(await workspace.evaluate(element => element.scrollTop)).toBe(0);
+  await expect(workspace.getByRole('button', { name: /Native preferences/ })).toBeInViewport();
+  await page.setViewportSize(viewport);
+
   await openSection(workspace, 'Projects');
   const project = workspace.getByRole('article').filter({ hasText: 'SMURF Project' });
   await expect(project).toContainText('/workspace/smurf');

@@ -38,7 +38,7 @@ export function Dialog({ title, children, onClose, initialFocus }: { title: stri
           return resolveDialogReturnFocus(returnFocus, title);
         }}>
           <div {...stylex.props(styles.header)}><BaseDialog.Title {...stylex.props(styles.title)}>{title}</BaseDialog.Title><BaseDialog.Close render={<IconButton label="Close"><X size={22} strokeWidth={ICON_STROKE} aria-hidden="true" /></IconButton>} /></div>
-          {children}
+          <div data-app-dialog-body="" {...stylex.props(styles.body)}>{children}</div>
         </BaseDialog.Popup>
       </BaseDialog.Viewport>
     </BaseDialog.Portal>
@@ -56,8 +56,9 @@ export function DialogActions({ children }: { children: ReactNode }) {
 const styles = stylex.create({
   backdrop: { position: 'fixed', inset: 0, zIndex: 20, backgroundColor: 'rgb(0 0 0 / .5)' },
   viewport: { position: 'fixed', top: 'var(--dialog-top, 0px)', left: 0, width: '100%', height: 'var(--dialog-height, 100dvh)', zIndex: 21, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left))', overflow: 'hidden', pointerEvents: 'none' },
-  popup: { width: '100%', maxWidth: 420, maxHeight: '100%', padding: 22, borderRadius: 24, backgroundColor: tokens.surface, color: tokens.text, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, boxShadow: '0 20px 80px rgb(0 0 0 / .3)', overflowY: 'auto', overscrollBehavior: 'contain', pointerEvents: 'auto' },
-  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16 },
+  popup: { display: 'flex', flexDirection: 'column', width: '100%', maxWidth: 420, maxHeight: '100%', borderRadius: 24, backgroundColor: tokens.surface, color: tokens.text, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, boxShadow: '0 20px 80px rgb(0 0 0 / .3)', overflow: 'hidden', pointerEvents: 'auto' },
+  header: { display: 'flex', flexShrink: 0, alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '22px 22px 16px' },
+  body: { minHeight: 0, minWidth: 0, padding: '0 22px 22px', overflowY: 'auto', overscrollBehavior: 'contain' },
   title: { fontSize: '1.125rem', fontWeight: 650, lineHeight: 1.3, margin: 0, minWidth: 0 },
   description: { fontSize: '0.875rem', lineHeight: 1.6, color: tokens.muted, margin: '0 0 16px', overflowWrap: 'anywhere' },
   actions: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 20 },
