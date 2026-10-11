@@ -5,6 +5,9 @@ const UNREAD_SESSION = 'sessioncharlie03';
 const READ_SESSION = 'sessiondelta004';
 const AGENT_ALPHA = 'agentalpha001';
 const AGENT_BRAVO = 'agentbravo002';
+const WEB_ACTION_TITLE = 'Read browser reference';
+const WEB_PAGE_TITLE = 'Browser Reference';
+const WEB_PAGE_URL = 'https://example.com/browser';
 
 async function conversations(page: Page) {
   const open = page.getByRole('button', { name: 'Open conversations' });
@@ -79,7 +82,7 @@ test('activity keeps distinct stable subagent identities and meaningful web, cod
   const calls = [
     { type: 'toolCall', id: 'call-agent-alpha', name: 'subagent', args: { action: 'spawn', description: 'Compare sources', session_id: AGENT_ALPHA } },
     { type: 'toolCall', id: 'call-agent-bravo', name: 'subagent', args: { action: 'spawn', description: 'Inspect markup', session_id: AGENT_BRAVO } },
-    { type: 'toolCall', id: 'call-web', name: 'webfetch', args: { title: 'Read SMURF reference', url: 'https://example.com/smurf' } },
+    { type: 'toolCall', id: 'call-web', name: 'webfetch', args: { title: WEB_ACTION_TITLE, url: WEB_PAGE_URL } },
     { type: 'toolCall', id: 'call-code', name: 'repl', args: { title: 'Executed DOM probe', code: 'document.querySelector("main")' } },
     { type: 'toolCall', id: 'call-file', name: 'read_file', args: { path: `/Users/mj/.aside/u/0/sessions/2026_${SESSION_A}/src/activity.ts` } },
   ];
@@ -94,7 +97,7 @@ test('activity keeps distinct stable subagent identities and meaningful web, cod
     { seq: 1, role: 'assistant', ts: now + 1, responseId: 'activity-response', model: 'gpt-6.1-sol', provider: 'openai-codex', blocks: calls },
     result(2, 'call-agent-alpha', `session_id: ${AGENT_ALPHA}\nmodel: gpt-6.1-sol · high`),
     result(3, 'call-agent-bravo', `session_id: ${AGENT_BRAVO}\nmodel: gpt-6.1-sol · low`),
-    result(4, 'call-web', '→ SMURF Reference (https://example.com/smurf)'),
+    result(4, 'call-web', `→ ${WEB_PAGE_TITLE} (${WEB_PAGE_URL})`),
     result(5, 'call-code', 'DOM probe completed.'),
     result(6, 'call-file', 'export function Activity() {}'),
   ]);
@@ -131,9 +134,9 @@ test('activity keeps distinct stable subagent identities and meaningful web, cod
   expect((await iconMetadata(agentBravo)).colors).toEqual(firstBravo.colors);
   await agents.getByRole('button', { name: 'Close', exact: true }).click();
 
-  const web = page.getByRole('region', { name: 'Read SMURF reference' });
+  const web = page.getByRole('region', { name: WEB_ACTION_TITLE });
   await expect(web.locator('svg').first()).toHaveClass(/lucide-globe/);
-  await expect(web.getByRole('link', { name: /SMURF Reference/ })).toHaveAttribute('href', 'https://example.com/smurf');
+  await expect(web.getByRole('link', { name: new RegExp(WEB_PAGE_TITLE) })).toHaveAttribute('href', WEB_PAGE_URL);
   const code = page.getByRole('region', { name: 'Executed DOM probe' });
   await expect(code.locator('svg').first()).toHaveClass(/lucide-code-xml/);
   await code.getByText('Technical details', { exact: true }).click();

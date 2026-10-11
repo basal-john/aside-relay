@@ -1,16 +1,17 @@
 import { test, expect, SESSION_A } from './fixture';
 
 test('HTML visual renders in a sandbox and can switch to compact source', async ({ page, mockAside }) => {
-  mockAside.messages.get(SESSION_A)!.push({ seq: 2, role: 'assistant', ts: Date.now(), responseId: 'visual-response', model: 'gpt-6.1-sol', provider: 'openai-codex', blocks: [{ type: 'text', text: '```visual\n<!doctype html><html><body><h1>Rendered SMURF</h1></body></html>\n```' }] });
+  const visualTitle = 'Interactive workflow';
+  mockAside.messages.get(SESSION_A)!.push({ seq: 2, role: 'assistant', ts: Date.now(), responseId: 'visual-response', model: 'gpt-6.1-sol', provider: 'openai-codex', blocks: [{ type: 'text', text: '```visual\n<!doctype html><html><body><h1>' + visualTitle + '</h1></body></html>\n```' }] });
   await page.goto(`/c/${SESSION_A}`);
   const frame = page.getByTitle('HTML visual');
   await expect(frame).toBeVisible();
   await expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
   await expect(frame).toHaveAttribute('referrerpolicy', 'no-referrer');
-  await expect(frame.contentFrame().getByRole('heading', { name: 'Rendered SMURF' })).toBeVisible();
+  await expect(frame.contentFrame().getByRole('heading', { name: visualTitle })).toBeVisible();
   await page.getByRole('button', { name: 'Show visual source' }).click();
   const source = page.getByRole('region', { name: 'Visual source' });
-  await expect(source).toContainText('<h1>Rendered SMURF</h1>');
+  await expect(source).toContainText(`<h1>${visualTitle}</h1>`);
   const typography = await source.evaluate(element => {
     const style = getComputedStyle(element);
     return { fontFamily: style.fontFamily, lineHeight: Number.parseFloat(style.lineHeight) / Number.parseFloat(style.fontSize) };

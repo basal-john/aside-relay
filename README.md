@@ -1372,7 +1372,7 @@ protected app after completing that gateway's login.
 
 ## Development and architecture
 
-The [SMURF test guide](tests/README.md) maps current features to logic, backend,
+The [test guide](tests/README.md) maps current features to logic, backend,
 production smoke, and Chromium/mobile WebKit checks, including failure and
 recovery cases. Install the browser runtimes once before the aggregate suite:
 

@@ -1,9 +1,11 @@
 import type { Page, Route } from '@playwright/test';
-import { expect, SESSION_A, test } from './fixture';
+import { BROWSER_TAB_ID as TAB_ID, BROWSER_TAB_TITLE as TAB_TITLE, BROWSER_TAB_URL as TAB_URL, expect, SESSION_A, test } from './fixture';
 
-const TAB_ID = 'tab-google-001';
-const TAB_TITLE = 'Google SMURF';
-const TAB_URL = 'https://www.google.com/search?q=smurf';
+const BROWSER_INPUT = 'browser automation';
+const HISTORY_TITLE = 'Browser guide';
+const HISTORY_URL = 'https://history.example/guide';
+const BOOKMARK_TITLE = 'Browser tools';
+const BOOKMARK_URL = 'https://bookmark.example/tools';
 
 async function openBrowserSheet(page: Page) {
   await page.goto(`/c/${SESSION_A}`);
@@ -45,14 +47,14 @@ test('active tab exposes its destination and sends exact browser control command
   await sheet.getByRole('button', { name: 'Back', exact: true }).click();
   await sheet.getByRole('button', { name: 'Forward', exact: true }).click();
   await sheet.getByRole('button', { name: 'Control', exact: true }).click();
-  await sheet.getByRole('textbox', { name: 'Text to type in browser' }).fill('Smurf village');
+  await sheet.getByRole('textbox', { name: 'Text to type in browser' }).fill(BROWSER_INPUT);
   await sheet.getByRole('button', { name: 'Type', exact: true }).click();
   await sheet.getByRole('button', { name: 'Press Enter' }).click();
 
   await expect.poll(() => controls).toEqual([
     { action: 'back' },
     { action: 'forward' },
-    { action: 'type', text: 'Smurf village' },
+    { action: 'type', text: BROWSER_INPUT },
     { action: 'key', key: 'Enter' },
   ]);
 });
@@ -87,21 +89,21 @@ test('history and bookmarks open the chosen destination', async ({ page, mockAsi
     libraryRequests.push(`${url.pathname}${url.search}`);
     const kind = url.searchParams.get('kind');
     const items = kind === 'history'
-      ? [{ id: 'history-smurf', title: 'Smurf history result', url: 'https://history.example/smurf', visitCount: 5 }]
+      ? [{ id: 'history-guide', title: HISTORY_TITLE, url: HISTORY_URL, visitCount: 5 }]
       : kind === 'bookmarks'
-        ? [{ id: 'bookmark-village', title: 'Smurf village bookmark', url: 'https://bookmark.example/village' }]
+        ? [{ id: 'bookmark-tools', title: BOOKMARK_TITLE, url: BOOKMARK_URL }]
         : [];
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items }) });
   });
 
   const sheet = await openBrowserSheet(page);
   await sheet.getByRole('button', { name: 'History', exact: true }).click();
-  await expect(sheet.getByRole('button', { name: /Smurf history result/ })).toContainText('5 visits');
-  await sheet.getByRole('button', { name: /Smurf history result/ }).click();
+  await expect(sheet.getByRole('button', { name: new RegExp(HISTORY_TITLE) })).toContainText('5 visits');
+  await sheet.getByRole('button', { name: new RegExp(HISTORY_TITLE) }).click();
   await expect(sheet.getByPlaceholder('Search tabs')).toBeVisible();
 
   await sheet.getByRole('button', { name: 'Bookmarks', exact: true }).click();
-  await sheet.getByRole('button', { name: /Smurf village bookmark/ }).click();
+  await sheet.getByRole('button', { name: new RegExp(BOOKMARK_TITLE) }).click();
   await expect(sheet.getByPlaceholder('Search tabs')).toBeVisible();
 
   expect(libraryRequests).toEqual([
@@ -109,7 +111,7 @@ test('history and bookmarks open the chosen destination', async ({ page, mockAsi
     `/api/native/browser/library?kind=bookmarks&query=&session=${SESSION_A}`,
   ]);
   expect(mockAside.calls.filter(call => call.method === 'POST' && call.path === `/api/tabs?session=${SESSION_A}`).map(call => call.body)).toEqual([
-    { url: 'https://history.example/smurf' },
-    { url: 'https://bookmark.example/village' },
+    { url: HISTORY_URL },
+    { url: BOOKMARK_URL },
   ]);
 });

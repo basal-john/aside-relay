@@ -1,4 +1,4 @@
-import { test, expect, SESSION_A } from './fixture';
+import { BROWSER_TAB_TITLE, test, expect, SESSION_A } from './fixture';
 
 test('subagent approval omits always-allow and resolves optimistically', async ({ page, mockAside }) => {
   mockAside.workspace = {
@@ -30,7 +30,7 @@ test('browser preview supports keyboard movement, minimize, restore, expand, and
     return current!;
   }
   const initial = await stablePreviewBox();
-  const handle = page.getByRole('button', { name: /Open browser preview: Google SMURF/ });
+  const handle = page.getByRole('button', { name: `Open browser preview: ${BROWSER_TAB_TITLE}` });
   await handle.focus();
   await handle.press('ArrowLeft');
   await expect.poll(() => page.evaluate(() => localStorage.getItem('asideBrowserPreviewPosition'))).not.toBeNull();

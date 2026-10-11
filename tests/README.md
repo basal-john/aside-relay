@@ -1,8 +1,8 @@
-# Testing current features with SMURF
+# Testing current features
 
-This suite follows Google's [SMURF](https://testing.googleblog.com/2024/10/smurf-beyond-test-pyramid.html):
-**Speed, Maintainability, Utilization, Reliability, Fidelity**. SMURF guides where
-each check belongs; a higher test count alone does not demonstrate coverage.
+The suite exercises current user journeys, failure recovery, and concurrent
+updates. Checks use the smallest environment that can verify the behavior; a
+higher test count alone does not demonstrate coverage.
 
 ## Run from a fresh checkout
 
@@ -38,7 +38,7 @@ Browser failures save screenshots, traces, and an HTML report under
 `output/playwright/`; CI uploads that folder on failure. Inspect a trace with
 `npx playwright show-trace <trace.zip>`.
 
-## How the five criteria affect the suite
+## How the checks are organized
 
 | Criterion | Implementation | Observable result |
 | --- | --- | --- |
@@ -47,6 +47,11 @@ Browser failures save screenshots, traces, and an HTML report under
 | Utilization | One browser worker, isolated temporary files, task-owned localhost server | Tests do not compete with or modify the signed-in Aside account |
 | Reliability | Condition-based browser assertions, explicit race gates, zero retries, repeated execution command | A first-run failure remains visible; a late response can be released at a chosen point |
 | Fidelity | Production bundle, two browser engines, real ASGI routes and actual service-worker source | Compiler, DOM, routing, protocol, and bridge behavior are exercised together |
+
+The WebKit build used in Linux CI reports the unsupported `interactive-widget`
+viewport option as a console error. The fixture ignores only that exact browser
+diagnostic in WebKit. Other console errors and page errors still fail the test. The viewport
+option remains in the app for browsers that support keyboard-driven resizing.
 
 Browser contexts are recreated per test. Unexpected API requests fail the
 fixture instead of receiving a generic successful response. Backend tests set

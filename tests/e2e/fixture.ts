@@ -12,7 +12,11 @@ type Followup = { id: string; prompt: string; attachments: unknown[]; status: 'q
 type Gate = { promise: Promise<void>; release: () => void };
 type HeldRequest = { method: string; path: string | RegExp; gate: Gate; failureStatus?: number };
 
-const PREVIEW_IMAGE = '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"><rect width="100%" height="100%" fill="#111"/><text x="24" y="48" fill="white">Google SMURF</text></svg>';
+export const BROWSER_TAB_ID = 'tab-docs-001';
+export const BROWSER_TAB_TITLE = 'Streaming documentation';
+export const BROWSER_TAB_URL = 'https://example.com/docs/streaming';
+
+const PREVIEW_IMAGE = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"><rect width="100%" height="100%" fill="#111"/><text x="24" y="48" fill="white">${BROWSER_TAB_TITLE}</text></svg>`;
 
 function gate(): Gate {
   let release: () => void = () => {};
@@ -59,7 +63,7 @@ export class MockAside {
   failNextSend = false;
   workspace: Record<string, unknown> = { status: 'idle', summary: 'Two files changed.', agents: [], todos: [], outputs: [] };
   preferences: Record<string, unknown> = { followUpBehavior: 'queue', sidebarRecentChatLimit: 3, defaultProjectId: null };
-  tabs = [{ targetId: 'tab-google-001', title: 'Google SMURF', url: 'https://www.google.com/search?q=smurf', active: true, loaded: true, lastAccessed: Date.now() }];
+  tabs = [{ targetId: BROWSER_TAB_ID, title: BROWSER_TAB_TITLE, url: BROWSER_TAB_URL, active: true, loaded: true, lastAccessed: Date.now() }];
   private socket?: WebSocketRoute;
   private pendingRun?: { payload: Record<string, unknown>; gate: Gate };
   private delayedNativePage?: { cursor: string; gate: Gate };
@@ -288,13 +292,14 @@ export class MockAside {
 type Fixtures = { mockAside: MockAside };
 
 export const test = base.extend<Fixtures>({
-  mockAside: [async ({ page }, use) => {
+  mockAside: [async ({ page, browserName }, use) => {
     const mock = new MockAside(page);
     const runtimeErrors: string[] = [];
     page.on('pageerror', error => runtimeErrors.push(`pageerror: ${error.message}`));
     page.on('console', message => {
       if (message.type() !== 'error') return;
       const text = message.text();
+      if (browserName === 'webkit' && text === 'Viewport argument key "interactive-widget" not recognized and ignored.') return;
       if (/Failed to load resource: the server responded with a status of 503/.test(text)) return;
       if (mock.allowedConsoleErrors.some(pattern => pattern.test(text))) return;
       runtimeErrors.push(`console: ${text}`);

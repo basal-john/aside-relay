@@ -4,6 +4,9 @@ import { THEME_STORAGE_KEY } from '../../web/src/theme';
 
 type WorkspaceState = ReturnType<typeof workspaceState>;
 
+const PROJECT_INSTRUCTIONS = '# Project rules\nUse primary sources.';
+const RENAMED_PROJECT = 'Release review';
+
 test('workspace exposes every native section and keeps project edits in sync', async ({ page }) => {
   await page.addInitScript(key => localStorage.setItem(key, 'dark'), THEME_STORAGE_KEY);
   const state = workspaceState();
@@ -45,23 +48,23 @@ test('workspace exposes every native section and keeps project edits in sync', a
   await page.setViewportSize(viewport);
 
   await openSection(workspace, 'Projects');
-  const project = workspace.getByRole('article').filter({ hasText: 'SMURF Project' });
-  await expect(project).toContainText('/workspace/smurf');
+  const project = workspace.getByRole('article').filter({ hasText: state.project.name });
+  await expect(project).toContainText(state.project.workspacePath);
   await project.getByRole('button', { name: 'Instructions' }).click();
-  const instructions = page.getByRole('dialog', { name: 'SMURF Project instructions' });
-  await expect(instructions.getByLabel('Instructions')).toHaveValue('# SMURF rules\nUse primary sources.');
+  const instructions = page.getByRole('dialog', { name: `${state.project.name} instructions` });
+  await expect(instructions.getByLabel('Instructions')).toHaveValue(PROJECT_INSTRUCTIONS);
   await instructions.getByRole('button', { name: 'Close' }).click();
 
   await project.getByRole('button', { name: 'Edit' }).click();
   const editProject = page.getByRole('dialog', { name: 'Edit project' });
-  await editProject.getByLabel('Name').fill('SMURF Research');
+  await editProject.getByLabel('Name').fill(RENAMED_PROJECT);
   await editProject.getByRole('button', { name: 'Save project' }).click();
-  await expect(workspace.getByRole('article').filter({ hasText: 'SMURF Research' })).toBeVisible();
+  await expect(workspace.getByRole('article').filter({ hasText: RENAMED_PROJECT })).toBeVisible();
 
   await backToWorkspace(workspace);
   await openSection(workspace, 'Routines');
-  await expect(workspace.getByText('Daily SMURF brief')).toBeVisible();
-  await expect(workspace.getByText('Summarize SMURF research.')).toBeVisible();
+  await expect(workspace.getByText(state.routine.name)).toBeVisible();
+  await expect(workspace.getByText(state.routine.prompt)).toBeVisible();
 
   await backToWorkspace(workspace);
   await openSection(workspace, 'Memory');
@@ -137,12 +140,12 @@ test('preference conflict reloads native state instead of keeping a stale draft'
 });
 
 function workspaceState() {
-  const project = { id: 'project-smurf', name: 'SMURF Project', workspacePath: '/workspace/smurf', sessionId: SESSION_A };
-  const routine = { id: 'routine-daily', name: 'Daily SMURF brief', prompt: 'Summarize SMURF research.', rrule: 'FREQ=DAILY;BYHOUR=9', status: 'active' };
+  const project = { id: 'project-demo', name: 'Demo Project', workspacePath: '/workspace/demo', sessionId: SESSION_A };
+  const routine = { id: 'routine-daily', name: 'Daily release brief', prompt: 'Summarize recent release changes.', rrule: 'FREQ=DAILY;BYHOUR=9', status: 'active' };
   const memories = { preferences: { enabled: true, episodicRetentionDays: 90, dreamingMinHours: 12, dreamingMinSessions: 4 }, files: [{ name: 'Research preferences', path: 'memory/preferences.md', lastUpdatedAt: '2026-10-11T01:00:00Z' }] };
   const contextAwareness = { settings: { enabled: true, captureTypedText: false, screenOcr: true, pausedUntil: null, rules: [] }, status: { state: 'active' }, applications: [{ name: 'Chrome' }] };
   const skills = [{ name: 'Research helper', path: 'user/research-helper', description: 'Repeatable research workflow.', enabled: true, group: 'user' }];
-  const connections = { servers: [{ name: 'Local MCP', transport: 'stdio', command: 'smurf-mcp', enabled: true, status: 'connected' }], inventories: { 'Local MCP': { tools: [{ name: 'Search web', description: 'Search trusted sources.' }] } } };
+  const connections = { servers: [{ name: 'Local MCP', transport: 'stdio', command: 'demo-mcp', enabled: true, status: 'connected' }], inventories: { 'Local MCP': { tools: [{ name: 'Search web', description: 'Search trusted sources.' }] } } };
   const providers = { connectedProviders: [{ providerId: 'openai-codex', name: 'OpenAI Codex', state: 'connected', type: 'oauth' }], availableModels: [{ id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', provider: 'openai-codex' }] };
   const account = { profile: { name: 'Mina', email: 'mina@example.com', subscriptionPlan: 'Plus' }, devices: [{ id: 'device-mac', deviceName: 'MacBook Pro', platform: 'macOS', appVersion: '1.26.1010.2149', isCurrent: true, lastSeenAt: '2026-10-11T01:00:00Z' }] };
   const preferences = { defaultPermissionMode: 'default', followUpBehavior: 'queue', agentTabs: { closeAfterIdleMinutes: 15 }, agentTaskNotifications: { needsAttention: true, taskCompletions: true, routineCompletions: false }, completionSound: { enabled: true }, sidebarRecentChatLimit: 10, sidepanelSessionOnTabChange: 'new-session', timezone: 'Asia/Seoul' };
@@ -158,8 +161,8 @@ async function installWorkspaceApi(page: Page, state: WorkspaceState) {
 
     if (method === 'GET' && path === '/api/native/workspace') return reply(route, workspaceRoot(state));
     if (method === 'GET' && path === '/api/native/workspace/projects') return reply(route, [state.project]);
-    if (method === 'GET' && path === '/api/native/workspace/projects/project-smurf/instructions') return reply(route, { content: '# SMURF rules\nUse primary sources.', lastUpdatedAt: '2026-10-11T01:00:00Z' });
-    if (method === 'PATCH' && path === '/api/native/workspace/projects/project-smurf') {
+    if (method === 'GET' && path === `/api/native/workspace/projects/${state.project.id}/instructions`) return reply(route, { content: PROJECT_INSTRUCTIONS, lastUpdatedAt: '2026-10-11T01:00:00Z' });
+    if (method === 'PATCH' && path === `/api/native/workspace/projects/${state.project.id}`) {
       Object.assign(state.project, request.postDataJSON());
       return reply(route, state.project);
     }
