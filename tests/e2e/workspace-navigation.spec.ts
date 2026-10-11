@@ -1,9 +1,11 @@
 import type { Page, Route } from '@playwright/test';
 import { expect, SESSION_A, test } from './fixture';
+import { THEME_STORAGE_KEY } from '../../web/src/theme';
 
 type WorkspaceState = ReturnType<typeof workspaceState>;
 
 test('workspace exposes every native section and keeps project edits in sync', async ({ page }) => {
+  await page.addInitScript(key => localStorage.setItem(key, 'dark'), THEME_STORAGE_KEY);
   const state = workspaceState();
   state.skills.push(...Array.from({ length: 49 }, (_, index) => ({ ...state.skills[0], name: `Helper ${index}`, path: `user/helper-${index}` })));
   await installWorkspaceApi(page, state);
@@ -73,9 +75,24 @@ test('workspace exposes every native section and keeps project edits in sync', a
 
   await backToWorkspace(workspace);
   await openSection(workspace, 'Skills');
+  const skillsHeader = workspace.locator('[data-app-dialog-header]');
+  const headerBefore = await skillsHeader.boundingBox();
+  await workspace.locator('[data-app-dialog-body]').evaluate(element => element.scrollTo(0, element.scrollHeight));
+  await expect.poll(() => workspace.locator('[data-app-dialog-body]').evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  expect(await skillsHeader.boundingBox()).toEqual(headerBefore);
+  await expect(workspace.getByRole('button', { name: 'Back to workspace' })).toBeInViewport();
+  await expect(workspace.getByRole('button', { name: 'Close', exact: true })).toBeInViewport();
+  await workspace.locator('[data-app-dialog-body]').evaluate(element => element.scrollTo(0, 0));
   await expect(workspace.getByRole('heading', { name: 'Research helper', exact: true })).toBeVisible();
   await expect(workspace.getByText('Local catalog')).toBeVisible();
   await expect(workspace.getByText('Visual browse')).toBeVisible();
+  await expect(workspace.getByRole('button', { name: 'Add skill', exact: true })).toBeVisible();
+  await workspace.getByRole('button', { name: 'Import', exact: true }).click();
+  const importSkill = page.getByRole('dialog', { name: 'Import skill' });
+  await expect(importSkill.getByLabel('Source folder')).toBeVisible();
+  await importSkill.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(importSkill).toBeHidden();
+  await expect(workspace).toHaveCSS('opacity', '1');
 
   await backToWorkspace(workspace);
   await openSection(workspace, 'Plugins & MCP');
@@ -98,6 +115,8 @@ test('workspace exposes every native section and keeps project edits in sync', a
   await openSection(workspace, 'Native preferences');
   await expect(workspace.getByLabel('Follow-up behavior')).toHaveValue('queue');
   await expect(workspace.getByLabel('Timezone')).toHaveValue('Asia/Seoul');
+  await workspace.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(workspace).toBeHidden();
 });
 
 test('preference conflict reloads native state instead of keeping a stale draft', async ({ page, mockAside }) => {
@@ -191,19 +210,27 @@ async function openWorkspace(page: Page) {
   await page.getByRole('button', { name: 'Settings' }).click();
   const settings = page.getByRole('dialog', { name: 'Settings' });
   await settings.getByRole('button', { name: 'Workspace & preferences' }).click();
-  const workspace = page.getByRole('dialog', { name: 'Workspace & preferences' });
-  await expect(workspace.getByRole('heading', { name: 'Workspace', exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Workspace & preferences' })).toBeVisible();
+  const workspace = page.locator('[data-app-dialog]').first();
+  await expect(workspace.getByRole('heading', { name: 'Workspace & preferences', exact: true })).toBeVisible();
+  await expect(workspace.getByRole('heading', { level: 2 })).toHaveCount(1);
   return workspace;
 }
 
 async function openSection(workspace: ReturnType<Page['getByRole']>, name: string) {
   await workspace.getByRole('button', { name: new RegExp(`^${name}`) }).click();
-  await expect(workspace.getByRole('heading', { name, exact: true }).first()).toBeVisible();
+  await expect(workspace).toHaveAccessibleName(name);
+  await expect(workspace.getByRole('heading', { name, exact: true })).toHaveCount(1);
+  await expect(workspace.getByRole('heading', { level: 2 })).toHaveCount(1);
+  await expect(workspace.getByRole('button', { name: 'Back to workspace' })).toBeFocused();
+  expect(await workspace.locator('[data-app-dialog-body]').evaluate(element => element.scrollTop)).toBe(0);
 }
 
 async function backToWorkspace(workspace: ReturnType<Page['getByRole']>) {
   await workspace.getByRole('button', { name: 'Back to workspace' }).click();
-  await expect(workspace.getByRole('heading', { name: 'Workspace', exact: true })).toBeVisible();
+  await expect(workspace).toHaveAccessibleName('Workspace & preferences');
+  await expect(workspace.getByRole('heading', { name: 'Workspace & preferences', exact: true })).toBeVisible();
+  await expect(workspace.getByRole('button', { name: 'Close', exact: true })).toBeFocused();
 }
 
 function reply(route: Route, body: unknown, status = 200) {

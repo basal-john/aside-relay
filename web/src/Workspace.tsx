@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { Archive, Bot, Brain, CalendarClock, ChevronLeft, CircleUserRound, FolderKanban, History, KeyRound, Pause, Play, Plug, Plus, RefreshCw, Save, ShieldCheck, Sparkles, Trash2, Wrench } from 'lucide-react';
+import { Archive, Bot, Brain, CalendarClock, CircleUserRound, FolderKanban, History, KeyRound, Pause, Play, Plug, Plus, RefreshCw, Save, ShieldCheck, Sparkles, Trash2, Wrench } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { UseChat } from './types';
 import { Button } from './Button';
@@ -48,9 +48,10 @@ const SECTION_META: { id: WorkspaceSection; title: string; description: string; 
   { id: 'preferences', title: 'Native preferences', description: 'Permissions, queueing and cleanup', icon: Wrench },
 ];
 
-export function Workspace({ chat, notify, onOpenSession, onNewProjectChat, initialSection }: {
+export function Workspace({ chat, notify, onClose, onOpenSession, onNewProjectChat, initialSection }: {
   chat: UseChat;
   notify: (text: string, kind?: 'error' | 'success') => void;
+  onClose: () => void;
   onOpenSession?: (sessionId: string) => void;
   onNewProjectChat?: (projectId: string) => void;
   initialSection?: WorkspaceSection;
@@ -148,22 +149,19 @@ export function Workspace({ chat, notify, onOpenSession, onNewProjectChat, initi
 
   const availableSections = useMemo(() => SECTION_META.filter(item => data?.capabilities[item.id]), [data?.capabilities]);
   const selected = section && data?.capabilities[section] ? section : undefined;
+  const selectedMeta = SECTION_META.find(item => item.id === selected);
 
-  if (isLoading && !data) return <div role="status" {...stylex.props(styles.center)}><RefreshCw aria-hidden="true" size={20} strokeWidth={ICON_STROKE} /><span>Loading native workspace…</span></div>;
-  if (error && !data) return <EmptyState icon={ShieldCheck} title="Workspace unavailable" detail={error} action={<Button onClick={() => void refresh()}>Try again</Button>} />;
-  if (!data?.available) return <EmptyState icon={ShieldCheck} title="Native workspace unavailable" detail="Connect to a supported Aside profile to manage native settings." />;
-
-  return <div {...stylex.props(styles.workspace)}>
+  return <Dialog title={selectedMeta?.title ?? 'Workspace & preferences'} description={selectedMeta?.description ?? 'Settings stored by the connected Aside profile.'} back={selected ? { label: 'Back to workspace', onClick: () => setSection(undefined) } : undefined} onClose={onClose}>
+    {isLoading && !data ? <div role="status" {...stylex.props(styles.center)}><RefreshCw aria-hidden="true" size={20} strokeWidth={ICON_STROKE} /><span>Loading native workspace…</span></div> : error && !data ? <EmptyState icon={ShieldCheck} title="Workspace unavailable" detail={error} action={<Button onClick={() => void refresh()}>Try again</Button>} /> : !data?.available ? <EmptyState icon={ShieldCheck} title="Native workspace unavailable" detail="Connect to a supported Aside profile to manage native settings." /> : <div {...stylex.props(styles.workspace)}>
     {selected ? <>
-      <div {...stylex.props(styles.sectionHeader)}><button type="button" aria-label="Back to workspace" {...stylex.props(styles.back)} onClick={() => setSection(undefined)}><ChevronLeft size={22} strokeWidth={ICON_STROKE} aria-hidden="true" /></button><div><h2 {...stylex.props(styles.pageTitle)}>{SECTION_META.find(item => item.id === selected)?.title}</h2><p {...stylex.props(styles.pageDescription)}>{SECTION_META.find(item => item.id === selected)?.description}</p></div></div>
       <SectionContent section={selected} value={sectionData[selected] ?? data.sections[selected]} capabilities={data.capabilities} preferenceReset={preferenceReset} isMutating={isMutating} mutate={mutate} read={read} openForm={setForm} onOpenSession={onOpenSession} onNewProjectChat={onNewProjectChat} />
     </> : <>
-      <div {...stylex.props(styles.overviewHeader)}><div><h2 {...stylex.props(styles.pageTitle)}>Workspace</h2><p {...stylex.props(styles.pageDescription)}>Settings stored by the connected Aside profile.</p></div></div>
       <div {...stylex.props(styles.grid)}>{availableSections.map(item => <SectionTile key={item.id} {...item} value={data.sections[item.id]} onClick={() => setSection(item.id)} />)}</div>
       {!availableSections.length ? <EmptyState icon={ShieldCheck} title="No native controls available" detail="This Aside version did not report any supported workspace capabilities." /> : undefined}
     </>}
     {form ? <EditDialog form={form} isSaving={isMutating} onClose={() => setForm(undefined)} /> : undefined}
-  </div>;
+  </div>}
+  </Dialog>;
 }
 
 function SectionTile({ title, description, icon: Icon, value, onClick }: { title: string; description: string; icon: LucideIcon; value: unknown; onClick: () => void }) {
@@ -197,7 +195,7 @@ function SectionContent({ section, value, capabilities, preferenceReset, isMutat
 
 function Projects({ value, isMutating, mutate, read, openForm, canEditInstructions, onOpenSession, onNewProjectChat }: SectionProps & { canEditInstructions: boolean; onOpenSession?: (sessionId: string) => void; onNewProjectChat?: (projectId: string) => void }) {
   const items = itemArray(value);
-  return <SectionList title="Projects" actionLabel="New project" onAction={() => openForm(projectForm())} empty="No projects"><div {...stylex.props(styles.list)}>{items.map(item => {
+  return <SectionList actionLabel="New project" onAction={() => openForm(projectForm())} empty="No projects"><div {...stylex.props(styles.list)}>{items.map(item => {
     const id = itemId(item, 'projectId'); const isArchived = bool(item.archived) || Boolean(item.archivedAt);
     return <ResourceCard key={id} title={label(item)} detail={text(item.workspacePath) || text(item.workingDirectory) || text(item.path) || text(item.instructions)} badge={isArchived ? 'Archived' : undefined}>
       <CardActions><Button size="compact" onClick={() => openForm(projectForm(item, values => mutate({ path: `/projects/${encodeURIComponent(id)}`, method: 'PATCH', body: values, success: 'Project updated.' })))}>Edit</Button>{canEditInstructions ? <Button size="compact" onClick={() => void read(`/projects/${encodeURIComponent(id)}/instructions`).then(result => { const instructions = object(result); openForm({ title: `${label(item)} instructions`, description: 'Instructions saved as AGENTS.md in the project workspace.', submitLabel: 'Save instructions', fields: [{ key: 'content', label: 'Instructions', value: text(instructions.content), kind: 'textarea' }], onSubmit: values => mutate({ path: `/projects/${encodeURIComponent(id)}/instructions`, method: 'PATCH', body: { content: values.content }, success: 'Project instructions updated.' }) }); })}>Instructions</Button> : undefined}{onNewProjectChat && !isArchived ? <Button size="compact" variant="primary" onClick={() => onNewProjectChat(id)}>New chat</Button> : undefined}{text(item.sessionId) && onOpenSession ? <Button size="compact" onClick={() => onOpenSession(text(item.sessionId))}>Open chat</Button> : undefined}{!isArchived ? <Button size="compact" disabled={isMutating} onClick={() => void mutate({ path: `/projects/${encodeURIComponent(id)}/archive`, success: 'Project archived.' })}><Archive size={15} />Archive</Button> : undefined}<Button size="compact" variant="danger" disabled={isMutating} onClick={() => openForm(confirmForm('Delete project?', 'The project entry will be removed.', () => mutate({ path: `/projects/${encodeURIComponent(id)}`, method: 'DELETE', success: 'Project deleted.' })))}><Trash2 size={15} />Delete</Button></CardActions>
@@ -215,7 +213,7 @@ function Projects({ value, isMutating, mutate, read, openForm, canEditInstructio
 function Routines({ value, isMutating, mutate, read, openForm }: SectionProps) {
   const items = itemArray(value);
   const [histories, setHistories] = useState<Record<string, JsonObject[]>>({});
-  return <SectionList title="Routines" actionLabel="New routine" onAction={() => openForm(routineForm())} empty="No routines"><div {...stylex.props(styles.list)}>{items.map(item => {
+  return <SectionList actionLabel="New routine" onAction={() => openForm(routineForm())} empty="No routines"><div {...stylex.props(styles.list)}>{items.map(item => {
     const id = itemId(item, 'routineId'); const isPaused = bool(item.paused) || text(item.status) === 'paused';
     return <ResourceCard key={id} title={label(item)} detail={[text(item.schedule), text(item.lastRunAt) ? `Last run ${dateText(item.lastRunAt)}` : ''].filter(Boolean).join(' · ')} badge={isPaused ? 'Paused' : text(item.status)}>
       {text(item.prompt) ? <p {...stylex.props(styles.body)}>{text(item.prompt)}</p> : undefined}
@@ -252,7 +250,7 @@ function Memories({ value, isMutating, mutate, read, openForm }: SectionProps) {
     fields: [{ key: 'enabled', label: 'Use memory', value: bool(preferences.enabled), kind: 'checkbox' }, { key: 'episodicRetentionDays', label: 'Retention days', value: text(preferences.episodicRetentionDays), kind: 'number', placeholder: '90' }, { key: 'dreamingMinHours', label: 'Minimum hours before memory generation', value: text(preferences.dreamingMinHours), kind: 'number' }, { key: 'dreamingMinSessions', label: 'Minimum sessions before memory generation', value: text(preferences.dreamingMinSessions), kind: 'number' }],
     onSubmit: values => mutate({ path: '/memories/preferences', method: 'PATCH', body: { enabled: values.enabled, episodicRetentionDays: numeric(values.episodicRetentionDays), dreamingMinHours: numeric(values.dreamingMinHours), dreamingMinSessions: numeric(values.dreamingMinSessions) }, success: 'Memory preferences updated.' }),
   });
-  return <SectionList title="Memory" actionLabel="Retention" onAction={editPreferences} empty="No saved memories"><div {...stylex.props(styles.list)}>{items.map(item => { const path = text(item.path); return <ResourceCard key={itemId(item, 'path')} title={label(item)} detail={[path, dateText(item.lastUpdatedAt)].filter(Boolean).join(' · ')}><CardActions><Button size="compact" onClick={() => void editMemory(item)}>Edit</Button></CardActions></ResourceCard>; })}</div></SectionList>;
+  return <SectionList actionLabel="Retention" onAction={editPreferences} empty="No saved memories"><div {...stylex.props(styles.list)}>{items.map(item => { const path = text(item.path); return <ResourceCard key={itemId(item, 'path')} title={label(item)} detail={[path, dateText(item.lastUpdatedAt)].filter(Boolean).join(' · ')}><CardActions><Button size="compact" onClick={() => void editMemory(item)}>Edit</Button></CardActions></ResourceCard>; })}</div></SectionList>;
 }
 
 function ContextAwareness({ value, isMutating, mutate, openForm }: SectionProps) {
@@ -277,7 +275,7 @@ function Skills({ value, isMutating, mutate, read, openForm, canViewCatalog, can
     const result = await read(`/skills/${encodeURIComponent(path)}${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`);
     openForm(skillForm({ ...item, ...object(result) }));
   };
-  return <SectionList title="Skills" actionLabel="Add skill" onAction={() => openForm(skillForm())} secondaryAction={<Button size="compact" onClick={() => openForm({ title: 'Import skill', description: 'Import a skill from a local folder.', submitLabel: 'Import', fields: [{ key: 'sourcePath', label: 'Source folder', placeholder: '/Users/me/skill', required: true }, { key: 'projectId', label: 'Project ID (optional)' }], onSubmit: values => mutate({ path: '/skills/import', body: values, success: 'Skill imported.' }) })}>Import</Button>} empty="No skills"><div {...stylex.props(styles.list)}>{items.map(item => {
+  return <SectionList actionLabel="Add skill" onAction={() => openForm(skillForm())} secondaryAction={<Button size="compact" onClick={() => openForm({ title: 'Import skill', description: 'Import a skill from a local folder.', submitLabel: 'Import', fields: [{ key: 'sourcePath', label: 'Source folder', placeholder: '/Users/me/skill', required: true }, { key: 'projectId', label: 'Project ID (optional)' }], onSubmit: values => mutate({ path: '/skills/import', body: values, success: 'Skill imported.' }) })}>Import</Button>} empty="No skills"><div {...stylex.props(styles.list)}>{items.map(item => {
     const path = text(item.path) || text(item.skillPath) || itemId(item); const isWritable = text(item.group) === 'user' || bool(item.writable);
     return <ResourceCard key={path} title={label(item)} detail={path} badge={bool(item.enabled) ? 'Enabled' : undefined}><p {...stylex.props(styles.body)}>{text(item.description)}</p><CardActions>{isWritable ? <><Button size="compact" onClick={() => void editSkill(item)}>Edit</Button><Button size="compact" variant="danger" disabled={isMutating} onClick={() => openForm(confirmForm('Delete skill?', 'The selected skill will be removed.', () => mutate({ path: `/skills/${encodeURIComponent(path)}`, method: 'DELETE', success: 'Skill deleted.' })))}>Delete</Button></> : canCustomize ? <Button size="compact" disabled={isMutating} onClick={() => void mutate({ path: `/skills/${encodeURIComponent(path)}/copy`, body: { projectId: item.projectId ?? null }, success: 'Skill copied for customization.' })}>Customize</Button> : undefined}</CardActions></ResourceCard>;
   })}</div>{catalog ? <div {...stylex.props(styles.catalog)}><h4 {...stylex.props(styles.listTitle)}>Local catalog</h4>{Object.entries(object(catalog.groups)).map(([group, skills]) => { const entries = itemArray(skills); return <div key={group} {...stylex.props(styles.catalogGroup)}><div {...stylex.props(styles.catalogRow)}><span>{humanize(group)}</span><span {...stylex.props(ui.muted)}>{entries.length}</span></div>{entries.length ? <div {...stylex.props(styles.chips)}>{entries.map(skill => <span key={itemId(skill)} {...stylex.props(styles.chip)}>{label(skill)}</span>)}</div> : undefined}</div>; })}</div> : undefined}</SectionList>;
@@ -301,7 +299,7 @@ function Connections({ value, isMutating, mutate, read, openForm, canEditToolPer
     const didSave = await mutate({ path: '/connections/tools/permissions', method: 'PATCH', body: { tool, policy }, success: 'Tool permission updated.' });
     if (!didSave) setToolPolicies(current => ({ ...current, policies: { ...current.policies, [tool]: previous } }));
   };
-  return <div {...stylex.props(styles.stack)}><SectionList title="Plugins & MCP" actionLabel="New connection" onAction={() => openForm(connectionForm())} empty="No connections"><div {...stylex.props(styles.list)}>{items.map(item => {
+  return <div {...stylex.props(styles.stack)}><SectionList actionLabel="New connection" onAction={() => openForm(connectionForm())} empty="No connections"><div {...stylex.props(styles.list)}>{items.map(item => {
     const name = text(item.name) || itemId(item); const isConnected = bool(item.connected) || text(item.status) === 'connected';
     return <ResourceCard key={name} title={label(item)} detail={text(item.url) || text(item.command)} badge={text(item.status)}><CardActions><Button size="compact" onClick={() => openForm(connectionForm(item))}>Edit</Button><Button size="compact" disabled={isMutating} onClick={() => void mutate({ path: `/connections/${encodeURIComponent(name)}/test`, success: 'Connection test finished.' })}>Test</Button><Button size="compact" disabled={isMutating} onClick={() => void mutate({ path: `/connections/${encodeURIComponent(name)}/${isConnected ? 'cancel' : 'connect'}`, success: isConnected ? 'Connection disconnected.' : 'Connection started.' })}>{isConnected ? 'Disconnect' : 'Connect'}</Button><Button size="compact" variant="danger" onClick={() => openForm(confirmForm('Delete connection?', 'The connection configuration will be removed.', () => mutate({ path: `/connections/${encodeURIComponent(name)}`, method: 'DELETE', success: 'Connection deleted.' })))}>Delete</Button></CardActions></ResourceCard>;
   })}</div></SectionList>{toolPolicies.tools.length ? <SectionList title="Tool permissions" empty="No tools"><div {...stylex.props(styles.list)}>{toolPolicies.tools.map(tool => { const name = text(tool.name) || text(tool.id) || itemId(tool); return <div key={name} {...stylex.props(styles.permissionRow)}><span {...stylex.props(styles.cardCopy)}><strong>{label(tool)}</strong>{text(tool.description) ? <span {...stylex.props(ui.muted)}>{text(tool.description)}</span> : undefined}</span><select aria-label={`${label(tool)} permission`} value={toolPolicies.policies[name] ?? 'inherit'} disabled={isMutating} {...stylex.props(styles.compactSelect)} onChange={event => void updateToolPolicy(name, event.target.value)}><option value="inherit">Default</option><option value="allow">Allow</option><option value="ask">Ask</option><option value="deny">Deny</option></select></div>; })}</div></SectionList> : undefined}{Object.keys(inventories).length ? <SectionList title="Available tools" empty="No tools"><div {...stylex.props(styles.list)}>{Object.entries(inventories).map(([name, inventory]) => { const tools = itemArray(object(inventory).tools); return <ResourceCard key={name} title={name} detail={`${tools.length} tool${tools.length === 1 ? '' : 's'}`}>{tools.length ? <p {...stylex.props(styles.body)}>{tools.map(tool => label(tool)).join(', ')}</p> : undefined}</ResourceCard>; })}</div></SectionList> : undefined}</div>;
@@ -317,7 +315,7 @@ function Connections({ value, isMutating, mutate, read, openForm, canEditToolPer
 
 function Providers({ value, isMutating, mutate, openForm }: SectionProps) {
   const root = object(value); const connections = itemArray(root.connectedProviders); const models = itemArray(root.availableModels); const connectionById = new Map(connections.map(item => [text(item.providerId), item])); const providerIds = [...new Set([...connections.map(item => text(item.providerId)), ...models.map(item => text(item.provider)).filter(Boolean)])];
-  return <SectionList title="AI providers" actionLabel="Custom provider" onAction={() => openForm({ title: 'Add custom provider', description: 'Credentials are write-only and are never returned by the server.', submitLabel: 'Add provider', fields: [{ key: 'id', label: 'Provider ID', required: true }, { key: 'name', label: 'Display name', required: true }, { key: 'baseUrl', label: 'API base URL', placeholder: 'https://…', required: true }, { key: 'modelId', label: 'Model ID', required: true }, { key: 'apiKey', label: 'API key', kind: 'password', required: true }], onSubmit: values => mutate({ path: '/providers/custom', body: { providers: { [String(values.id)]: { name: values.name, api: 'openai-completions', baseUrl: values.baseUrl, apiKey: values.apiKey, authHeader: 'Authorization', models: [{ id: values.modelId, name: values.modelId }] } } }, success: 'Provider added.' }) })} empty="No providers"><div {...stylex.props(styles.list)}>{providerIds.map(id => {
+  return <SectionList actionLabel="Custom provider" onAction={() => openForm({ title: 'Add custom provider', description: 'Credentials are write-only and are never returned by the server.', submitLabel: 'Add provider', fields: [{ key: 'id', label: 'Provider ID', required: true }, { key: 'name', label: 'Display name', required: true }, { key: 'baseUrl', label: 'API base URL', placeholder: 'https://…', required: true }, { key: 'modelId', label: 'Model ID', required: true }, { key: 'apiKey', label: 'API key', kind: 'password', required: true }], onSubmit: values => mutate({ path: '/providers/custom', body: { providers: { [String(values.id)]: { name: values.name, api: 'openai-completions', baseUrl: values.baseUrl, apiKey: values.apiKey, authHeader: 'Authorization', models: [{ id: values.modelId, name: values.modelId }] } } }, success: 'Provider added.' }) })} empty="No providers"><div {...stylex.props(styles.list)}>{providerIds.map(id => {
     const connection = connectionById.get(id); const providerModels = models.filter(model => text(model.provider) === id); const isCustom = text(connection?.type) === 'custom'; const canEditApiKey = text(connection?.credentialType) === 'api_key' || text(connection?.type) === 'api_key';
     return <ResourceCard key={id} title={text(connection?.name) || id} detail={providerModels.length ? `${providerModels.length} model${providerModels.length === 1 ? '' : 's'}` : id} badge={connection ? text(connection.state) || 'Connected' : 'Available'}><CardActions>{canEditApiKey ? <Button size="compact" onClick={() => openForm({ title: `Update ${id} credential`, description: 'The credential is sent once and will not be shown again.', submitLabel: 'Save credential', fields: [{ key: 'credential', label: 'API key', kind: 'password', required: true }], onSubmit: values => mutate({ path: `/providers/${encodeURIComponent(id)}/credential`, body: { credential: { type: 'api_key', key: values.credential } }, success: 'Credential updated.' }) })}><KeyRound size={15} />Credential</Button> : undefined}{isCustom ? <Button size="compact" variant="danger" disabled={isMutating} onClick={() => openForm(confirmForm('Delete provider?', 'The custom provider configuration will be removed.', () => mutate({ path: `/providers/custom/${encodeURIComponent(id)}`, method: 'DELETE', success: 'Provider deleted.' })))}>Delete</Button> : undefined}</CardActions></ResourceCard>;
   })}</div></SectionList>;
@@ -346,9 +344,9 @@ type SectionProps = {
   openForm: (dialog: FormDialog) => void;
 };
 
-function SectionList({ title, actionLabel, onAction, secondaryAction, empty, children }: { title: string; actionLabel?: string; onAction?: () => void; secondaryAction?: React.ReactNode; empty: string; children?: React.ReactNode }) {
+function SectionList({ title, actionLabel, onAction, secondaryAction, empty, children }: { title?: string; actionLabel?: string; onAction?: () => void; secondaryAction?: React.ReactNode; empty: string; children?: React.ReactNode }) {
   const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children);
-  return <section><div {...stylex.props(styles.listHeader)}><h3 {...stylex.props(styles.listTitle)}>{title}</h3><div {...stylex.props(styles.inlineActions)}>{secondaryAction}{actionLabel && onAction ? <Button size="compact" variant="primary" onClick={onAction}><Plus size={16} strokeWidth={ICON_STROKE} aria-hidden="true" />{actionLabel}</Button> : undefined}</div></div>{hasChildren ? children : <p {...stylex.props(styles.empty)}>{empty}</p>}</section>;
+  return <section>{(title || actionLabel || secondaryAction) && <div {...stylex.props(styles.listHeader, !title && styles.listActions)}>{title && <h3 {...stylex.props(styles.listTitle)}>{title}</h3>}<div {...stylex.props(styles.inlineActions)}>{secondaryAction}{actionLabel && onAction ? <Button size="compact" variant="primary" onClick={onAction}><Plus size={16} strokeWidth={ICON_STROKE} aria-hidden="true" />{actionLabel}</Button> : undefined}</div></div>}{hasChildren ? children : <p {...stylex.props(styles.empty)}>{empty}</p>}</section>;
 }
 
 function ResourceCard({ title, detail, badge, children }: { title: string; detail?: string; badge?: string; children?: React.ReactNode }) {
@@ -398,11 +396,6 @@ function permissionPolicies(value: unknown) {
 const styles = stylex.create({
   workspace: { display: 'flex', flexDirection: 'column', minHeight: 0, gap: 20, padding: '0 2px 24px', color: tokens.text },
   center: { minHeight: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, color: tokens.muted },
-  overviewHeader: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
-  sectionHeader: { display: 'flex', alignItems: 'center', gap: 10 },
-  back: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: 44, height: 44, padding: 0, borderWidth: 0, borderRadius: '50%', backgroundColor: { default: tokens.surface, ':hover': tokens.hover }, color: tokens.text },
-  pageTitle: { fontSize: '1.125rem', fontWeight: 650, lineHeight: 1.3, margin: 0 },
-  pageDescription: { margin: '3px 0 0', color: tokens.muted, fontSize: '.8125rem', lineHeight: 1.5 },
   grid: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10, '@media (max-width: 520px)': { gridTemplateColumns: 'minmax(0, 1fr)' } },
   tile: { display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, minHeight: 82, padding: 14, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, borderRadius: 18, backgroundColor: { default: tokens.surface, ':hover': tokens.hover }, color: tokens.text, textAlign: 'left' },
   tileIcon: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: 38, height: 38, borderRadius: 12, backgroundColor: tokens.hover, color: tokens.primary },
@@ -410,6 +403,7 @@ const styles = stylex.create({
   count: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, minWidth: 24, height: 24, padding: '0 7px', borderRadius: 12, backgroundColor: tokens.hover, color: tokens.muted, fontSize: '.75rem', lineHeight: 1, fontVariantNumeric: 'tabular-nums' },
   stack: { display: 'flex', flexDirection: 'column', gap: 20 },
   listHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
+  listActions: { justifyContent: 'flex-end' },
   listTitle: { margin: 0, fontSize: '.875rem', fontWeight: 650 },
   inlineActions: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   list: { display: 'flex', flexDirection: 'column', gap: 10 },
