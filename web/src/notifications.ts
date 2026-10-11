@@ -1,3 +1,4 @@
+import { APP_NAME } from './brand';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { UseChat } from './types';
 
@@ -6,10 +7,10 @@ const NOTIFICATION_TIMEOUT_MS = 10_000;
 const ENABLE_ERROR = 'Could not enable notifications. Try again.';
 
 function unavailableReason() {
-  if (!window.isSecureContext) return 'Open Aside over HTTPS to enable notifications.';
+  if (!window.isSecureContext) return `Open ${APP_NAME} over HTTPS to enable notifications.`;
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const isInstalled = matchMedia('(display-mode: standalone)').matches || ('standalone' in navigator && navigator.standalone === true);
-  if (isIOS && !isInstalled) return 'Add Aside to your Home Screen, then open it to enable notifications.';
+  if (isIOS && !isInstalled) return `Add ${APP_NAME} to your Home Screen, then open it to enable notifications.`;
   if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return 'Notifications are not supported in this browser.';
 }
 

@@ -28,7 +28,7 @@ from contextlib import closing, contextmanager
 
 import config
 
-log = logging.getLogger("aside-remote.daemondb")
+log = logging.getLogger("aside-relay.daemondb")
 
 DB = config.ASIDE_USER_DIR / "state.db"
 

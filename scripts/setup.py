@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""aside-remote guided setup.
+"""aside-relay guided setup.
 
 Interactive:      python3 scripts/setup.py
 Non-interactive:  python3 scripts/setup.py --yes            (defaults, local-only)
@@ -8,9 +8,9 @@ Uninstall:        python3 scripts/setup.py --uninstall-service
 
 Everything the wizard writes can also be done by hand — see README "Manual setup".
 It writes exactly three things, all outside the repo:
-  ~/.aside-remote/token   bearer token (0600)
-  ~/.aside-remote/env     KEY=VALUE config (0600)
-  ~/Library/LaunchAgents/com.aside-remote.plist   (only if you opt in)
+  ~/.aside-relay/token   bearer token (0600)
+  ~/.aside-relay/env     KEY=VALUE config (0600)
+  ~/Library/LaunchAgents/com.aside-relay.plist   (only if you opt in)
 """
 from __future__ import annotations
 
@@ -26,9 +26,9 @@ from pathlib import Path
 
 HOME = Path.home()
 REPO = Path(__file__).resolve().parent.parent
-TOKEN_FILE = HOME / ".aside-remote/token"
-ENV_FILE = HOME / ".aside-remote/env"
-PLIST = HOME / "Library/LaunchAgents/com.aside-remote.plist"
+TOKEN_FILE = HOME / ".aside-relay/token"
+ENV_FILE = HOME / ".aside-relay/env"
+PLIST = HOME / "Library/LaunchAgents/com.aside-relay.plist"
 
 OK, WARN, BAD = "\033[32m✓\033[0m", "\033[33m!\033[0m", "\033[31m✗\033[0m"
 
@@ -119,7 +119,7 @@ def load_env() -> dict[str, str]:
 
 
 def save_env(env: dict[str, str]) -> None:
-    lines = ["# aside-remote config — see README for every key", ""]
+    lines = ["# aside-relay config — see README for every key", ""]
     lines += [f"{k}={v}" for k, v in sorted(env.items()) if v]
     ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
     ENV_FILE.write_text("\n".join(lines) + "\n")
@@ -134,31 +134,31 @@ def configure(assume_yes: bool) -> None:
     print("      Local-only use needs nothing here. For phone/remote access the")
     print("      recommended front is Cloudflare Tunnel + Access — see README.")
     if yesno("Configure Cloudflare Access verification now?", False, assume_yes):
-        env["ASIDE_REMOTE_ACCESS_TEAM"] = ask(
+        env["ASIDE_RELAY_ACCESS_TEAM"] = ask(
             "Access team domain (e.g. yourteam.cloudflareaccess.com)",
-            env.get("ASIDE_REMOTE_ACCESS_TEAM", ""))
-        env["ASIDE_REMOTE_ACCESS_AUD"] = ask(
+            env.get("ASIDE_RELAY_ACCESS_TEAM", ""))
+        env["ASIDE_RELAY_ACCESS_AUD"] = ask(
             "Access application AUD tag",
-            env.get("ASIDE_REMOTE_ACCESS_AUD", ""))
-        env["ASIDE_REMOTE_ACCESS_EMAILS"] = ask(
+            env.get("ASIDE_RELAY_ACCESS_AUD", ""))
+        env["ASIDE_RELAY_ACCESS_EMAILS"] = ask(
             "allowed emails (comma-separated)",
-            env.get("ASIDE_REMOTE_ACCESS_EMAILS", ""))
+            env.get("ASIDE_RELAY_ACCESS_EMAILS", ""))
     else:
         say(OK, "skipped — bridge stays loopback-only until you front it yourself")
 
     print("\n[4/5] Push notifications (optional)")
     if yesno("Send a push (ntfy protocol) when a run finishes?", False, assume_yes):
-        env["ASIDE_REMOTE_NTFY"] = ask("ntfy server URL (e.g. https://ntfy.sh)",
-                                      env.get("ASIDE_REMOTE_NTFY", "https://ntfy.sh"))
-        env["ASIDE_REMOTE_NTFY_TOPIC"] = ask("topic", env.get("ASIDE_REMOTE_NTFY_TOPIC",
-                                            "aside-" + secrets.token_hex(4)))
+        env["ASIDE_RELAY_NTFY"] = ask("ntfy server URL (e.g. https://ntfy.sh)",
+                                      env.get("ASIDE_RELAY_NTFY", "https://ntfy.sh"))
+        env["ASIDE_RELAY_NTFY_TOPIC"] = ask("topic", env.get("ASIDE_RELAY_NTFY_TOPIC",
+                                            "aside-relay-" + secrets.token_hex(4)))
     save_env(env)
 
 
 # ---------------------------------------------------------------- service
 def install_service() -> None:
     (REPO / "logs").mkdir(exist_ok=True)      # plist 가 로그를 여기 쓴다
-    tmpl = (REPO / "deploy/com.aside-remote.plist.template").read_text()
+    tmpl = (REPO / "deploy/com.aside-relay.plist.template").read_text()
     plist = (tmpl.replace("__PYTHON__", sys.executable)
                  .replace("__REPO__", str(REPO))
                  .replace("__HOME__", str(HOME)))
@@ -198,7 +198,7 @@ def main() -> int:
     if a.install_service:
         install_service(); return 0
 
-    print("aside-remote setup")
+    print("aside-relay setup")
     if not check_prereqs():
         print("\nfix the ✗ items above, then re-run.")
         return 1

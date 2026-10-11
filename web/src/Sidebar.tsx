@@ -1,3 +1,4 @@
+import { APP_NAME } from './brand';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { motion, useReducedMotion } from 'motion/react';
@@ -6,7 +7,7 @@ import { ArrowDownUp, ChevronRight, Ellipsis, EyeOff, Grid2X2, List, Pin, Plus, 
 import type { ChatSession, SessionSettings, UseChat } from './types';
 import type { SessionMenuTarget } from './SessionMenu';
 import { tokens } from './tokens.stylex';
-import { ICON_STROKE, SESSION_CHANGE_EVENT, AsideIcon, BrowserIcon, IconButton, styles as ui } from './ui';
+import { ICON_STROKE, SESSION_CHANGE_EVENT, BrowserIcon, IconButton, styles as ui } from './ui';
 import { Button } from './Button';
 import { useAutoRefresh } from './useAutoRefresh';
 
@@ -175,7 +176,7 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen
     const target = targetFor(event.target); if (!target) return;
     event.preventDefault(); onMenu(target);
   }}>
-    <div {...stylex.props(styles.top)}><span {...stylex.props(styles.brand)}><AsideIcon size={24} />Aside</span>{isDrawer && <IconButton label="Close conversations" onClick={onClose}><X size={22} strokeWidth={ICON_STROKE} /></IconButton>}</div>
+    <div {...stylex.props(styles.top)}><span {...stylex.props(styles.brand)}><img src="/icons/mark.svg" width={24} height={24} alt="" aria-hidden="true" />{APP_NAME}</span>{isDrawer && <IconButton label="Close conversations" onClick={onClose}><X size={22} strokeWidth={ICON_STROKE} /></IconButton>}</div>
     <div {...stylex.props(styles.newChatRow)}><button {...stylex.props(styles.newChat)} onClick={onNew}><Plus size={20} strokeWidth={ICON_STROKE} />New chat</button>{onNewIncognito && <IconButton label="New incognito chat" onClick={onNewIncognito}><EyeOff size={19} strokeWidth={ICON_STROKE} /></IconButton>}</div>
     <div {...stylex.props(styles.search)}><Search size={17} strokeWidth={ICON_STROKE} /><input aria-label="Search conversations" placeholder="Search" value={chat.searchQuery} onChange={event => chat.setSearchQuery(event.target.value)} {...stylex.props(styles.searchInput)} />{chat.searchQuery && <button {...stylex.props(styles.clear)} aria-label="Clear search" onClick={() => chat.setSearchQuery('')}><X size={16} /></button>}</div>
     {isShowingAll && <div {...stylex.props(styles.controls)}>

@@ -3,7 +3,7 @@
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.aside-remote</string>
+  <key>Label</key><string>com.aside-relay</string>
   <key>ProgramArguments</key><array>
     <string>__PYTHON__</string>
     <string>__REPO__/server.py</string>

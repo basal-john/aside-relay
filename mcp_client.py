@@ -19,7 +19,7 @@ from typing import Any
 
 import config
 
-log = logging.getLogger("aside-remote.mcp")
+log = logging.getLogger("aside-relay.mcp")
 
 _WRAP = "await (async () => {\n%s\n})();"
 
@@ -69,7 +69,7 @@ class MCPClient:
         await self._request("initialize", {
             "protocolVersion": "2024-11-05",
             "capabilities": {},
-            "clientInfo": {"name": "aside-remote", "version": "1"},
+            "clientInfo": {"name": "aside-relay", "version": "1"},
         }, timeout=30)
         self._notify("notifications/initialized", {})
         # 세션 pwd 확보 (스크린샷 저장 경로로 쓴다)

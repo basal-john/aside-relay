@@ -1,3 +1,4 @@
+import { APP_NAME } from './brand';
 import { useCallback, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Check, ChevronRight, SlidersHorizontal } from 'lucide-react';
@@ -32,9 +33,9 @@ export function Settings({ chat, notify, notifications, isDarkMode, onThemeToggl
   }, [chat.request]);
   useAutoRefresh(refresh, 5_000);
   return <div {...stylex.props(styles.content)}>
-    {onWorkspace ? <section><h3 {...stylex.props(styles.heading)}>Aside</h3><button type="button" {...stylex.props(styles.workspace)} onClick={onWorkspace}><SlidersHorizontal size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /><span {...stylex.props(styles.workspaceText)}><strong>Workspace & preferences</strong><span {...stylex.props(ui.muted)}>Projects, routines, memory, connections, providers and native preferences</span></span><ChevronRight size={18} strokeWidth={ICON_STROKE} aria-hidden="true" /></button></section> : undefined}
+    {onWorkspace ? <section><h3 {...stylex.props(styles.heading)}>{APP_NAME}</h3><button type="button" {...stylex.props(styles.workspace)} onClick={onWorkspace}><SlidersHorizontal size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /><span {...stylex.props(styles.workspaceText)}><strong>Workspace & preferences</strong><span {...stylex.props(ui.muted)}>Projects, routines, memory, connections, providers and native preferences</span></span><ChevronRight size={18} strokeWidth={ICON_STROKE} aria-hidden="true" /></button></section> : undefined}
     <section><h3 {...stylex.props(styles.heading)}>Connection</h3><div {...stylex.props(styles.statusRow)}><span>Bridge</span><span {...stylex.props(ui.muted)}>{chat.isConnected ? 'Connected' : 'Reconnecting…'}</span></div>
-      <div {...stylex.props(styles.statusRow)}><span>Aside</span><span {...stylex.props(ui.muted)}>{health ? health.asideApp ? 'Running' : 'Not running' : error ? 'Unavailable' : 'Checking…'}</span></div>
+      <div {...stylex.props(styles.statusRow)}><span>Aside browser</span><span {...stylex.props(ui.muted)}>{health ? health.asideApp ? 'Running' : 'Not running' : error ? 'Unavailable' : 'Checking…'}</span></div>
       <div {...stylex.props(styles.statusRow)}><span>Browser</span><span {...stylex.props(ui.muted)}>{browserStatus === 'connected' ? 'Connected' : browserStatus === 'unavailable' ? 'Unavailable' : 'Checking…'}</span></div>
       {error && <p role="alert" {...stylex.props(ui.muted)}>{error}</p>}
       {health && !health.asideApp && <div {...stylex.props(styles.actions)}><Button onClick={async () => { try { await chat.request('/api/aside/launch', { method: 'POST' }); notify('Aside opened.', 'success'); } catch { notify('Could not open Aside.', 'error'); } }}>Open Aside</Button></div>}
@@ -44,7 +45,7 @@ export function Settings({ chat, notify, notifications, isDarkMode, onThemeToggl
     </section>
     <section><h3 {...stylex.props(styles.heading)}>Notifications</h3>
       <div {...stylex.props(styles.statusRow)}><span>Response notifications</span><span {...stylex.props(ui.muted)}>{notifications.status === 'enabled' ? 'Enabled' : notifications.status === 'checking' ? 'Checking…' : notifications.status === 'denied' ? 'Blocked' : notifications.status === 'unavailable' ? 'Unavailable' : 'Off'}</span></div>
-      <p {...stylex.props(ui.muted)}>{notifications.unavailableReason || (notifications.status === 'denied' ? 'Allow notifications for Aside in your device settings.' : 'Get notified when a response finishes while you are away from the app. Tap a notification to open its conversation.')}</p>
+      <p {...stylex.props(ui.muted)}>{notifications.unavailableReason || (notifications.status === 'denied' ? `Allow notifications for ${APP_NAME} in your device settings.` : 'Get notified when a response finishes while you are away from the app. Tap a notification to open its conversation.')}</p>
       {notifications.status !== 'unavailable' && notifications.status !== 'denied' && <Button disabled={notifications.isUpdating || notifications.status === 'checking' || !chat.isReady || !!chat.authError} onClick={() => { void (notifications.status === 'enabled' ? notifications.disable() : notifications.enable()); }}>{notifications.isUpdating ? 'Updating…' : notifications.status === 'enabled' ? 'Turn off notifications' : 'Enable notifications'}</Button>}
     </section>
     <section><h3 {...stylex.props(styles.heading)}>Appearance</h3><div {...stylex.props(styles.statusRow)}><span>Dark mode</span><motion.button type="button" role="switch" aria-label="Dark mode" aria-checked={isDarkMode} whileTap={shouldReduceMotion ? undefined : { scale: .94 }} onClick={onThemeToggle} {...stylex.props(styles.themeSwitch)}><motion.span animate={{ backgroundColor: isDarkMode ? 'var(--primary)' : 'var(--hover)' }} transition={{ duration: shouldReduceMotion ? 0 : .18 }} {...stylex.props(styles.switchTrack)}><motion.span animate={{ x: isDarkMode ? 20 : 0 }} transition={shouldReduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 520, damping: 34 }} {...stylex.props(styles.switchThumb)} /></motion.span></motion.button></div>

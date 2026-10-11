@@ -28,7 +28,7 @@ daemon is required. `ASIDE_TEST_PYTHON` can select another Python executable.
 | `npm run test:backend` | HTTP routes, native contracts, queue, runner, files, push, realtime | Actual Python application; native daemon, external push transport, and CLI execution stubbed |
 | `npm run test:mutations` | Test sensitivity | Seeds unsafe URL, invalid counter, and private diagnostic defects in a temporary source copy; each must fail an assertion |
 | `npm run build` | TypeScript and production compiler pipeline | React Compiler, StyleX, lazy chunks, production assets |
-| `npm run test:smoke` | Production boot and reconnect recovery | Built JavaScript in JSDOM; no browser layout engine |
+| `npm run test:smoke` | Product identity, production boot and reconnect recovery | Built JavaScript in JSDOM; no browser layout engine |
 | `npm run test:e2e` | User journeys and layout | Built application in Chromium and iPhone-sized WebKit; stateful synthetic HTTP/WebSocket backend |
 | `npm run test:repeat` | Browser repeatability | Runs every browser scenario three times, with retries disabled |
 

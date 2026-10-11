@@ -91,7 +91,7 @@ class WebPushTest(support.IsolatedBackendTest):
         self.assertEqual(payloads[0]["body"], "Answer with evidence complete.")
         self.assertEqual(payloads[0]["title"], "Actual conversation")
         self.assertEqual(payloads[0]["navigate"], "https://aside.example/c/session-42")
-        self.assertEqual(payloads[0]["tag"], "aside:run-42")
+        self.assertEqual(payloads[0]["tag"], "aside-relay:run-42")
         self.assertEqual(payloads[0]["tag"], payloads[1]["tag"])
 
     async def test_unicode_body_is_truncated_to_the_encrypted_payload_budget(self):

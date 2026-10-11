@@ -23,7 +23,7 @@ import httpx
 
 import config
 
-log = logging.getLogger("aside-remote.fonts")
+log = logging.getLogger("aside-relay.fonts")
 
 CACHE = config.CACHE_DIR / "fonts"
 CACHE.mkdir(parents=True, exist_ok=True)

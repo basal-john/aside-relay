@@ -39,7 +39,7 @@ import config
 from daemon import ACCOUNT_ID, daemon, repair_browser_binding
 import sessions
 
-log = logging.getLogger("aside-remote.runner")
+log = logging.getLogger("aside-relay.runner")
 SESSION_NOT_FOUND_MESSAGE = "Conversation not found"
 RUN_ALREADY_RUNNING_MESSAGE = "This conversation is already running"
 RUN_FAILED_MESSAGE = "The response could not start. Please try again."
@@ -278,7 +278,7 @@ async def _spawn(args: list[str]) -> tuple[asyncio.subprocess.Process, int]:
 
 
 def _stream_log() -> str:
-    fd, path = tempfile.mkstemp(prefix="aside-remote-stream-", suffix=".jsonl")
+    fd, path = tempfile.mkstemp(prefix="aside-relay-stream-", suffix=".jsonl")
     os.close(fd)
     return path
 

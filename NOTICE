@@ -1,3 +1,9 @@
+Project attribution
+-------------------
+aside-relay is derived from aside-remote by its original contributors.
+  https://github.com/esc5221/aside-remote
+  MIT License; original copyright is retained in LICENSE.
+
 Bundled third-party code
 ------------------------
 web/vendor/highlight.min.js and web/vendor/lang-*.min.js
@@ -13,7 +19,7 @@ web/vendor/remixicon.symbol.svg
   Copyright (c) 2017–2026 Remix Design
   https://github.com/Remix-Design/RemixIcon
   Source: https://registry.npmjs.org/remixicon/-/remixicon-4.9.1.tgz
-  This sprite contains only the UI symbols used by Aside Remote.
+  This sprite contains only the UI symbols used by aside-relay.
   Original symbol paths and view boxes are unchanged.
   The full license is in web/vendor/remixicon.LICENSE.
 

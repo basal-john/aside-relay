@@ -3,7 +3,7 @@
 핵심 제약(실측):
   · `aside exec` 에는 첨부 옵션이 없다. 이미지를 프롬프트에 실어 보낼 방법이 없다.
   · repl 의 fs 는 "Project and session roots" 밖을 거부한다.
-    ~/aside-remote/cache 에 두면 에이전트가 못 읽는다.
+    ~/aside-relay/cache 에 두면 에이전트가 못 읽는다.
   · 반면 Aside 유저 루트(~/.aside/u/0) 안은 읽힌다. 세션 디렉토리가 생기기 전에도 쓸 수 있어
     새 대화의 경쟁 상태도 없다.
 → 그래서 업로드는 ~/.aside/u/0/uploads/ 에 두고, 프롬프트에 그 경로를 적어
@@ -21,7 +21,7 @@ from pathlib import Path
 
 import config
 
-log = logging.getLogger("aside-remote.uploads")
+log = logging.getLogger("aside-relay.uploads")
 
 # 매직 바이트로 판별한다. 확장자나 클라이언트가 보낸 content-type 을 믿지 않는다.
 _MAGIC = [

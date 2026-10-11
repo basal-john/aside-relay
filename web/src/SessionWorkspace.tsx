@@ -1,3 +1,4 @@
+import { APP_NAME } from './brand';
 import { useEffect, useEffectEvent, useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { AnimatePresence } from 'motion/react';
@@ -274,7 +275,7 @@ function parseSuspension(value: Record<string, unknown> | undefined): WorkspaceS
   return {
     kind,
     toolCallId: typeof value.toolCallId === 'string' ? value.toolCallId : typeof value.tool_call_id === 'string' ? value.tool_call_id : '',
-    title: getText(value.title, request?.title) ?? (kind === 'ask-user-question' ? 'Aside needs your answer' : kind === 'approval' ? 'Approval needed' : 'Confirmation needed'),
+    title: getText(value.title, request?.title) ?? (kind === 'ask-user-question' ? `${APP_NAME} needs your answer` : kind === 'approval' ? 'Approval needed' : 'Confirmation needed'),
     message: getText(value.message, request?.message, request?.description) ?? (kind === 'approval' ? describeApproval(request?.scope) : undefined),
     questions,
     canAlwaysAllow: !(typeof source?.taskId === 'string' && source.taskId.length > 0),

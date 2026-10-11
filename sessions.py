@@ -25,7 +25,7 @@ import httpx
 import config
 from daemon import ACCOUNT_ID, daemon
 
-log = logging.getLogger("aside-remote.sessions")
+log = logging.getLogger("aside-relay.sessions")
 
 _dir_index: dict[str, Path] = {}
 _dir_index_at: float = 0.0

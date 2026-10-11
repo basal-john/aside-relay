@@ -26,7 +26,7 @@ from daemon import ACCOUNT_ID, daemon, repair_browser_binding
 from mcp_client import mcp
 import daemondb
 
-log = logging.getLogger("aside-remote.browser")
+log = logging.getLogger("aside-relay.browser")
 
 ATTACH_TIMEOUT_MS = 12000
 CURRENT_SESSION_CODE = "console.log(JSON.stringify({id: aside.sessions.current().id}));"

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Awaitable, Callable
 if TYPE_CHECKING:
     from native_queue import NativeQueue
 
-log = logging.getLogger("aside-remote.followups")
+log = logging.getLogger("aside-relay.followups")
 EDIT_LEASE_SEC = 300
 RECEIPT_LIMIT = 256
 

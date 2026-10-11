@@ -8,6 +8,7 @@ import { JSDOM } from 'jsdom';
 const root = path.resolve(import.meta.dirname, '..');
 const dist = path.join(root, 'web/dist');
 const UI_TIMEOUT_MS = 5_000;
+const PRODUCT_NAME = 'aside-relay';
 const indexPath = path.join(dist, 'index.html');
 if (!fs.existsSync(indexPath)) throw new Error('web/dist is missing. Run npm run build first.');
 
@@ -59,6 +60,11 @@ await Promise.race([
 await waitFor(() => document.querySelector('[aria-current="page"]')?.textContent.includes('Beta'));
 await waitFor(() => document.querySelector('[aria-label="Your message"]'));
 check('no boot errors', runtimeErrors.length === 0);
+check('product title is aside-relay', document.title === PRODUCT_NAME);
+check('Home Screen title is aside-relay', document.querySelector('meta[name="apple-mobile-web-app-title"]')?.content === PRODUCT_NAME);
+check('drawer brand is aside-relay', document.querySelector('aside[aria-label="Conversations"]')?.textContent.includes(PRODUCT_NAME));
+const manifest = JSON.parse(fs.readFileSync(path.join(root, 'web/manifest.webmanifest'), 'utf8'));
+check('installation manifest uses aside-relay', manifest.name === PRODUCT_NAME && manifest.short_name === PRODUCT_NAME);
 check('conversation list rendered', document.querySelectorAll('aside[aria-label="Conversations"]').length === 1);
 check('settings refresh restores the last conversation in the background', location.pathname === '/settings' && document.querySelector('[aria-current="page"]')?.textContent.includes('Beta'));
 check('restored messages rendered', document.querySelector('[aria-label="Your message"]')?.textContent.includes('Inspect this'));

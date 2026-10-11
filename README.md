@@ -1,4 +1,4 @@
-# aside-remote
+# aside-relay
 
 Use [Aside](https://aside.dev) from your phone or browser. This self-hosted web app
 connects to the Aside app and CLI on your Mac, with live conversations, browser
@@ -10,10 +10,10 @@ its own access-token login; no separate AI API key is required.
 
 ## Screenshots
 
-Actual app-only captures from a public demo conversation, using a phone-sized browser.
-Device status bars and browser address bars are omitted. The demo opens a public page,
-runs browser tools, renders an interactive HTML diagram, and accepts a queued message
-through **Steer instead**.
+App-only captures of aside-relay in a phone-sized browser, using public sample
+content and controlled API fixtures. Device status
+bars and browser address bars are omitted. The gallery shows code, interactive
+HTML, tool activity, queue controls, conversations, browser previews, and settings.
 Click any image to view it at full size.
 
 <table>
@@ -43,7 +43,7 @@ Click any image to view it at full size.
     <th>Model picker</th>
   </tr>
   <tr>
-    <td><a href="docs/screenshots/conversation-drawer.jpg"><img src="docs/screenshots/conversation-drawer.jpg" width="240" alt="Drawer searching for the public README demo conversation"></a></td>
+    <td><a href="docs/screenshots/conversation-drawer.jpg"><img src="docs/screenshots/conversation-drawer.jpg" width="240" alt="Drawer showing the sample README demo conversation"></a></td>
     <td><a href="docs/screenshots/conversation-menu.jpg"><img src="docs/screenshots/conversation-menu.jpg" width="240" alt="Conversation menu with pin, rename, share, copy link, and copy session ID"></a></td>
     <td><a href="docs/screenshots/model-picker.jpg"><img src="docs/screenshots/model-picker.jpg" width="240" alt="Model selection dialog with providers and reasoning effort"></a></td>
   </tr>
@@ -53,7 +53,7 @@ Click any image to view it at full size.
     <th>Connection and notifications</th>
   </tr>
   <tr>
-    <td><a href="docs/screenshots/browser-pip.jpg"><img src="docs/screenshots/browser-pip.jpg" width="240" alt="Live browser preview beside completed browser actions"></a></td>
+    <td><a href="docs/screenshots/browser-pip.jpg"><img src="docs/screenshots/browser-pip.jpg" width="240" alt="Browser preview beside completed browser actions"></a></td>
     <td><a href="docs/screenshots/browser-sheet.jpg"><img src="docs/screenshots/browser-sheet.jpg" width="240" alt="Browser sheet showing the page title, URL, preview, and Open in your browser action"></a></td>
     <td><a href="docs/screenshots/settings.jpg"><img src="docs/screenshots/settings.jpg" width="240" alt="Settings dialog showing connection and notification status"></a></td>
   </tr>
@@ -141,7 +141,7 @@ phone / browser
 Tailscale Serve, Caddy, Nginx, or another HTTPS proxy
     │ private connection
     ▼
-Mac: aside-remote :8799 → Aside CLI / local daemon / browser profile
+Mac: aside-relay :8799 → Aside CLI / local daemon / browser profile
 ```
 
 | Route | Address | Requirements | Login |
@@ -164,7 +164,7 @@ throughout the selected recipe; do not copy placeholder credentials literally.
 | Input | Default / decision |
 | --- | --- |
 | Mac user | The signed-in macOS user who owns the Aside account and browser profile |
-| Checkout | A permanent directory, such as `~/projects/aside-remote` |
+| Checkout | A permanent directory, such as `~/projects/aside-relay` |
 | Aside CLI | `~/.local/bin/aside`, or the actual absolute executable path |
 | Aside account | `u0`; use the account that owns the intended browser profile |
 | Aside user directory | `u0` → `~/.aside/u/0`; `u1` → `~/.aside/u/1` |
@@ -232,8 +232,8 @@ Keep Aside and that profile running under the same logged-in Mac user.
 ```bash
 mkdir -p "$HOME/projects"
 cd "$HOME/projects"
-git clone https://github.com/mym0404/aside-remote.git
-cd aside-remote
+git clone https://github.com/mym0404/aside-relay.git
+cd aside-relay
 python3.13 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -r requirements.txt
@@ -253,7 +253,7 @@ For a fresh install with standard paths, run:
 ```
 
 This checks prerequisites, creates the access token, and writes
-`~/.aside-remote/env`. On a fresh installation it does not enable Cloudflare,
+`~/.aside-relay/env`. On a fresh installation it does not enable Cloudflare,
 ntfy, or the login service. Existing settings are preserved, so `--yes` does
 **not** remove an older Cloudflare configuration.
 
@@ -267,14 +267,14 @@ For Tailscale or your own domain, answer **no** to its Cloudflare question. Its
 ntfy question is separate from built-in Web Push, which needs no ntfy service.
 Answer no to service installation until the foreground test below passes.
 
-For manual setup, first create its directory with `mkdir -p "$HOME/.aside-remote"`.
-Then create/edit `~/.aside-remote/env` with the following values, or edit an
+For manual setup, first create its directory with `mkdir -p "$HOME/.aside-relay"`.
+Then create/edit `~/.aside-relay/env` with the following values, or edit an
 existing configuration to choose a different account. A config file is optional
 with all defaults; the server generates a missing token itself.
 
 ```dotenv
-ASIDE_REMOTE_HOST=127.0.0.1
-ASIDE_REMOTE_PORT=8799
+ASIDE_RELAY_HOST=127.0.0.1
+ASIDE_RELAY_PORT=8799
 ASIDE_BIN=~/.local/bin/aside
 ASIDE_ACCOUNT=u0
 ASIDE_USER_DIR=~/.aside/u/0
@@ -285,17 +285,17 @@ For an existing installation switching away from Access, set these entries empty
 in that file and remove conflicting values from the process environment:
 
 ```dotenv
-ASIDE_REMOTE_ACCESS_TEAM=
-ASIDE_REMOTE_ACCESS_AUD=
-ASIDE_REMOTE_ACCESS_EMAILS=
-ASIDE_REMOTE_ACCESS_CNS=
+ASIDE_RELAY_ACCESS_TEAM=
+ASIDE_RELAY_ACCESS_AUD=
+ASIDE_RELAY_ACCESS_EMAILS=
+ASIDE_RELAY_ACCESS_CNS=
 ```
 
 Keep `ASIDE_ACCOUNT` and `ASIDE_USER_DIR` consistent. For example, change both to
 `u1` and `~/.aside/u/1`. Protect the configuration:
 
 ```bash
-chmod 600 "$HOME/.aside-remote/env"
+chmod 600 "$HOME/.aside-relay/env"
 ```
 
 File precedence and the complete settings table are in
@@ -330,7 +330,7 @@ process.
 
 ## Authentication
 
-The bridge creates a random token in `~/.aside-remote/token` with mode `0600` if
+The bridge creates a random token in `~/.aside-relay/token` with mode `0600` if
 none exists. It is a shared credential granting access to the connected Aside
 account, including agent execution and its logged-in browser. Share it only with
 people/devices you intend to give that access.
@@ -340,7 +340,7 @@ For Tailscale, your own domain, LAN/VPN, or Funnel:
 1. On the Mac, copy the token without printing it into terminal output:
 
    ```bash
-   pbcopy < "$HOME/.aside-remote/token"
+   pbcopy < "$HOME/.aside-relay/token"
    ```
 
 2. Transfer it through a private channel to the phone if clipboard sharing is not
@@ -352,7 +352,7 @@ Repeat once for each separate browser, Home Screen app, or new origin. The UI
 stores the token in that origin's local storage and exchanges it for the
 HttpOnly `ar_token` cookie used by images and WebSockets. The cookie lasts 30
 days; saved-token login can renew it. Do not put tokens in URLs or screenshots.
-If using `ASIDE_REMOTE_TOKEN` or a custom token file, copy that configured token
+If using `ASIDE_RELAY_TOKEN` or a custom token file, copy that configured token
 instead of the default file.
 
 Automatic `/api/web-token` login has only two paths: requests whose host **and**
@@ -389,12 +389,12 @@ After the foreground test passes, from the permanent checkout:
 
 ```bash
 .venv/bin/python scripts/setup.py --install-service
-plutil -lint "$HOME/Library/LaunchAgents/com.aside-remote.plist"
-launchctl print "gui/$(id -u)/com.aside-remote"
+plutil -lint "$HOME/Library/LaunchAgents/com.aside-relay.plist"
+launchctl print "gui/$(id -u)/com.aside-relay"
 ```
 
 Invoking the installer with `.venv/bin/python` records that interpreter in
-`~/Library/LaunchAgents/com.aside-remote.plist`. `--install-service` installs the
+`~/Library/LaunchAgents/com.aside-relay.plist`. `--install-service` installs the
 service only; it does not install dependencies or perform the setup checks.
 The LaunchAgent starts at login and restarts after an unsuccessful exit. It runs
 as your user, not root, and loads the configuration file on each server start.
@@ -402,7 +402,7 @@ as your user, not root, and loads the configuration file on each server start.
 Restart after a configuration edit, inspect logs, or remove the service:
 
 ```bash
-launchctl kickstart -k "gui/$(id -u)/com.aside-remote"
+launchctl kickstart -k "gui/$(id -u)/com.aside-relay"
 tail -n 80 logs/bridge.err.log
 tail -n 80 logs/bridge.out.log
 # Remove only the bridge login service; configuration and conversations remain.
@@ -561,7 +561,7 @@ sudo apt-get install nginx certbot python3-certbot-nginx
 sudo mkdir -p /var/www/aside-acme
 ```
 
-Create `/etc/nginx/sites-available/aside-remote` with this temporary HTTP site
+Create `/etc/nginx/sites-available/aside-relay` with this temporary HTTP site
 for certificate issuance:
 
 ```nginx
@@ -577,7 +577,7 @@ For this new site only, enable it, validate, obtain the certificate, and then
 replace the temporary file with the final configuration below:
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/aside-remote /etc/nginx/sites-enabled/aside-remote
+sudo ln -s /etc/nginx/sites-available/aside-relay /etc/nginx/sites-enabled/aside-relay
 sudo nginx -t
 sudo systemctl reload nginx
 sudo certbot certonly --webroot -w /var/www/aside-acme -d chat.example.com
@@ -662,7 +662,7 @@ explains certificate issuance and renewal hooks.
 
 ## Existing website or VPS
 
-Keep your current website and add a dedicated subdomain for Aside Remote.
+Keep your current website and add a dedicated subdomain for aside-relay.
 Proxy the **entire** subdomain, including `/api/*`, `/ws`, `/assets/*`, `/sw.js`,
 `/manifest.webmanifest`, `/icons/*`, and `/c/<session>` routes. Do not cache API,
 authentication, HTML entry pages, or WebSocket traffic. Keep the application's
@@ -716,16 +716,16 @@ If you do not already have a suitable key, create a dedicated one on the Mac
 (do not overwrite an existing key), and install only its public key on the VPS:
 
 ```bash
-ssh-keygen -t ed25519 -f "$HOME/.ssh/aside-remote-vps"
-cat "$HOME/.ssh/aside-remote-vps.pub" | ssh bridge-user@vps.example.com 'umask 077; mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys'
-ssh-add --apple-use-keychain "$HOME/.ssh/aside-remote-vps"
+ssh-keygen -t ed25519 -f "$HOME/.ssh/aside-relay-vps"
+cat "$HOME/.ssh/aside-relay-vps.pub" | ssh bridge-user@vps.example.com 'umask 077; mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys'
+ssh-add --apple-use-keychain "$HOME/.ssh/aside-relay-vps"
 ```
 
 Keep the private key on the Mac. To test the forwarding connection:
 
 ```bash
 ssh -N -T \
-  -i "$HOME/.ssh/aside-remote-vps" \
+  -i "$HOME/.ssh/aside-relay-vps" \
   -o ExitOnForwardFailure=yes \
   -o ServerAliveInterval=30 \
   -o ServerAliveCountMax=3 \
@@ -741,10 +741,10 @@ block and public Host. Permit public 80/443 and SSH as required; do not publish
 For automatic reconnection at Mac login, add a dedicated entry to `~/.ssh/config`:
 
 ```sshconfig
-Host aside-remote-vps
+Host aside-relay-vps
     HostName vps.example.com
     User bridge-user
-    IdentityFile ~/.ssh/aside-remote-vps
+    IdentityFile ~/.ssh/aside-relay-vps
     IdentitiesOnly yes
     UseKeychain yes
     AddKeysToAgent yes
@@ -755,31 +755,31 @@ Host aside-remote-vps
     RemoteForward 127.0.0.1:18799 127.0.0.1:8799
 ```
 
-Use the actual private-key path. Test `ssh -N -T aside-remote-vps` interactively
+Use the actual private-key path. Test `ssh -N -T aside-relay-vps` interactively
 first so host-key verification is complete. Then stop that test and save this
-as `~/Library/LaunchAgents/com.aside-remote.ssh.plist`, replacing the log paths
+as `~/Library/LaunchAgents/com.aside-relay.ssh.plist`, replacing the log paths
 with your **absolute** home path; plist strings do not expand `~`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>com.aside-remote.ssh</string>
+  <key>Label</key><string>com.aside-relay.ssh</string>
   <key>ProgramArguments</key><array>
     <string>/usr/bin/ssh</string><string>-N</string><string>-T</string>
-    <string>aside-remote-vps</string>
+    <string>aside-relay-vps</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>
-  <key>StandardOutPath</key><string>/Users/YOUR_USER/.aside-remote/ssh.out.log</string>
-  <key>StandardErrorPath</key><string>/Users/YOUR_USER/.aside-remote/ssh.err.log</string>
+  <key>StandardOutPath</key><string>/Users/YOUR_USER/.aside-relay/ssh.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOUR_USER/.aside-relay/ssh.err.log</string>
 </dict></plist>
 ```
 
 ```bash
-plutil -lint "$HOME/Library/LaunchAgents/com.aside-remote.ssh.plist"
-launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.aside-remote.ssh.plist"
+plutil -lint "$HOME/Library/LaunchAgents/com.aside-relay.ssh.plist"
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.aside-relay.ssh.plist"
 ```
 
 The SSH connection's keepalives detect failure; launchd restarts the process.
@@ -798,7 +798,7 @@ or Cloudflare. The recipe still needs an HTTPS name/address trusted by the phone
   name. A DNS-based ACME challenge can issue certificates without opening the
   private service publicly; its plugin/credentials depend on your DNS provider.
 - Keep the bridge on loopback when the proxy runs on the Mac. If a separate LAN
-  proxy must connect directly, bind `ASIDE_REMOTE_HOST` to the Mac's specific
+  proxy must connect directly, bind `ASIDE_RELAY_HOST` to the Mac's specific
   LAN/VPN address, allow only the proxy through the firewall, and set
   `FORWARDED_ALLOW_IPS` to that proxy's exact private address. Use an encrypted
   VPN link for traffic crossing networks. Do not forward that bridge port publicly.
@@ -858,14 +858,14 @@ http://:8798 {
 
 Use one Caddy instance: if its login service already runs, add this block to its
 existing Caddyfile and reload it. Otherwise create the directory with
-`mkdir -p "$HOME/.config/aside-remote"`, save the dedicated file below, and test
+`mkdir -p "$HOME/.config/aside-relay"`, save the dedicated file below, and test
 it in the foreground. Do not start another instance using the same admin port.
 
-For a dedicated file at `~/.config/aside-remote/Funnel.Caddyfile`:
+For a dedicated file at `~/.config/aside-relay/Funnel.Caddyfile`:
 
 ```bash
-caddy validate --config "$HOME/.config/aside-remote/Funnel.Caddyfile" --adapter caddyfile
-caddy run --config "$HOME/.config/aside-remote/Funnel.Caddyfile" --adapter caddyfile
+caddy validate --config "$HOME/.config/aside-relay/Funnel.Caddyfile" --adapter caddyfile
+caddy run --config "$HOME/.config/aside-relay/Funnel.Caddyfile" --adapter caddyfile
 ```
 
 In another terminal, use a free Funnel HTTPS port (8443 here leaves a private
@@ -909,7 +909,7 @@ on the Mac. Cloudflare also offers dashboard-managed tunnels.
    ```bash
    brew install cloudflared
    cloudflared tunnel login
-   cloudflared tunnel create aside-remote
+   cloudflared tunnel create aside-relay
    ```
 
 4. Record the generated UUID and credential-file path. Add this to
@@ -926,20 +926,20 @@ on the Mac. Cloudflare also offers dashboard-managed tunnels.
      - service: http_status:404
    ```
 
-5. Add these entries to `~/.aside-remote/env`, then restart the bridge:
+5. Add these entries to `~/.aside-relay/env`, then restart the bridge:
 
    ```dotenv
-   ASIDE_REMOTE_ACCESS_TEAM=yourteam.cloudflareaccess.com
-   ASIDE_REMOTE_ACCESS_AUD=YOUR_ACCESS_APPLICATION_AUD
-   ASIDE_REMOTE_ACCESS_EMAILS=you@example.com
+   ASIDE_RELAY_ACCESS_TEAM=yourteam.cloudflareaccess.com
+   ASIDE_RELAY_ACCESS_AUD=YOUR_ACCESS_APPLICATION_AUD
+   ASIDE_RELAY_ACCESS_EMAILS=you@example.com
    ```
 
 6. Validate the tunnel, create DNS, and test it in the foreground:
 
    ```bash
    cloudflared tunnel ingress validate
-   cloudflared tunnel route dns aside-remote chat.example.com
-   cloudflared tunnel run aside-remote
+   cloudflared tunnel route dns aside-relay chat.example.com
+   cloudflared tunnel run aside-relay
    ```
 
 7. Open the HTTPS hostname, complete Access login, and check that the bridge
@@ -984,7 +984,7 @@ the payload; stopping a response does not send a completion alert. Network,
 system notification settings, and Focus modes can delay or suppress delivery.
 
 Signing keys and subscriptions are created automatically in
-`~/.aside-remote/web-push`; keep them across restarts and backups. No Apple
+`~/.aside-relay/web-push`; keep them across restarts and backups. No Apple
 developer account, APNs certificate, or manually issued VAPID key is required.
 Changing the hostname or losing the signing key requires enabling notifications
 again for that origin. The service worker handles push; it does not turn the app
@@ -996,9 +996,9 @@ into an offline conversation client.
 ntfy is independent of Home Screen Web Push. Set a server URL and a unique topic:
 
 ```dotenv
-ASIDE_REMOTE_NTFY=https://ntfy.sh
-ASIDE_REMOTE_NTFY_TOPIC=YOUR_PRIVATE_RANDOM_TOPIC
-ASIDE_REMOTE_NTFY_ENABLED=1
+ASIDE_RELAY_NTFY=https://ntfy.sh
+ASIDE_RELAY_NTFY_TOPIC=YOUR_PRIVATE_RANDOM_TOPIC
+ASIDE_RELAY_NTFY_ENABLED=1
 ```
 
 Restart the bridge and subscribe to the same topic in an ntfy client. Public
@@ -1011,7 +1011,7 @@ URL and topic, without a separate ntfy username/password option.
 Values resolve in this order, with the first value winning:
 
 1. Actual environment variables of the server process.
-2. `~/.aside-remote/env`.
+2. `~/.aside-relay/env`.
 3. The checkout's `.env`.
 4. Built-in defaults.
 
@@ -1022,34 +1022,34 @@ or `~`, which the bridge expands. An explicitly empty value in the first file
 also overrides a later file. Restart after editing.
 
 A terminal's exported settings are not automatically inherited by a login
-LaunchAgent. Put persistent bridge settings in `~/.aside-remote/env`. A custom
+LaunchAgent. Put persistent bridge settings in `~/.aside-relay/env`. A custom
 `FORWARDED_ALLOW_IPS` value can go there too; Uvicorn reads it at startup. The
 service sets `HOME`, and absolute Aside/interpreter paths avoid PATH differences.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ASIDE_REMOTE_HOST` | `127.0.0.1` | Bind address; normally leave loopback behind a local proxy |
-| `ASIDE_REMOTE_PORT` | `8799` | Bridge port; update the upstream when changing it |
-| `ASIDE_REMOTE_TOKEN_FILE` | `~/.aside-remote/token` | Shared token file; generated if absent/empty |
-| `ASIDE_REMOTE_TOKEN` | Unset | Explicit token override; takes precedence over the token file |
+| `ASIDE_RELAY_HOST` | `127.0.0.1` | Bind address; normally leave loopback behind a local proxy |
+| `ASIDE_RELAY_PORT` | `8799` | Bridge port; update the upstream when changing it |
+| `ASIDE_RELAY_TOKEN_FILE` | `~/.aside-relay/token` | Shared token file; generated if absent/empty |
+| `ASIDE_RELAY_TOKEN` | Unset | Explicit token override; takes precedence over the token file |
 | `ASIDE_BIN` | `~/.local/bin/aside` | Aside CLI executable |
 | `ASIDE_ACCOUNT` | `u0` | CLI account ID; must match its user directory |
 | `ASIDE_USER_DIR` | `~/.aside/u/<account number>` | Aside account's sessions and uploads; `u0` uses `0` |
 | `ASIDE_DAEMON_URL` | `http://127.0.0.1:21420` | Local Aside daemon |
-| `ASIDE_REMOTE_FOLLOWUPS_FILE` | `~/.aside-remote/followups.json` | Persistent queue state |
-| `ASIDE_REMOTE_WEB_PUSH_DIR` | `~/.aside-remote/web-push` | Push signing key and subscriptions |
-| `ASIDE_REMOTE_UPLOAD_MAX` | `25165824` | Maximum image file size, bytes: 24 MiB |
-| `ASIDE_REMOTE_MCP_KEEPALIVE` | `1500` | MCP keepalive interval, seconds |
-| `ASIDE_REMOTE_MCP_TIMEOUT` | `125` | Browser REPL call timeout, seconds |
-| `ASIDE_REMOTE_SHOT_TTL` | `60` | Screenshot cache lifetime, seconds |
-| `ASIDE_REMOTE_NTFY` | Empty | ntfy server URL; empty disables ntfy |
-| `ASIDE_REMOTE_NTFY_TOPIC` | `aside-runs` | Completion-alert topic |
-| `ASIDE_REMOTE_NTFY_ENABLED` | `1` | ntfy is enabled only with a URL and value `1`; `0` disables |
-| `ASIDE_REMOTE_ACCESS_TEAM` | Empty | Optional Access team domain, without scheme |
-| `ASIDE_REMOTE_ACCESS_AUD` | Empty | Optional Access application audience tag |
-| `ASIDE_REMOTE_ACCESS_EMAILS` | Empty | Comma-separated allowed Access emails; set an explicit allowlist when using Access |
-| `ASIDE_REMOTE_CF_SERVICE_TOKEN_FILE` | `~/.aside-remote/cf_service_token.json` | Optional JSON with `client_id`/`client_secret` for a separately configured Access service-token client |
-| `ASIDE_REMOTE_ACCESS_CNS` | Empty | Additional allowed Access service-token common names, comma-separated |
+| `ASIDE_RELAY_FOLLOWUPS_FILE` | `~/.aside-relay/followups.json` | Persistent queue state |
+| `ASIDE_RELAY_WEB_PUSH_DIR` | `~/.aside-relay/web-push` | Push signing key and subscriptions |
+| `ASIDE_RELAY_UPLOAD_MAX` | `25165824` | Maximum image file size, bytes: 24 MiB |
+| `ASIDE_RELAY_MCP_KEEPALIVE` | `1500` | MCP keepalive interval, seconds |
+| `ASIDE_RELAY_MCP_TIMEOUT` | `125` | Browser REPL call timeout, seconds |
+| `ASIDE_RELAY_SHOT_TTL` | `60` | Screenshot cache lifetime, seconds |
+| `ASIDE_RELAY_NTFY` | Empty | ntfy server URL; empty disables ntfy |
+| `ASIDE_RELAY_NTFY_TOPIC` | `aside-relay-runs` | Completion-alert topic |
+| `ASIDE_RELAY_NTFY_ENABLED` | `1` | ntfy is enabled only with a URL and value `1`; `0` disables |
+| `ASIDE_RELAY_ACCESS_TEAM` | Empty | Optional Access team domain, without scheme |
+| `ASIDE_RELAY_ACCESS_AUD` | Empty | Optional Access application audience tag |
+| `ASIDE_RELAY_ACCESS_EMAILS` | Empty | Comma-separated allowed Access emails; set an explicit allowlist when using Access |
+| `ASIDE_RELAY_CF_SERVICE_TOKEN_FILE` | `~/.aside-relay/cf_service_token.json` | Optional JSON with `client_id`/`client_secret` for a separately configured Access service-token client |
+| `ASIDE_RELAY_ACCESS_CNS` | Empty | Additional allowed Access service-token common names, comma-separated |
 | `FORWARDED_ALLOW_IPS` | Uvicorn's loopback default | Exact trusted proxy peer addresses; relevant when a proxy is on another machine |
 
 The service-token file informs bridge identity verification; it does not make
@@ -1075,7 +1075,7 @@ git pull --ff-only
 npm ci
 npm run build
 npm test
-launchctl kickstart -k "gui/$(id -u)/com.aside-remote"
+launchctl kickstart -k "gui/$(id -u)/com.aside-relay"
 ```
 
 Resolve local changes without discarding them before pulling. For a foreground
@@ -1090,9 +1090,9 @@ this repository and can change its internal interfaces.
 
 | State | Default location | Preserve? |
 | --- | --- | --- |
-| Bridge settings and access token | `~/.aside-remote/env`, `~/.aside-remote/token` | Yes; token is a secret |
-| Follow-up queue | `~/.aside-remote/followups.json` | Yes; review queued work before resuming |
-| Push keys/subscriptions | `~/.aside-remote/web-push/` | Yes; losing the key requires resubscription |
+| Bridge settings and access token | `~/.aside-relay/env`, `~/.aside-relay/token` | Yes; token is a secret |
+| Follow-up queue | `~/.aside-relay/followups.json` | Yes; review queued work before resuming |
+| Push keys/subscriptions | `~/.aside-relay/web-push/` | Yes; losing the key requires resubscription |
 | Conversations and titles | `~/.aside/u/0/sessions/` | Yes; use the configured account's path |
 | Image attachments | `~/.aside/u/0/uploads/` | Yes |
 | Conversation pins | `<checkout>/cache/conversation-pins.sqlite` | Yes |
@@ -1106,10 +1106,10 @@ copy state to a private backup directory outside the repository:
 ```bash
 .venv/bin/python scripts/setup.py --uninstall-service
 umask 077
-backup_dir="$HOME/Backups/aside-remote/$(date +%Y%m%d-%H%M%S)"
+backup_dir="$HOME/Backups/aside-relay/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$backup_dir"
 chmod 700 "$backup_dir"
-ditto "$HOME/.aside-remote" "$backup_dir/bridge-state"
+ditto "$HOME/.aside-relay" "$backup_dir/bridge-state"
 ditto "$HOME/.aside/u/0/sessions" "$backup_dir/sessions"
 ditto "$HOME/.aside/u/0/uploads" "$backup_dir/uploads"
 if [ -f cache/conversation-pins.sqlite ]; then
@@ -1142,14 +1142,14 @@ with a freshly generated credential. For the default token file:
 .venv/bin/python - <<'PYTOKEN'
 from pathlib import Path
 import secrets
-path = Path.home() / ".aside-remote/token"
+path = Path.home() / ".aside-relay/token"
 path.parent.mkdir(parents=True, exist_ok=True)
 path.write_text(secrets.token_urlsafe(32) + "\n")
 path.chmod(0o600)
 PYTOKEN
 ```
 
-Remove/update any `ASIDE_REMOTE_TOKEN` override or the file change will have no
+Remove/update any `ASIDE_RELAY_TOKEN` override or the file change will have no
 effect. Restart the bridge; old saved tokens/cookies stop working. Reconnect each
 client through Settings, or verified Access login. Never rotate just to install
 another client.
@@ -1159,7 +1159,7 @@ another client.
 ```bash
 .venv/bin/python scripts/setup.py --uninstall-service
 # If the optional SSH LaunchAgent was installed:
-launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.aside-remote.ssh.plist"
+launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.aside-relay.ssh.plist"
 ```
 
 Remove that SSH plist after bootout. Disable only this app's Serve/Funnel listener
@@ -1201,7 +1201,7 @@ Useful checks from the checkout:
 node --version
 lsof -nP -iTCP:8799 -sTCP:LISTEN
 curl --fail --silent --show-error http://127.0.0.1:21420/health
-launchctl print "gui/$(id -u)/com.aside-remote"
+launchctl print "gui/$(id -u)/com.aside-relay"
 tail -n 80 logs/bridge.err.log
 ```
 
@@ -1265,7 +1265,7 @@ npm test
 For frontend development, run the backend on port 8800 in one terminal:
 
 ```bash
-ASIDE_REMOTE_PORT=8800 .venv/bin/python server.py
+ASIDE_RELAY_PORT=8800 .venv/bin/python server.py
 ```
 
 Then run Vite in another terminal:
@@ -1350,6 +1350,10 @@ port 21420. Treat bridge-token access like access to your logged-in browser and
 agent tools, not a read-only chat viewer.
 
 ## License
+
+This is an independently maintained repository derived from
+[aside-remote](https://github.com/esc5221/aside-remote). Original copyright and
+license notices are preserved.
 
 MIT, except bundled third-party assets, which retain the licenses listed in
 [NOTICE](NOTICE).

@@ -1,4 +1,4 @@
-"""aside-remote — Aside 를 폰에서 쓰기 위한 로컬 브리지.
+"""aside-relay — Aside 를 폰에서 쓰기 위한 로컬 브리지.
 
   Android ──HTTPS/WSS──> Cloudflare Access ──> cloudflared ──> 여기(127.0.0.1:8799)
                                                                  ├ aside mcp  (브라우저/탭)
@@ -63,10 +63,10 @@ class _StripQuery(logging.Filter):
 
 
 logging.getLogger("uvicorn.access").addFilter(_StripQuery())
-log = logging.getLogger("aside-remote")
+log = logging.getLogger(config.APP_NAME)
 
 STARTED_AT = time.time()
-app = FastAPI(title="aside-remote", docs_url=None, redoc_url=None)
+app = FastAPI(title=config.APP_NAME, docs_url=None, redoc_url=None)
 _http: httpx.AsyncClient | None = None
 push_notifications = web_push.WebPushStore(config.WEB_PUSH_DIR)
 
@@ -241,7 +241,7 @@ async def _startup() -> None:
     _http = httpx.AsyncClient()
     followup_queue.start()
     asyncio.create_task(_warm_mcp())
-    log.info("aside-remote up on %s:%s (auth=%s)",
+    log.info("%s up on %s:%s (auth=%s)", config.APP_NAME,
              config.HOST, config.PORT, "on" if config.BEARER else "OFF")
 
 
@@ -1060,7 +1060,7 @@ async def push_ntfy(session_id: str, run: "runner.Run") -> None:
     """
     if not config.NTFY_ENABLED or not _http:
         return
-    title = "Aside"
+    title = config.APP_NAME
     try:
         for s in (await sessions.list_sessions(_http, limit=20))["items"]:
             if s["id"] == session_id:

@@ -1,6 +1,6 @@
-# Aside Remote — Mobile Conversation UI
+# aside-relay — Mobile Conversation UI
 
-Aside uses a restrained, monochrome conversation interface inspired by ChatGPT on iOS. UI copy is English. Existing conversation content keeps its original language.
+aside-relay uses a restrained, monochrome conversation interface inspired by ChatGPT on iOS. UI copy is English. Existing conversation content keeps its original language.
 
 ## Reference and layout
 

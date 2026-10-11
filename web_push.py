@@ -16,7 +16,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from pywebpush import WebPushException, webpush
 
-log = logging.getLogger("aside-remote.web-push")
+log = logging.getLogger("aside-relay.web-push")
 FOCUS_LEASE_SEC = 25
 PUSH_TTL_SEC = 60 * 60
 PUSH_TIMEOUT_SEC = 10
@@ -160,7 +160,7 @@ class WebPushStore:
                     "title": title,
                     "body": body,
                     "navigate": f"{origin}/c/{session_id}",
-                    "tag": f"aside:{run_id}",
+                    "tag": f"aside-relay:{run_id}",
                     "icon": f"{origin}/icons/icon-192.png",
                     "silent": False,
                 }
@@ -184,7 +184,7 @@ class WebPushStore:
                     await asyncio.to_thread(
                         webpush, subscription_info=record["subscription"], data=data,
                         vapid_private_key=str(self.key_path),
-                        vapid_claims={"sub": origin if origin.startswith("https:") else "https://aside.dev"},
+                        vapid_claims={"sub": origin if origin.startswith("https:") else "https://github.com/mym0404/aside-relay"},
                         ttl=PUSH_TTL_SEC, timeout=PUSH_TIMEOUT_SEC, headers={"Urgency": "high"},
                     )
                 except WebPushException as error:

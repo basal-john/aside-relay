@@ -21,11 +21,11 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
 from cryptography.hazmat.primitives.hashes import SHA256
 
-log = logging.getLogger("aside-remote.cfaccess")
+log = logging.getLogger("aside-relay.cfaccess")
 
 import config
 
-# Team domain comes from config (ASIDE_REMOTE_ACCESS_TEAM). Empty = feature off;
+# Team domain comes from config (ASIDE_RELAY_ACCESS_TEAM). Empty = feature off;
 # verify() then rejects everything, and only loopback token bootstrap works.
 TEAM_DOMAIN = config.ACCESS_TEAM_DOMAIN
 CERTS_URL = f"https://{TEAM_DOMAIN}/cdn-cgi/access/certs" if TEAM_DOMAIN else ""

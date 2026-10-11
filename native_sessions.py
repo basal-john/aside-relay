@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 import sessions
 from daemon import ACCOUNT_ID, daemon
 
-log = logging.getLogger("aside-remote.native-sessions")
+log = logging.getLogger("aside-relay.native-sessions")
 
 router = APIRouter(prefix="/api/native/sessions")
 projects_router = APIRouter(prefix="/api/native/projects")

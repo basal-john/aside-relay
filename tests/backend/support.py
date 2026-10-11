@@ -6,26 +6,26 @@ from pathlib import Path
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, patch
 
-_storage = tempfile.TemporaryDirectory(prefix="aside-remote-backend-tests-")
+_storage = tempfile.TemporaryDirectory(prefix="aside-relay-backend-tests-")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 TEST_ROOT = Path(_storage.name)
 TEST_TOKEN = "isolated-backend-test-token"
 SESSION_ID = "TESTSESSION000001"
 
 os.environ.update({
-    "ASIDE_REMOTE_TOKEN": TEST_TOKEN,
-    "ASIDE_REMOTE_TOKEN_FILE": str(TEST_ROOT / "token"),
+    "ASIDE_RELAY_TOKEN": TEST_TOKEN,
+    "ASIDE_RELAY_TOKEN_FILE": str(TEST_ROOT / "token"),
     "ASIDE_USER_DIR": str(TEST_ROOT / "aside"),
     "ASIDE_BIN": str(TEST_ROOT / "unavailable-aside"),
     "ASIDE_DAEMON_URL": "http://127.0.0.1:1",
-    "ASIDE_REMOTE_FOLLOWUPS_FILE": str(TEST_ROOT / "followups.json"),
-    "ASIDE_REMOTE_WEB_PUSH_DIR": str(TEST_ROOT / "push"),
-    "ASIDE_REMOTE_NTFY": "",
-    "ASIDE_REMOTE_ACCESS_TEAM": "",
-    "ASIDE_REMOTE_ACCESS_AUD": "",
-    "ASIDE_REMOTE_ACCESS_EMAILS": "",
-    "ASIDE_REMOTE_CF_SERVICE_TOKEN_FILE": str(TEST_ROOT / "missing-service-token"),
-    "ASIDE_REMOTE_ACCESS_CNS": "",
+    "ASIDE_RELAY_FOLLOWUPS_FILE": str(TEST_ROOT / "followups.json"),
+    "ASIDE_RELAY_WEB_PUSH_DIR": str(TEST_ROOT / "push"),
+    "ASIDE_RELAY_NTFY": "",
+    "ASIDE_RELAY_ACCESS_TEAM": "",
+    "ASIDE_RELAY_ACCESS_AUD": "",
+    "ASIDE_RELAY_ACCESS_EMAILS": "",
+    "ASIDE_RELAY_CF_SERVICE_TOKEN_FILE": str(TEST_ROOT / "missing-service-token"),
+    "ASIDE_RELAY_ACCESS_CNS": "",
 })
 
 
