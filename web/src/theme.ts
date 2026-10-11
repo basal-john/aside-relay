@@ -22,8 +22,12 @@ export function applyTheme(theme: Theme, appearance = loadAppearance()) {
   const root = document.documentElement;
   root.dataset.theme = theme;
   applyAppearance(theme, appearance);
+  const background = getComputedStyle(root).getPropertyValue('--canvas').trim();
+  root.style.backgroundColor = background;
+  root.style.colorScheme = theme;
+  document.body.style.backgroundColor = background;
   document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', theme);
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', getComputedStyle(root).getPropertyValue('--canvas').trim());
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', background);
 }
 
 export type ThemeMode = Theme | 'system';
