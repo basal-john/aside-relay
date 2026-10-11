@@ -22,6 +22,10 @@ export function BrowserIcon({ size = 22 }: { size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={ICON_STROKE} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M3 9h18" /><path d="M6.5 6.5h.01M9.5 6.5h.01M12.5 6.5h.01" strokeWidth="2" /></svg>;
 }
 
+export function AsideIcon({ size = 20 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path fill="currentColor" d="M6.90986 2.73871C9.80058 0.968848 13.9716 1.35518 17.1472 3.77582C22.8616 7.73363 23.2313 15.547 21.8425 19.0659C20.1912 23.2491 4.78915 23.4773 2.53779 19.5766C0.541459 16.1174 1.50912 11.74 4.26728 9.37543C3.69303 6.96606 4.60628 4.06868 6.90986 2.73871ZM11.7224 7.57954C10.9172 7.57956 10.2644 8.23242 10.2643 9.03754V11.7768C10.2644 12.5819 10.9172 13.2348 11.7224 13.2348H11.8669C12.672 13.2348 13.3249 12.582 13.3249 11.7768V9.03754C13.3248 8.2324 12.672 7.57954 11.8669 7.57954H11.7224ZM16.9958 7.67914C16.2455 7.67926 15.6374 8.2872 15.6374 9.03754V11.7836C15.6374 12.534 16.2455 13.1419 16.9958 13.142C17.7462 13.142 18.3551 12.5341 18.3552 11.7836V9.03754C18.3551 8.28713 17.7462 7.67914 16.9958 7.67914Z" /></svg>;
+}
+
 export function Sheet({ title, children, onClose, isWide = false, isFullScreen = false, swipeY }: { title: string; children: ReactNode; onClose: () => void; isWide?: boolean; isFullScreen?: boolean; swipeY?: MotionValue<number> }) {
   const ref = useRef<HTMLDialogElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);

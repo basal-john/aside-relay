@@ -6,7 +6,7 @@ import { Ellipsis, Pin, Plus, Search, Settings2, X, ChevronRight } from 'lucide-
 import type { UseChat } from './types';
 import type { SessionMenuTarget } from './SessionMenu';
 import { tokens } from './tokens.stylex';
-import { ICON_STROKE, BrowserIcon, IconButton, styles as ui } from './ui';
+import { ICON_STROKE, AsideIcon, BrowserIcon, IconButton, styles as ui } from './ui';
 import { Button } from './Button';
 
 const RECENT_CONVERSATION_LIMIT = 3;
@@ -49,7 +49,7 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onOpen, onSettings, on
     const target = targetFor(event.target); if (!target) return;
     event.preventDefault(); onMenu(target);
   }}>
-    <div {...stylex.props(styles.top)}><span {...stylex.props(styles.brand)}>Aside</span>{isDrawer && <IconButton label="Close conversations" onClick={onClose}><X size={22} strokeWidth={ICON_STROKE} /></IconButton>}</div>
+    <div {...stylex.props(styles.top)}><span {...stylex.props(styles.brand)}><AsideIcon size={24} />Aside</span>{isDrawer && <IconButton label="Close conversations" onClick={onClose}><X size={22} strokeWidth={ICON_STROKE} /></IconButton>}</div>
     <button {...stylex.props(styles.newChat)} onClick={onNew}><Plus size={20} strokeWidth={ICON_STROKE} />New chat</button>
     <div {...stylex.props(styles.search)}><Search size={17} strokeWidth={ICON_STROKE} /><input aria-label="Search conversations" placeholder="Search" value={chat.searchQuery} onChange={event => chat.setSearchQuery(event.target.value)} {...stylex.props(styles.searchInput)} />{chat.searchQuery && <button {...stylex.props(styles.clear)} aria-label="Clear search" onClick={() => chat.setSearchQuery('')}><X size={16} /></button>}</div>
     <div {...stylex.props(styles.list)}>
@@ -85,7 +85,7 @@ function dateGroup(seconds: number) {
 const styles = stylex.create({
   sidebar: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, width: '100%', backgroundColor: tokens.surface, paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', minWidth: 0 },
   top: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 68, padding: '8px 16px 8px 24px', flexShrink: 0 },
-  brand: { fontSize: '1.3125rem', fontWeight: 650, letterSpacing: '-.5px' },
+  brand: { display: 'flex', alignItems: 'center', gap: 8, fontSize: '1.3125rem', fontWeight: 650, letterSpacing: '-.5px' },
   newChat: { display: 'flex', alignItems: 'center', gap: 12, minHeight: 48, flexShrink: 0, margin: '0 14px 12px', padding: '0 14px', borderWidth: 0, borderRadius: 14, backgroundColor: { default: tokens.canvas, ':hover': tokens.hover }, color: tokens.text, fontSize: '0.875rem', fontWeight: 550 },
   search: { display: 'flex', alignItems: 'center', gap: 9, margin: '0 22px 10px', padding: '0 2px', color: tokens.muted, minHeight: 44, flexShrink: 0 },
   searchInput: { borderWidth: 0, backgroundColor: 'transparent', color: tokens.text, width: '100%', minWidth: 0, fontSize: '1rem', padding: '10px 0' },
