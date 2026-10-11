@@ -5,6 +5,7 @@ type WorkspaceState = ReturnType<typeof workspaceState>;
 
 test('workspace exposes every native section and keeps project edits in sync', async ({ page }) => {
   const state = workspaceState();
+  state.skills.push(...Array.from({ length: 49 }, (_, index) => ({ ...state.skills[0], name: `Helper ${index}`, path: `user/helper-${index}` })));
   await installWorkspaceApi(page, state);
   const workspace = await openWorkspace(page);
 
@@ -17,6 +18,14 @@ test('workspace exposes every native section and keeps project edits in sync', a
   await expect(workspace.getByRole('button', { name: /AI providers/ })).toBeVisible();
   await expect(workspace.getByRole('button', { name: /Account & devices/ })).toBeVisible();
   await expect(workspace.getByRole('button', { name: /Native preferences/ })).toBeVisible();
+
+  for (const [name, count] of [['Routines', '1'], ['Skills', '50']]) {
+    const chip = workspace.getByRole('button', { name: new RegExp(`^${name}`) }).getByText(count, { exact: true });
+    await expect(chip).toHaveCSS('display', 'flex');
+    await expect(chip).toHaveCSS('align-items', 'center');
+    await expect(chip).toHaveCSS('justify-content', 'center');
+    await expect(chip).toHaveCSS('flex-shrink', '0');
+  }
 
   const viewport = page.viewportSize()!;
   await page.setViewportSize({ width: viewport.width, height: 640 });

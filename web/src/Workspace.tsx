@@ -407,7 +407,7 @@ const styles = stylex.create({
   tile: { display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, minHeight: 82, padding: 14, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, borderRadius: 18, backgroundColor: { default: tokens.surface, ':hover': tokens.hover }, color: tokens.text, textAlign: 'left' },
   tileIcon: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: 38, height: 38, borderRadius: 12, backgroundColor: tokens.hover, color: tokens.primary },
   tileCopy: { display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, gap: 2, overflowWrap: 'anywhere' },
-  count: { minWidth: 24, height: 24, padding: '2px 7px', borderRadius: 12, backgroundColor: tokens.hover, color: tokens.muted, fontSize: '.75rem', textAlign: 'center' },
+  count: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, minWidth: 24, height: 24, padding: '0 7px', borderRadius: 12, backgroundColor: tokens.hover, color: tokens.muted, fontSize: '.75rem', lineHeight: 1, fontVariantNumeric: 'tabular-nums' },
   stack: { display: 'flex', flexDirection: 'column', gap: 20 },
   listHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
   listTitle: { margin: 0, fontSize: '.875rem', fontWeight: 650 },
