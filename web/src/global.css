@@ -84,6 +84,7 @@
   .markdown pre { margin: 0; overflow-x: auto; padding: 12px 16px; max-width: 100%; overscroll-behavior-x: none; touch-action: pan-x pan-y; font-size: 0.8125rem; line-height: var(--code-line-height); tab-size: 4; }
   .markdown pre *, .markdown [aria-label="Response table"], .markdown table, .markdown table * { touch-action: pan-x pan-y; }
   .markdown pre code { background: none; padding: 0; white-space: pre; overflow-wrap: normal; font-size: inherit; line-height: inherit; }
+  @media (max-width: 700px) { .markdown pre code { white-space: pre-wrap; overflow-wrap: anywhere; } }
   .markdown table { border-collapse: collapse; width: 100%; font-size: 0.875rem; }
   .markdown td, .markdown th { padding: 11px 14px; border-bottom: 1px solid var(--border); text-align: left; min-width: 120px; }
   .markdown th { font-weight: 650; background: var(--surface); }
