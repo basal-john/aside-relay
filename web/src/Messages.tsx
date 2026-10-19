@@ -52,7 +52,7 @@ function CopyButton({ text, notify }: { text: string; notify: (text: string, kin
   }}>{isCopied ? <Check size={18} strokeWidth={ICON_STROKE} /> : <Copy size={18} strokeWidth={ICON_STROKE} />}</IconButton>;
 }
 
-function CodeBlock({ children, notify, isIncomplete, onAction }: { children: ReactNode; notify: (text: string, kind?: 'success' | 'error') => void; isIncomplete: boolean; onAction?: (text: string) => void }) {
+function CodeBlock({ children, notify, isIncomplete, onAction, onPrefill }: { children: ReactNode; notify: (text: string, kind?: 'success' | 'error') => void; isIncomplete: boolean; onAction?: (text: string) => void; onPrefill?: (text: string) => void }) {
   const code = textContent(children);
   const child = Children.toArray(children)[0];
   const language = typeof child === 'object' && 'props' in child ? (child.props as { className?: string }).className?.match(/language-(\S+)/)?.[1] : undefined;
@@ -60,7 +60,7 @@ function CodeBlock({ children, notify, isIncomplete, onAction }: { children: Rea
   if (language && DRAFT_LANGUAGES.has(language)) {
     if (isIncomplete) return <div {...stylex.props(styles.code)}><div {...stylex.props(styles.codeHeader)}><span>Writing draft…</span></div></div>;
     const data = parseDraft(code);
-    if (data) return <DraftCard key={`${language}:${Boolean(onAction)}:${code}`} language={language} data={data} source={code} notify={notify} onAction={onAction} />;
+    if (data) return <DraftCard key={`${language}:${Boolean(onAction)}:${code}`} language={language} data={data} source={code} notify={notify} onAction={onAction} onPrefill={onPrefill} />;
   }
   if (language === 'visual' || language === 'html') return isIncomplete ? <div {...stylex.props(styles.code)}><div {...stylex.props(styles.codeHeader)}><span>Building visual…</span><CopyButton text={code} notify={notify} /></div><div role="status" {...stylex.props(styles.visual)} /></div> : <Visual source={code} notify={notify} />;
   return <div {...stylex.props(styles.code)}><div {...stylex.props(styles.codeHeader)}><span>{language || 'Text'}</span><CopyButton text={code} notify={notify} /></div><pre role="region" aria-label={(language || 'Text') + ' code'} tabIndex={0}>{children}</pre></div>;
@@ -114,10 +114,11 @@ function Diagram({ source, notify }: { source: string; notify: (text: string, ki
   </div>;
 }
 
-export function Messages({ chat, listRef, onAtBottomChange, notify, onZoom, onOpenSession, onComposeContext, onAskSidechat, agentIds }: {
+export function Messages({ chat, listRef, onAtBottomChange, notify, onZoom, onOpenSession, onComposeContext, onPrefill, onAskSidechat, agentIds }: {
   chat: UseChat; listRef: RefObject<VirtuosoHandle | null>; onAtBottomChange: (isAtBottom: boolean) => void; notify: (text: string, kind?: 'success' | 'error') => void; onZoom: (src: string) => void;
   onOpenSession: (sessionId: string) => void;
   onComposeContext: (context: { messageId: string; text: string }) => void;
+  onPrefill?: (text: string) => void;
   onAskSidechat: (context: { messageId: string; text: string }) => void;
   agentIds?: string[];
 }) {
@@ -210,21 +211,21 @@ export function Messages({ chat, listRef, onAtBottomChange, notify, onZoom, onOp
     const attachments = attachmentMatch ? attachmentMatch[1].trim().split('\n').flatMap(line => { const match = line.match(/^- (.*) → (.+\/([^/]+))$/); return match ? [{ name: match[1], src: '/api/upload/' + encodeURIComponent(match[3]) }] : []; }) : [];
     return <article key={message.seq} data-message-id={message.seq} data-message-role={message.role} data-turn-index={groups.indexOf(group)} data-selectable={selectableId === String(message.seq)} tabIndex={text ? 0 : undefined} aria-haspopup={text ? 'menu' : undefined} aria-keyshortcuts={text ? 'Shift+F10' : undefined} aria-label={message.role === 'user' ? 'Your message' : 'Response'} {...stylex.props(styles.message, message.role === 'user' && styles.user)}>
       {attachments.map(attachment => /\.(?:png|jpe?g|gif|webp|avif)$/i.test(attachment.src) ? <button key={attachment.src} {...stylex.props(styles.imageButton)} onClick={() => onZoom(attachment.src)}><img src={attachment.src} alt={attachment.name} {...stylex.props(styles.image)} /></button> : <a key={attachment.src} href={attachment.src} target="_blank" rel="noopener noreferrer" {...stylex.props(styles.fileAttachment)}><FileText size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /><span>{attachment.name}</span></a>)}
-      {message.role === 'user' ? <div {...stylex.props(styles.userText)}>{text}</div> : <ResponseMarkdown text={text} sessionId={chat.sessionId} notify={notify} onZoom={onZoom} onAction={!liveAssistant?.text && message.seq === lastConversationMessage?.seq ? onDraftAction : undefined} />}
+      {message.role === 'user' ? <div {...stylex.props(styles.userText)}>{text}</div> : <ResponseMarkdown text={text} sessionId={chat.sessionId} notify={notify} onZoom={onZoom} onAction={!liveAssistant?.text && message.seq === lastConversationMessage?.seq ? onDraftAction : undefined} onPrefill={!liveAssistant?.text && message.seq === lastConversationMessage?.seq ? onPrefill : undefined} />}
       {message.blocks.filter(block => block.type === 'image').map((block, index) => block.type === 'image' ? <button key={index} {...stylex.props(styles.imageButton)} onClick={() => onZoom('/api/media/' + block.mediaId)}><img src={'/api/media/' + block.mediaId} alt="Attachment" loading="lazy" {...stylex.props(styles.image)} /></button> : undefined)}
     </article>;
   }
 }
 
-function ResponseMarkdown({ text, sessionId, notify, onZoom, onAction, isStreaming = false }: { text: string; sessionId?: string; notify: (text: string, kind?: 'success' | 'error') => void; onZoom: (src: string) => void; onAction?: (text: string) => void; isStreaming?: boolean }) {
-  return <MarkdownContext value={{ text, sessionId, notify, onZoom, onAction, isStreaming }}><div className="markdown"><ReactMarkdown remarkPlugins={markdownPlugins} rehypePlugins={highlightPlugins} components={markdownComponents}>{text}</ReactMarkdown></div></MarkdownContext>;
+function ResponseMarkdown({ text, sessionId, notify, onZoom, onAction, onPrefill, isStreaming = false }: { text: string; sessionId?: string; notify: (text: string, kind?: 'success' | 'error') => void; onZoom: (src: string) => void; onAction?: (text: string) => void; onPrefill?: (text: string) => void; isStreaming?: boolean }) {
+  return <MarkdownContext value={{ text, sessionId, notify, onZoom, onAction, onPrefill, isStreaming }}><div className="markdown"><ReactMarkdown remarkPlugins={markdownPlugins} rehypePlugins={highlightPlugins} components={markdownComponents}>{text}</ReactMarkdown></div></MarkdownContext>;
 }
 
-const MarkdownContext = createContext<{ text: string; sessionId?: string; isStreaming: boolean; notify: (text: string, kind?: 'success' | 'error') => void; onZoom: (src: string) => void; onAction?: (text: string) => void }>({ text: '', isStreaming: false, notify: () => {}, onZoom: () => {} });
+const MarkdownContext = createContext<{ text: string; sessionId?: string; isStreaming: boolean; notify: (text: string, kind?: 'success' | 'error') => void; onZoom: (src: string) => void; onAction?: (text: string) => void; onPrefill?: (text: string) => void }>({ text: '', isStreaming: false, notify: () => {}, onZoom: () => {} });
 const markdownComponents: Components = {
   pre: function MarkdownCode({ children, node }) {
-    const { text, notify, isStreaming, onAction } = useContext(MarkdownContext);
-    return <CodeBlock notify={notify} onAction={onAction} isIncomplete={isStreaming && !/(?:^|\n)\s*(?:`{3,}|~{3,})\s*$/.test(text.slice(node?.position?.start.offset, node?.position?.end.offset))}>{children}</CodeBlock>;
+    const { text, notify, isStreaming, onAction, onPrefill } = useContext(MarkdownContext);
+    return <CodeBlock notify={notify} onAction={onAction} onPrefill={onPrefill} isIncomplete={isStreaming && !/(?:^|\n)\s*(?:`{3,}|~{3,})\s*$/.test(text.slice(node?.position?.start.offset, node?.position?.end.offset))}>{children}</CodeBlock>;
   },
   table: ({ children }) => <div role="region" aria-label="Response table" tabIndex={0} {...stylex.props(styles.tableScroll)}><table>{children}</table></div>,
   img: function MarkdownImage({ src, alt }) {
@@ -243,7 +244,7 @@ const styles = stylex.create({
   row: { display: 'flex', flexDirection: 'column', width: '100%', minWidth: 0, maxWidth: 736, margin: '0 auto', padding: '0 max(20px, env(safe-area-inset-right)) 14px max(20px, env(safe-area-inset-left))', alignItems: 'stretch' },
   activityRow: { paddingBottom: 4 },
   firstRow: { paddingTop: 'calc(var(--header-height) + 12px)' },
-  bottomSpace: { height: 'calc(var(--composer-height) + var(--workspace-height, 0px))' },
+  bottomSpace: { height: 'calc(var(--composer-height) + var(--workspace-height, 0px) + 16px)' },
   message: { minWidth: 0, maxWidth: '100%', flexShrink: 0 },
   user: { alignSelf: 'flex-end', backgroundColor: tokens.bubble, borderRadius: 24, padding: '12px 18px', maxWidth: '88%', fontSize: '1rem', lineHeight: 1.55 },
   userText: { fontFamily: 'var(--font-content)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },

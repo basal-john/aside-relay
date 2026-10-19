@@ -106,7 +106,7 @@ export function QueuedBubble({ message, index, chat, isEditing, isAnotherEditing
 const styles = stylex.create({
   message: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', alignSelf: 'flex-end', minWidth: 0, maxWidth: '88%', gap: 8 },
   meta: { display: 'flex', alignItems: 'center', gap: 6, color: tokens.muted, fontSize: '0.8125rem', paddingRight: 3 },
-  menuTrigger: { display: 'grid', placeItems: 'center', width: 32, height: 32, borderWidth: 0, borderRadius: 12, padding: 0, color: tokens.muted, backgroundColor: { default: 'transparent', ':hover': tokens.hover } },
+  menuTrigger: { display: 'grid', placeItems: 'center', width: 44, height: 44, borderWidth: 0, borderRadius: 12, padding: 0, color: tokens.muted, backgroundColor: { default: 'transparent', ':hover': tokens.hover } },
   bubble: { backgroundColor: tokens.bubble, borderRadius: 24, padding: '12px 18px', minWidth: 0, maxWidth: '100%', fontSize: '1rem', lineHeight: 1.55, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
   editBubble: { width: 'min(540px, 100%)' },
   editInput: { display: 'block', width: '100%', maxHeight: 160, minHeight: 72, resize: 'none', padding: 0, borderWidth: 0, color: tokens.text, backgroundColor: 'transparent', fontFamily: tokens.font, fontSize: '1rem', lineHeight: 1.55, overflowWrap: 'anywhere' },

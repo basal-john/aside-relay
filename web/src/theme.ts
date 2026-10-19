@@ -27,7 +27,7 @@ export function applyTheme(theme: Theme, appearance = loadAppearance()) {
   root.style.colorScheme = theme;
   document.body.style.backgroundColor = background;
   document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', theme);
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', background);
+  document.querySelectorAll('meta[name="theme-color"]').forEach(meta => { meta.setAttribute('content', background); meta.removeAttribute('media'); });
 }
 
 export type ThemeMode = Theme | 'system';

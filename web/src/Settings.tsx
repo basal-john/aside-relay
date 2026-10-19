@@ -1,7 +1,7 @@
 import { APP_NAME } from './brand';
 import { useCallback, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { ChevronRight, SlidersHorizontal } from 'lucide-react';
+import { ChevronRight, RotateCw, SlidersHorizontal } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
 import type { UseChat } from './types';
 import { ICON_STROKE, styles as ui } from './ui';
@@ -56,6 +56,7 @@ export function Settings({ chat, notify, notifications, isDarkMode, onThemeToggl
       <div role="group" aria-label="Primary color presets" {...stylex.props(styles.swatches)}>{ACCENT_COLORS.map(color => <button key={color} type="button" aria-label={'Primary color ' + color} aria-pressed={appearance.accent === color} onClick={() => onAppearanceChange({ ...appearance, accent: color })} {...stylex.props(styles.swatch, appearance.accent === color && styles.selectedSwatch)} style={{ backgroundColor: color }} />)}</div>
       {([{ key: 'uiFont', label: 'UI font', fonts: UI_FONTS }, { key: 'contentFont', label: 'Content font', fonts: UI_FONTS }, { key: 'codeFont', label: 'Code font', fonts: CODE_FONTS }] as const).map(({ key, label, fonts }) => <div key={key} {...stylex.props(styles.statusRow)}><label htmlFor={key}>{label}</label><select id={key} value={appearance[key]} onChange={event => onAppearanceChange({ ...appearance, [key]: event.target.value })} {...stylex.props(styles.textSize)}>{fonts.map(font => <option key={font.id} value={font.id}>{font.name}</option>)}</select></div>)}
       <p {...stylex.props(ui.muted)}>The interface, messages and code can each use a different font.</p></section>
+    <section><h3 {...stylex.props(styles.heading)}>App</h3><p {...stylex.props(ui.muted)}>Reload to pick up an update or recover a stuck screen. Your conversations stay on the Mac.</p><div {...stylex.props(styles.actions)}><Button onClick={() => location.reload()}><RotateCw size={16} aria-hidden="true" />Reload app</Button></div></section>
   </div>;
 }
 

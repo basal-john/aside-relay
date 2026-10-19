@@ -67,7 +67,8 @@
   .queued-message-menu, .message-menu, .session-menu { opacity: 0; transition: opacity 140ms ease, display 140ms allow-discrete, overlay 140ms allow-discrete; }
   .queued-message-menu:popover-open, .message-menu:popover-open, .session-menu:popover-open { opacity: 1; }
   @starting-style { .queued-message-menu:popover-open, .message-menu:popover-open, .session-menu:popover-open { opacity: 0; } }
-  article[data-message-id] { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+  article[data-message-id] { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; transition: background-color 200ms ease; }
+  article[data-message-id][data-pressing] { background-color: var(--hover); border-radius: 16px; }
   article[data-selectable="true"], article[data-selectable="true"] *, pre, pre *, code, code * { -webkit-touch-callout: default; user-select: text; -webkit-user-select: text; }
   ::selection { background: var(--selection); }
   .markdown { font-family: var(--font-content); font-size: 1rem; line-height: 1.6; overflow-wrap: anywhere; min-width: 0; }

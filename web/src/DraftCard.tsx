@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { AtSign, Briefcase, Calendar, Code2, Copy, Mail, MessageCircle, MessageSquare, Send } from 'lucide-react';
+import { AtSign, Briefcase, Calendar, Code2, Copy, FilePlus, Mail, MessageCircle, MessageSquare, Pencil, Send } from 'lucide-react';
 import { tokens } from './tokens.stylex';
 import { Button } from './Button';
 import { describeDraft, type DraftData, type DraftKind } from './drafts';
@@ -8,10 +8,11 @@ import { describeDraft, type DraftData, type DraftKind } from './drafts';
 const icons: Record<DraftKind, typeof Mail> = { mail: Mail, imessage: MessageCircle, slack: MessageSquare, linkedin: Briefcase, calendar: Calendar, x: AtSign };
 
 /**
- * Renders an Aside draft-preview fence as a card. The action button asks for a second tap,
+ * Renders an Aside draft-preview fence as a card. Copy works locally. Edit prefills the composer.
+ * Save draft goes back to the agent as a follow-up. The action button asks for a second tap,
  * then sends its label back to the agent as a follow-up, as the native app's button does.
  */
-export function DraftCard({ language, data, source, notify, onAction }: { language: string; data: DraftData; source: string; notify: (text: string, kind?: 'success' | 'error') => void; onAction?: (text: string) => void }) {
+export function DraftCard({ language, data, source, notify, onAction, onPrefill }: { language: string; data: DraftData; source: string; notify: (text: string, kind?: 'success' | 'error') => void; onAction?: (text: string) => void; onPrefill?: (text: string) => void }) {
   const draft = describeDraft(language, data);
   const Icon = icons[draft.kind];
   const [isSource, setSource] = useState(false);
@@ -24,7 +25,7 @@ export function DraftCard({ language, data, source, notify, onAction }: { langua
   }
   function act() {
     if (!draft.action || !onAction) return;
-    if (!isArmed) { setArmed(true); return; }
+    if (!isArmed) { setArmed(true); navigator.vibrate?.(10); return; }
     setArmed(false); onAction(draft.action);
   }
   return <section aria-label={draft.label} {...stylex.props(styles.card)}>
@@ -36,6 +37,8 @@ export function DraftCard({ language, data, source, notify, onAction }: { langua
     </>}
     <footer {...stylex.props(styles.actions)}>
       <Button onClick={() => { void copy(); }}><Copy size={16} aria-hidden="true" />Copy</Button>
+      {onPrefill && <Button onClick={() => onPrefill('Change the draft: ')}><Pencil size={16} aria-hidden="true" />Edit</Button>}
+      {draft.saveDraft && onAction && <Button onClick={() => onAction(draft.saveDraft ?? '')}><FilePlus size={16} aria-hidden="true" />Save draft</Button>}
       {draft.action && onAction && <Button variant={isArmed ? 'danger' : 'primary'} onClick={act}><Send size={16} aria-hidden="true" />{isArmed ? `Tap again to ${draft.action.toLowerCase()}` : draft.action}</Button>}
     </footer>
   </section>;

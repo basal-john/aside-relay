@@ -17,13 +17,16 @@ test('gmail drafts expose recipients, subject, body and the native Send action',
   assert.equal(draft.action, 'Send')
 })
 
-test('actions match the native app: drafts with a button get one, previews and chat drafts do not', () => {
+test('drafts with a button get one, chat drafts get Send, previews get none', () => {
   const actions = Object.fromEntries([...DRAFT_LANGUAGES].map(language => [language, describeDraft(language, {}).action]))
   assert.equal(actions['imessage-draft'], 'Send')
   assert.equal(actions['calendar-event-draft'], 'Send invite')
   assert.equal(actions['x-tweet-draft'], 'Post')
   assert.equal(actions['linkedin-post-draft'], 'Post')
-  for (const language of ['tweet', 'x-post', 'linkedin-post', 'slack-draft', 'linkedin-draft']) assert.equal(actions[language], undefined, language)
+  for (const language of ['slack-draft', 'slack-message-draft', 'linkedin-draft', 'linkedin-message-draft']) assert.equal(actions[language], 'Send', language)
+  for (const language of ['tweet', 'x-post', 'linkedin-post']) assert.equal(actions[language], undefined, language)
+  assert.equal(describeDraft('gmail-draft', {}).saveDraft, 'Do not send it. Save this email as a draft in Gmail instead.')
+  assert.equal(describeDraft('slack-draft', {}).saveDraft, undefined)
 })
 
 test('chat drafts fall back to body and keep the thread context', () => {

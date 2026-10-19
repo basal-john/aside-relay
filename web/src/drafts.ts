@@ -1,6 +1,6 @@
 export type DraftData = Record<string, unknown>;
 export type DraftKind = 'mail' | 'imessage' | 'slack' | 'linkedin' | 'calendar' | 'x';
-export type Draft = { kind: DraftKind; label: string; fields: [string, string][]; thread: { name: string; message: string }[]; body: string; action?: string };
+export type Draft = { kind: DraftKind; label: string; fields: [string, string][]; thread: { name: string; message: string }[]; body: string; action?: string; saveDraft?: string };
 
 /** Fence languages emitted by Aside's built-in draft-preview skill, matching the native app's renderer list. */
 export const DRAFT_LANGUAGES = new Set(['calendar-draft', 'calendar-event-draft', 'gmail-draft', 'imessage-draft', 'linkedin-draft', 'linkedin-message-draft', 'linkedin-post', 'linkedin-post-draft', 'slack-draft', 'slack-message-draft', 'tweet', 'tweet-draft', 'x-post', 'x-post-draft', 'x-tweet', 'x-tweet-draft']);
@@ -33,13 +33,13 @@ export function describeDraft(language: string, data: DraftData): Draft {
   const author = [text(profile.authorName), text(profile.handle) && '@' + text(profile.handle), text(profile.headline)].filter(Boolean).join(' · ');
   switch (language) {
     case 'gmail-draft':
-      return { kind: 'mail', label: 'Email draft', fields: [['To', list(data.to).join(', ')], ['Cc', list(data.cc).join(', ')], ['Bcc', list(data.bcc).join(', ')], ['Subject', text(data.subject)]], thread: [], body: text(data.body), action: 'Send' };
+      return { kind: 'mail', label: 'Email draft', fields: [['To', list(data.to).join(', ')], ['Cc', list(data.cc).join(', ')], ['Bcc', list(data.bcc).join(', ')], ['Subject', text(data.subject)]], thread: [], body: text(data.body), action: 'Send', saveDraft: 'Do not send it. Save this email as a draft in Gmail instead.' };
     case 'imessage-draft':
       return { kind: 'imessage', label: 'iMessage draft', fields: [['To', text(data.to) || list(data.to).join(', ')], ['Files', list(data.attachments ?? data.attachment ?? data.attachmentPaths ?? data.attachmentPath).join(', ')]], thread, body: draft, action: 'Send' };
     case 'slack-draft': case 'slack-message-draft':
-      return { kind: 'slack', label: 'Slack draft', fields: [['Where', `${text(data.workspace, 'Slack')} · #${text(data.channel, 'channel')}`]], thread, body: draft };
+      return { kind: 'slack', label: 'Slack draft', fields: [['Where', `${text(data.workspace, 'Slack')} · #${text(data.channel, 'channel')}`]], thread, body: draft, action: 'Send' };
     case 'linkedin-draft': case 'linkedin-message-draft':
-      return { kind: 'linkedin', label: 'LinkedIn message', fields: [['To', records(data.profiles).map(item => text(item.name)).filter(Boolean).join(', ')]], thread, body: draft };
+      return { kind: 'linkedin', label: 'LinkedIn message', fields: [['To', records(data.profiles).map(item => text(item.name)).filter(Boolean).join(', ')]], thread, body: draft, action: 'Send' };
     case 'calendar-event-draft': case 'calendar-draft':
       return { kind: 'calendar', label: 'Calendar invite', fields: [['Title', text(data.title)], ['When', text(data.time)], ['Calendar', text(data.calendarName, 'Calendar')], ['Where', text(data.location)], ['Guests', records(data.attendees).map(item => text(item.name) || text(item.email)).filter(Boolean).join(', ')], ['Reminder', text(data.reminder)], ['Description', text(data.description)]], thread: [], body: draft, action: 'Send invite' };
     case 'linkedin-post': case 'linkedin-post-draft':

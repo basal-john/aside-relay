@@ -28,7 +28,7 @@ export type MessageMenuOptions = {
 export function useMessageMenu({ textForMessage, notify, ...options }: MessageMenuOptions) {
   const menuRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<SelectedMessage | undefined>(undefined);
-  const pressRef = useRef<{ x: number; y: number; timer: ReturnType<typeof setTimeout> } | undefined>(undefined);
+  const pressRef = useRef<{ x: number; y: number; timer: ReturnType<typeof setTimeout>; cue: ReturnType<typeof setTimeout>; article?: HTMLElement } | undefined>(undefined);
   const [selectableId, setSelectableId] = useState<string>();
   const [selectedMessage, setSelectedMessage] = useState<SelectedMessage>();
   const [editTarget, setEditTarget] = useState<SelectedMessage>();
@@ -36,7 +36,7 @@ export function useMessageMenu({ textForMessage, notify, ...options }: MessageMe
   const [isSaving, setSaving] = useState(false);
 
   function cancelPress() {
-    if (pressRef.current) clearTimeout(pressRef.current.timer);
+    if (pressRef.current) { clearTimeout(pressRef.current.timer); clearTimeout(pressRef.current.cue); delete pressRef.current.article?.dataset.pressing; }
     pressRef.current = undefined;
   }
 
@@ -101,7 +101,8 @@ export function useMessageMenu({ textForMessage, notify, ...options }: MessageMe
       if (!message) return;
       setSelectableId(undefined);
       const { clientX: x, clientY: y } = event;
-      pressRef.current = { x, y, timer: setTimeout(() => openMenu(message, x, y), LONG_PRESS_MS) };
+      const article = event.target instanceof Element ? event.target.closest<HTMLElement>('article[data-message-id]') ?? undefined : undefined;
+      pressRef.current = { x, y, article, cue: setTimeout(() => { if (article && event.pointerType === 'touch') article.dataset.pressing = ''; }, 150), timer: setTimeout(() => { cancelPress(); openMenu(message, x, y); }, LONG_PRESS_MS) };
     },
     onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
       const press = pressRef.current;

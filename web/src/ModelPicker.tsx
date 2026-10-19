@@ -146,7 +146,7 @@ function sortModels(models: AvailableModel[]) {
 }
 
 const styles = stylex.create({
-  trigger: { display: 'flex', alignItems: 'center', gap: 6, minHeight: 32, maxWidth: 190, minWidth: 0, padding: '0 10px', borderWidth: 0, borderRadius: 20, backgroundColor: { default: 'transparent', ':hover': tokens.hover }, color: tokens.muted, fontSize: '.6875rem', pointerEvents: 'auto', '@media (max-width: 375px)': { maxWidth: 172 } },
+  trigger: { position: 'relative', '::after': { content: '""', position: 'absolute', inset: '-6px 0' }, display: 'flex', alignItems: 'center', gap: 6, minHeight: 32, maxWidth: 190, minWidth: 0, padding: '0 10px', borderWidth: 0, borderRadius: 20, backgroundColor: { default: 'transparent', ':hover': tokens.hover }, color: tokens.muted, fontSize: '.6875rem', pointerEvents: 'auto', '@media (max-width: 375px)': { maxWidth: 172 } },
   name: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 },
   triggerText: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 },
   effort: { fontSize: '0.625rem' },
