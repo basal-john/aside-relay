@@ -19,6 +19,8 @@ import { useMessageMenu } from './useMessageMenu';
 import { QueuedBubble } from './QueuedMessages';
 import { Button } from './Button';
 import { Dialog, DialogDescription } from './Dialog';
+import { DraftCard } from './DraftCard';
+import { DRAFT_LANGUAGES, parseDraft } from './drafts';
 
 const markdownPlugins = [remarkGfm];
 const highlightPlugins = [rehypeHighlight];
@@ -50,11 +52,16 @@ function CopyButton({ text, notify }: { text: string; notify: (text: string, kin
   }}>{isCopied ? <Check size={18} strokeWidth={ICON_STROKE} /> : <Copy size={18} strokeWidth={ICON_STROKE} />}</IconButton>;
 }
 
-function CodeBlock({ children, notify, isIncomplete }: { children: ReactNode; notify: (text: string, kind?: 'success' | 'error') => void; isIncomplete: boolean }) {
+function CodeBlock({ children, notify, isIncomplete, onAction }: { children: ReactNode; notify: (text: string, kind?: 'success' | 'error') => void; isIncomplete: boolean; onAction?: (text: string) => void }) {
   const code = textContent(children);
   const child = Children.toArray(children)[0];
   const language = typeof child === 'object' && 'props' in child ? (child.props as { className?: string }).className?.match(/language-(\S+)/)?.[1] : undefined;
   if (language === 'mermaid') return <Diagram source={code} notify={notify} />;
+  if (language && DRAFT_LANGUAGES.has(language)) {
+    if (isIncomplete) return <div {...stylex.props(styles.code)}><div {...stylex.props(styles.codeHeader)}><span>Writing draft…</span></div></div>;
+    const data = parseDraft(code);
+    if (data) return <DraftCard language={language} data={data} source={code} notify={notify} onAction={onAction} />;
+  }
   if (language === 'visual' || language === 'html') return isIncomplete ? <div {...stylex.props(styles.code)}><div {...stylex.props(styles.codeHeader)}><span>Building visual…</span><CopyButton text={code} notify={notify} /></div><div role="status" {...stylex.props(styles.visual)} /></div> : <Visual source={code} notify={notify} />;
   return <div {...stylex.props(styles.code)}><div {...stylex.props(styles.codeHeader)}><span>{language || 'Text'}</span><CopyButton text={code} notify={notify} /></div><pre role="region" aria-label={(language || 'Text') + ' code'} tabIndex={0}>{children}</pre></div>;
 }
@@ -117,6 +124,7 @@ export function Messages({ chat, listRef, onAtBottomChange, notify, onZoom, onOp
   const { messages, pendingPrompt, liveAssistant, isRunning } = chat;
   const [isNavigatingTurns, setNavigatingTurns] = useState(false);
   const shouldReduceMotion = useReducedMotion();
+  const lastAssistantSeq = [...messages].reverse().find(message => message.role === 'assistant')?.seq;
   const sources = [...new Map(messages.flatMap(message => message.sources ?? []).map(source => [source.id, source])).values()];
   const messageById = new Map(messages.map(message => [String(message.seq), message]));
   const { handlers, menu, selectableId } = useMessageMenu(id => {
@@ -201,21 +209,21 @@ export function Messages({ chat, listRef, onAtBottomChange, notify, onZoom, onOp
     const attachments = attachmentMatch ? attachmentMatch[1].trim().split('\n').flatMap(line => { const match = line.match(/^- (.*) → (.+\/([^/]+))$/); return match ? [{ name: match[1], src: '/api/upload/' + encodeURIComponent(match[3]) }] : []; }) : [];
     return <article key={message.seq} data-message-id={message.seq} data-message-role={message.role} data-turn-index={groups.indexOf(group)} data-selectable={selectableId === String(message.seq)} tabIndex={text ? 0 : undefined} aria-haspopup={text ? 'menu' : undefined} aria-keyshortcuts={text ? 'Shift+F10' : undefined} aria-label={message.role === 'user' ? 'Your message' : 'Response'} {...stylex.props(styles.message, message.role === 'user' && styles.user)}>
       {attachments.map(attachment => /\.(?:png|jpe?g|gif|webp|avif)$/i.test(attachment.src) ? <button key={attachment.src} {...stylex.props(styles.imageButton)} onClick={() => onZoom(attachment.src)}><img src={attachment.src} alt={attachment.name} {...stylex.props(styles.image)} /></button> : <a key={attachment.src} href={attachment.src} target="_blank" rel="noopener noreferrer" {...stylex.props(styles.fileAttachment)}><FileText size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /><span>{attachment.name}</span></a>)}
-      {message.role === 'user' ? <div {...stylex.props(styles.userText)}>{text}</div> : <ResponseMarkdown text={text} notify={notify} onZoom={onZoom} />}
+      {message.role === 'user' ? <div {...stylex.props(styles.userText)}>{text}</div> : <ResponseMarkdown text={text} notify={notify} onZoom={onZoom} onAction={!isRunning && message.seq === lastAssistantSeq ? prompt => { void chat.send(prompt); } : undefined} />}
       {message.blocks.filter(block => block.type === 'image').map((block, index) => block.type === 'image' ? <button key={index} {...stylex.props(styles.imageButton)} onClick={() => onZoom('/api/media/' + block.mediaId)}><img src={'/api/media/' + block.mediaId} alt="Attachment" loading="lazy" {...stylex.props(styles.image)} /></button> : undefined)}
     </article>;
   }
 }
 
-function ResponseMarkdown({ text, notify, onZoom, isStreaming = false }: { text: string; notify: (text: string, kind?: 'success' | 'error') => void; onZoom: (src: string) => void; isStreaming?: boolean }) {
-  return <MarkdownContext value={{ text, notify, onZoom, isStreaming }}><div className="markdown"><ReactMarkdown remarkPlugins={markdownPlugins} rehypePlugins={highlightPlugins} components={markdownComponents}>{text}</ReactMarkdown></div></MarkdownContext>;
+function ResponseMarkdown({ text, notify, onZoom, onAction, isStreaming = false }: { text: string; notify: (text: string, kind?: 'success' | 'error') => void; onZoom: (src: string) => void; onAction?: (text: string) => void; isStreaming?: boolean }) {
+  return <MarkdownContext value={{ text, notify, onZoom, onAction, isStreaming }}><div className="markdown"><ReactMarkdown remarkPlugins={markdownPlugins} rehypePlugins={highlightPlugins} components={markdownComponents}>{text}</ReactMarkdown></div></MarkdownContext>;
 }
 
-const MarkdownContext = createContext<{ text: string; isStreaming: boolean; notify: (text: string, kind?: 'success' | 'error') => void; onZoom: (src: string) => void }>({ text: '', isStreaming: false, notify: () => {}, onZoom: () => {} });
+const MarkdownContext = createContext<{ text: string; isStreaming: boolean; notify: (text: string, kind?: 'success' | 'error') => void; onZoom: (src: string) => void; onAction?: (text: string) => void }>({ text: '', isStreaming: false, notify: () => {}, onZoom: () => {} });
 const markdownComponents: Components = {
   pre: function MarkdownCode({ children, node }) {
-    const { text, notify, isStreaming } = useContext(MarkdownContext);
-    return <CodeBlock notify={notify} isIncomplete={isStreaming && !/(?:^|\n)\s*(?:`{3,}|~{3,})\s*$/.test(text.slice(node?.position?.start.offset, node?.position?.end.offset))}>{children}</CodeBlock>;
+    const { text, notify, isStreaming, onAction } = useContext(MarkdownContext);
+    return <CodeBlock notify={notify} onAction={onAction} isIncomplete={isStreaming && !/(?:^|\n)\s*(?:`{3,}|~{3,})\s*$/.test(text.slice(node?.position?.start.offset, node?.position?.end.offset))}>{children}</CodeBlock>;
   },
   table: ({ children }) => <div role="region" aria-label="Response table" tabIndex={0} {...stylex.props(styles.tableScroll)}><table>{children}</table></div>,
   img: function MarkdownImage({ src, alt }) {

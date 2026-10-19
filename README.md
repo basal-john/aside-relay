@@ -135,6 +135,8 @@ Click any image to view it at full size.
 
 - Live streamed responses, searchable and virtualized history, Markdown,
   compact D2Coding code blocks, linked citations, and expandable tool activity.
+- Draft cards for Aside's draft previews (email, iMessage, Slack, LinkedIn,
+  calendar invites, X posts) with Copy and the same Send/Post action as the app.
 - Interactive HTML visuals with preview/source switching, image zoom/pan, and
   file attachments. Browse conversation outputs and project files, preview
   documents and source, and rename or delete files within the permitted roots.
@@ -193,6 +195,7 @@ Click any image to view it at full size.
 | Inspect a tool call | Expand its activity summary; Technical details shows its inputs and output |
 | Browse generated files | Session options → Files & outputs |
 | Switch between an HTML visual and its code | Source / Preview inside the visual card |
+| Send an email, message, invite or post the agent drafted | Send or Post on the draft card, then tap again to confirm |
 | Watch or control a browser tab | Open the PiP or Drawer → Browser; select a tab and enable Control |
 | Zoom a browser preview | Tap the preview in the browser sheet; use zoom controls, pinch or pan |
 | Manage projects, routines, skills or MCP | Drawer → Settings → Workspace & preferences |
