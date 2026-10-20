@@ -61,8 +61,11 @@ class NativeQueue:
             await asyncio.sleep(delay)
             values = await self.list(session_id)
             added = [value for value in values if _native_key(value) not in before]
-            if added:
-                return added[-1]
+            matching = [value for value in added if value.get("prompt", "").strip() == prompt]
+            if len(matching) == 1:
+                return matching[0]
+            if len(matching) > 1:
+                return None
         return None
 
     async def update(self, session_id: str, item: QueueItem, update: QueueItem) -> QueueItem:
