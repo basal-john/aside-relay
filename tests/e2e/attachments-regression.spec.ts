@@ -33,6 +33,22 @@ test('relative Markdown image loads through the session file API and keeps its U
   await expect.poll(() => expandedImage.evaluate(element => element instanceof HTMLImageElement ? element.naturalWidth : 0)).toBeGreaterThan(0);
 });
 
+test('queued PDF renders as a named file link instead of an image', async ({ page, mockAside }) => {
+  const pdfUrl = '/api/upload/queued-report.pdf';
+  mockAside.followups.set(SESSION_A, [{
+    id: 'queued-pdf',
+    prompt: 'Review the queued report.',
+    attachments: [{ id: 'queued-pdf-file', name: 'queued-report.pdf', mime: 'application/pdf', bytes: 1_024, url: pdfUrl }],
+    status: 'queued',
+  }]);
+
+  await page.goto(`/c/${SESSION_A}`);
+  const queuedMessage = page.getByRole('article', { name: 'Queued message 1' });
+  const fileLink = queuedMessage.getByRole('link', { name: 'queued-report.pdf' });
+  await expect(fileLink).toHaveAttribute('href', pdfUrl);
+  await expect(queuedMessage.getByRole('img')).toHaveCount(0);
+});
+
 test('sidebar shows ten recent conversations when no preference is stored', async ({ page, mockAside }) => {
   delete mockAside.preferences.sidebarRecentChatLimit;
   const referenceSession = mockAside.sessions[1];
