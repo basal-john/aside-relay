@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { ArrowUp, FileText, Mic, Plus, Square, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
@@ -57,6 +57,7 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
   // A touch submits before iOS can blur the input; its later click must not send again or activate the replacement Stop button.
   const isTouchSubmissionRef = useRef(false);
   const pendingPreviewRevokesRef = useRef<string[]>([]);
+  const submittedPreviewRevokesRef = useRef(new Map<string, { canRevoke: boolean; hasUnmounted: boolean }>());
   const revisionRef = useRef(revision);
   useEffect(() => { draftRef.current = draft; }, [draft]);
   useEffect(() => { attachmentRef.current = attachments; }, [attachments]);
@@ -71,7 +72,11 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
     attachmentRef.current = []; setAttachments([]);
     if (!document.querySelector(OPEN_DIALOG_SELECTOR)) input.current?.focus({ preventScroll: true });
   }, [revision]);
-  useEffect(() => () => { recognitionRef.current?.stop(); [...attachmentRef.current.flatMap(attachment => attachment.preview ? [attachment.preview] : []), ...pendingPreviewRevokesRef.current].forEach(preview => URL.revokeObjectURL(preview)); }, []);
+  useEffect(() => () => {
+    recognitionRef.current?.stop();
+    [...attachmentRef.current.flatMap(attachment => attachment.preview ? [attachment.preview] : []), ...pendingPreviewRevokesRef.current, ...submittedPreviewRevokesRef.current.keys()].forEach(preview => URL.revokeObjectURL(preview));
+    submittedPreviewRevokesRef.current.clear();
+  }, []);
   function resizeInput() { if (input.current) { input.current.style.height = 'auto'; input.current.style.height = Math.min(input.current.scrollHeight, MAX_DRAFT_HEIGHT) + 'px'; } }
   useLayoutEffect(resizeInput, [draft, textSize, uiFont, isExpanded]);
   useLayoutEffect(() => {
@@ -98,6 +103,29 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
   const shouldQueue = chat.isRunning || chat.queuedMessages.length > 0;
   const submitLabel = shouldQueue ? chat.isRunning && followUpBehavior === 'steer' ? 'Steer message' : 'Queue message' : chat.isSending ? 'Starting response' : 'Send message';
   function flushPreviewRevokes() { pendingPreviewRevokesRef.current.splice(0).forEach(preview => URL.revokeObjectURL(preview)); }
+  const markSubmittedPreviewUnmounted = useCallback((preview: string) => {
+    const pending = submittedPreviewRevokesRef.current.get(preview);
+    if (!pending) return;
+    if (pending.canRevoke) {
+      URL.revokeObjectURL(preview);
+      submittedPreviewRevokesRef.current.delete(preview);
+    } else {
+      pending.hasUnmounted = true;
+    }
+  }, []);
+  function allowSubmittedPreviewRevokes(sentAttachments: Attachment[]) {
+    sentAttachments.forEach(attachment => {
+      if (!attachment.preview) return;
+      const pending = submittedPreviewRevokesRef.current.get(attachment.preview);
+      if (!pending) return;
+      if (pending.hasUnmounted) {
+        URL.revokeObjectURL(attachment.preview);
+        submittedPreviewRevokesRef.current.delete(attachment.preview);
+      } else {
+        pending.canRevoke = true;
+      }
+    });
+  }
 
   async function addFiles(files: File[]) {
     const remaining = MAX_ATTACHMENTS - attachmentRef.current.length;
@@ -160,12 +188,14 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
     const sentDraft = draftRef.current; const sentRevision = revisionRef.current;
     const sentAttachments = attachmentRef.current;
     const uploads = sentAttachments.flatMap(attachment => attachment.upload ? [attachment.upload] : []);
+    sentAttachments.forEach(attachment => { if (attachment.preview) submittedPreviewRevokesRef.current.set(attachment.preview, { canRevoke: false, hasUnmounted: false }); });
     draftRef.current = ''; setDraft('');
     attachmentRef.current = []; setAttachments([]);
     input.current?.blur();
     const accepted = shouldQueue ? await chat.queue(sentDraft, uploads, chat.isRunning && followUpBehavior === 'steer') : await chat.send(sentDraft, uploads, modelSelection.current, runOptions);
-    if (sentRevision !== revisionRef.current) return;
-    if (!accepted) {
+    const shouldRestore = !accepted && sentRevision === revisionRef.current;
+    if (shouldRestore) {
+      sentAttachments.forEach(attachment => { if (attachment.preview) submittedPreviewRevokesRef.current.delete(attachment.preview); });
       attachmentRef.current = [...sentAttachments, ...attachmentRef.current].slice(0, MAX_ATTACHMENTS); setAttachments(attachmentRef.current);
       if (sentDraft) {
         const restoredDraft = draftRef.current ? sentDraft + '\n\n' + draftRef.current : sentDraft;
@@ -173,8 +203,9 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
       }
       return;
     }
+    allowSubmittedPreviewRevokes(sentAttachments);
+    if (sentRevision !== revisionRef.current) return;
     const sentKeys = new Set(sentAttachments.map(attachment => attachment.key));
-    pendingPreviewRevokesRef.current.push(...sentAttachments.flatMap(attachment => attachment.preview ? [attachment.preview] : []));
     attachmentRef.current = attachmentRef.current.filter(attachment => !sentKeys.has(attachment.key));
     setAttachments(attachmentRef.current);
   }
@@ -187,11 +218,7 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
     <form {...stylex.props(styles.composer, ui.glass, isExpanded && styles.expandedComposer)} onSubmit={event => { event.preventDefault(); void submit(); }} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addFiles([...event.dataTransfer.files]); }}>
       <AnimatePresence initial={false} onExitComplete={flushPreviewRevokes}>
         {attachments.length > 0 && <motion.div key="attachments" {...stylex.props(styles.attachments)} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 82 }} exit={{ opacity: 0, height: 0 }} transition={{ duration: .18 }}>
-          <AnimatePresence initial={false} onExitComplete={flushPreviewRevokes}>{attachments.map(attachment => <motion.div layout key={attachment.key} {...stylex.props(styles.attachment)} initial={{ opacity: 0, scale: .86, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .84, y: -6 }} transition={{ duration: .18, ease: [0.22, 1, 0.36, 1] }}>
-            {attachment.preview ? <img src={attachment.preview} alt={attachment.name} {...stylex.props(styles.thumbnail)} /> : <div {...stylex.props(styles.fileAttachment)}><FileText size={25} aria-hidden="true" /><span {...stylex.props(styles.fileName)}>{attachment.name}</span></div>}
-            {!attachment.upload && <span role="status" aria-label={attachment.name + (attachment.hasError ? ' failed to upload' : ' uploading')} {...stylex.props(styles.uploadState)}>{attachment.hasError ? 'Failed' : 'Uploading…'}</span>}
-            <motion.button type="button" {...stylex.props(styles.remove)} whileTap={{ scale: .86 }} aria-label={'Remove ' + attachment.name} onClick={() => { if (attachment.preview) pendingPreviewRevokesRef.current.push(attachment.preview); attachmentRef.current = attachmentRef.current.filter(item => item.key !== attachment.key); setAttachments(attachmentRef.current); }}><X size={14} strokeWidth={2} /></motion.button>
-          </motion.div>)}</AnimatePresence>
+          <AnimatePresence initial={false} onExitComplete={flushPreviewRevokes}>{attachments.map(attachment => <AttachmentItem key={attachment.key} attachment={attachment} onPreviewUnmount={markSubmittedPreviewUnmounted} onRemove={() => { if (attachment.preview) pendingPreviewRevokesRef.current.push(attachment.preview); attachmentRef.current = attachmentRef.current.filter(item => item.key !== attachment.key); setAttachments(attachmentRef.current); }} />)}</AnimatePresence>
         </motion.div>}
       </AnimatePresence>
       <div {...stylex.props(styles.inputActions)}><IconButton label="Add to message" aria-haspopup="dialog" style={{ width: 36, height: 36 }} disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={() => setAddingContext(true)}><Plus size={24} strokeWidth={ICON_STROKE} /></IconButton>{speechRecognition && <IconButton label={isDictating ? 'Stop dictation' : 'Dictate'} aria-pressed={isDictating} style={{ width: 36, height: 36 }} disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={toggleDictation}><Mic size={21} strokeWidth={ICON_STROKE} /></IconButton>}</div>
@@ -204,6 +231,15 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
     </form>
     <AnimatePresence>{isAddingContext && <ContextPicker request={chat.request} sessionId={chat.sessionId} onSelect={addContext} onChooseFiles={() => fileInput.current?.click()} onChooseFolder={() => folderInput.current?.click()} onClose={() => setAddingContext(false)} />}</AnimatePresence>
   </footer>;
+}
+
+function AttachmentItem({ attachment, onPreviewUnmount, onRemove }: { attachment: Attachment; onPreviewUnmount: (preview: string) => void; onRemove: () => void }) {
+  useEffect(() => () => { if (attachment.preview) onPreviewUnmount(attachment.preview); }, [attachment.preview, onPreviewUnmount]);
+  return <motion.div layout {...stylex.props(styles.attachment)} initial={{ opacity: 0, scale: .86, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .84, y: -6 }} transition={{ duration: .18, ease: [0.22, 1, 0.36, 1] }}>
+    {attachment.preview ? <img src={attachment.preview} alt={attachment.name} {...stylex.props(styles.thumbnail)} /> : <div {...stylex.props(styles.fileAttachment)}><FileText size={25} aria-hidden="true" /><span {...stylex.props(styles.fileName)}>{attachment.name}</span></div>}
+    {!attachment.upload && <span role="status" aria-label={attachment.name + (attachment.hasError ? ' failed to upload' : ' uploading')} {...stylex.props(styles.uploadState)}>{attachment.hasError ? 'Failed' : 'Uploading…'}</span>}
+    <motion.button type="button" {...stylex.props(styles.remove)} whileTap={{ scale: .86 }} aria-label={'Remove ' + attachment.name} onClick={onRemove}><X size={14} strokeWidth={2} /></motion.button>
+  </motion.div>;
 }
 
 async function resizeImage(file: File) {
