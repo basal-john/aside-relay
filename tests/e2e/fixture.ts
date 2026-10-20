@@ -217,7 +217,7 @@ export class MockAside {
     if (/^\/api\/tabs\/[^/]+\/focus$/.test(url.pathname)) return json(route, { ok: true });
     if (method === 'DELETE' && /^\/api\/tabs\/[^/]+$/.test(url.pathname)) { this.tabs = []; return json(route, { closed: true }); }
     const artifacts = url.pathname.match(/^\/api\/native\/files\/sessions\/([^/]+)\/artifacts$/);
-    if (artifacts && method === 'GET') return json(route, { items: [{ name: 'result.txt', path: 'result.txt', absolutePath: '/tmp/result.txt', bytes: 12, mtime: Date.now(), mime: 'text/plain', kind: 'text', previewUrl: '/preview/result.txt' }] });
+    if (artifacts && method === 'GET') return json(route, { items: [{ name: 'result.txt', path: 'result.txt', absolutePath: '/tmp/result.txt', bytes: 12, mtime: Date.now(), mime: 'text/plain', kind: 'text' }] });
     if (/\/artifact-preview$/.test(url.pathname)) return json(route, { content: 'E2E file content' });
     if (/\/artifacts\/result.txt$/.test(url.pathname)) return route.fulfill({ status: 200, contentType: 'text/plain', body: 'E2E file content' });
     if (method === 'GET' && url.pathname === '/api/native/files/roots') return json(route, { items: [] });

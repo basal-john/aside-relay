@@ -1,3 +1,6 @@
+import { isRecord } from './responses';
+import { formatBytes } from './format';
+import type { UseChat } from './types';
 import { useEffect, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { ArrowLeft, File, Folder, FolderOpen, Globe2, ImagePlus, Search, Sparkles } from 'lucide-react';
@@ -14,7 +17,7 @@ type Tab = { targetId: string; title: string; url: string };
 type PickerLocation = { root: NativeRoot; path: string; sessionId?: string };
 
 export function ContextPicker({ request, sessionId, skills = [], onSelect, onChooseFiles, onChooseFolder, onClose }: {
-  request: (path: string, init?: RequestInit) => Promise<Response>;
+  request: UseChat['request'];
   sessionId?: string;
   skills?: ContextSkill[];
   onSelect: (reference: ContextReference) => void;
@@ -44,9 +47,9 @@ export function ContextPicker({ request, sessionId, skills = [], onSelect, onCho
     setLocation(current => current?.sessionId === sessionId ? current : undefined);
     setEntries([]);
     Promise.all([
-      request(`/api/native/files/roots${session}`, { signal: controller.signal }).then(readJson),
-      request(`/api/tabs${sessionId ? `?session=${encodeURIComponent(sessionId)}` : ''}`, { signal: controller.signal }).then(readJson),
-      request('/api/native/workspace/skills', { signal: controller.signal }).then(readJson).catch(() => []),
+      request(`/api/native/files/roots${session}`, { signal: controller.signal }).then(response => response.json()),
+      request(`/api/tabs${sessionId ? `?session=${encodeURIComponent(sessionId)}` : ''}`, { signal: controller.signal }).then(response => response.json()),
+      request('/api/native/workspace/skills', { signal: controller.signal }).then(response => response.json()).catch(() => []),
     ]).then(([rootPayload, tabPayload, skillPayload]) => {
       if (controller.signal.aborted) return;
       setRoots(parseRoots(rootPayload));
@@ -68,7 +71,7 @@ export function ContextPicker({ request, sessionId, skills = [], onSelect, onCho
     setEntries([]);
     setError('');
     setLoadingEntries(true);
-    request(`/api/native/files/browse?${params}`, { signal: controller.signal }).then(readJson).then(payload => {
+    request(`/api/native/files/browse?${params}`, { signal: controller.signal }).then(response => response.json()).then(payload => {
       if (controller.signal.aborted) return;
       setEntries(parseEntries(payload)); setError('');
     }).catch(reason => {
@@ -105,7 +108,7 @@ export function ContextPicker({ request, sessionId, skills = [], onSelect, onCho
       {activeLocation ? visibleEntries.map(entry => <div key={entry.path} {...stylex.props(styles.entry)}><button type="button" {...stylex.props(styles.entryMain)} onClick={() => {
         if (entry.kind === 'folder') { openLocation({ ...activeLocation, path: entry.path }); return; }
         choose({ kind: 'file', label: entry.name, value: `[@file](${entry.absolutePath})` });
-      }}>{entry.kind === 'folder' ? <Folder size={19} /> : <File size={19} />}<span {...stylex.props(styles.rowText)}><strong {...stylex.props(styles.rowTitle)}>{entry.name}</strong><small {...stylex.props(styles.rowMeta)}>{entry.kind === 'folder' ? 'Folder' : formatBytes(entry.bytes)}</small></span></button>{entry.kind === 'folder' && <Button size="compact" onClick={() => choose({ kind: 'folder', label: entry.name, value: `[@folder](${entry.absolutePath})` })}>Add</Button>}</div>) : <>
+      }}>{entry.kind === 'folder' ? <Folder size={19} /> : <File size={19} />}<span {...stylex.props(styles.rowText)}><strong {...stylex.props(styles.rowTitle)}>{entry.name}</strong><small {...stylex.props(styles.rowMeta)}>{entry.kind === 'folder' ? 'Folder' : entry.bytes == null ? 'File' : formatBytes(entry.bytes)}</small></span></button>{entry.kind === 'folder' && <Button size="compact" onClick={() => choose({ kind: 'folder', label: entry.name, value: `[@folder](${entry.absolutePath})` })}>Add</Button>}</div>) : <>
         {visibleRoots.map(root => <button type="button" key={root.id} {...stylex.props(styles.row)} onClick={() => openLocation({ root, path: '', sessionId })}><Folder size={19} /><span {...stylex.props(styles.rowText)}><strong {...stylex.props(styles.rowTitle)}>{root.name}</strong><small {...stylex.props(styles.rowMeta)}>{root.path}</small></span></button>)}
         {visibleTabs.map(tab => <button type="button" key={tab.targetId} {...stylex.props(styles.row)} onClick={() => choose({ kind: 'tab', label: tab.title || tab.url, value: `[@tab "${tab.title || 'Untitled tab'}"](${tab.url})` })}><Globe2 size={19} /><span {...stylex.props(styles.rowText)}><strong {...stylex.props(styles.rowTitle)}>{tab.title || 'Untitled tab'}</strong><small {...stylex.props(styles.rowMeta)}>{tab.url}</small></span></button>)}
         {visibleSkills.map(skill => <button type="button" key={skill.path} {...stylex.props(styles.row)} onClick={() => choose({ kind: 'skill', label: skill.name, value: `[@skill "${skill.name}"](${skill.path})` })}><Sparkles size={19} /><span {...stylex.props(styles.rowText)}><strong {...stylex.props(styles.rowTitle)}>{skill.name}</strong><small {...stylex.props(styles.rowMeta)}>{skill.description || skill.path}</small></span></button>)}
@@ -114,11 +117,6 @@ export function ContextPicker({ request, sessionId, skills = [], onSelect, onCho
       {isLoading && <p role="status" {...stylex.props(styles.empty)}>Loading…</p>}
     </div>
   </Sheet>;
-}
-
-async function readJson(response: Response): Promise<unknown> {
-  if (!response.ok) throw new Error((await response.text()) || `Request failed (${response.status}).`);
-  return response.json();
 }
 
 function parseRoots(value: unknown) {
@@ -141,8 +139,6 @@ function parseSkills(value: unknown) {
   return items.flatMap((item): ContextSkill[] => isRecord(item) && item.enabled !== false && typeof item.name === 'string' && typeof item.path === 'string' ? [{ name: item.name, path: item.path, description: typeof item.description === 'string' ? item.description : undefined }] : []);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null; }
-function formatBytes(bytes?: number) { return bytes == null ? 'File' : bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
 
 const styles = stylex.create({
   header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 },
