@@ -180,6 +180,8 @@ async def _root(name: str, session_id: str | None) -> Path:
         if workspace:
             return workspace
     if name == "uploads":
+        if config.UPLOAD_DIR.is_symlink():
+            raise HTTPException(404, "File root not found.")
         return config.UPLOAD_DIR.resolve()
     if name == "session" and session_id:
         return _session_root(session_id)
