@@ -11,6 +11,7 @@ export type ContextSkill = { name: string; path: string; description?: string };
 type NativeRoot = { id: string; name: string; path: string };
 type NativeEntry = { name: string; path: string; absolutePath: string; kind: 'file' | 'folder'; bytes?: number; mime?: string };
 type Tab = { targetId: string; title: string; url: string };
+type PickerLocation = { root: NativeRoot; path: string; sessionId?: string };
 
 export function ContextPicker({ request, sessionId, skills = [], onSelect, onChooseFiles, onChooseFolder, onClose }: {
   request: (path: string, init?: RequestInit) => Promise<Response>;
@@ -25,71 +26,91 @@ export function ContextPicker({ request, sessionId, skills = [], onSelect, onCho
   const [roots, setRoots] = useState<NativeRoot[]>([]);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [nativeSkills, setNativeSkills] = useState<ContextSkill[]>([]);
-  const [location, setLocation] = useState<{ root: NativeRoot; path: string }>();
+  const [location, setLocation] = useState<PickerLocation>();
   const [entries, setEntries] = useState<NativeEntry[]>([]);
   const [error, setError] = useState('');
-  const [isLoading, setLoading] = useState(true);
+  const [contextSessionId, setContextSessionId] = useState(sessionId);
+  const [isLoadingContext, setLoadingContext] = useState(true);
+  const [isLoadingEntries, setLoadingEntries] = useState(false);
+  const activeLocation = location?.sessionId === sessionId ? location : undefined;
 
   useEffect(() => {
     const controller = new AbortController();
     const session = sessionId ? `?session=${encodeURIComponent(sessionId)}` : '';
+    setLoadingContext(true);
+    setError('');
+    setRoots([]);
+    setTabs([]);
+    setLocation(current => current?.sessionId === sessionId ? current : undefined);
+    setEntries([]);
     Promise.all([
       request(`/api/native/files/roots${session}`, { signal: controller.signal }).then(readJson),
       request(`/api/tabs${sessionId ? `?session=${encodeURIComponent(sessionId)}` : ''}`, { signal: controller.signal }).then(readJson),
       request('/api/native/workspace/skills', { signal: controller.signal }).then(readJson).catch(() => []),
     ]).then(([rootPayload, tabPayload, skillPayload]) => {
+      if (controller.signal.aborted) return;
       setRoots(parseRoots(rootPayload));
       setTabs(parseTabs(tabPayload));
       setNativeSkills(parseSkills(skillPayload));
+      setContextSessionId(sessionId);
       setError('');
     }).catch(reason => {
-      if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Could not load context.');
-    }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+      if (!controller.signal.aborted) { setContextSessionId(sessionId); setError(reason instanceof Error ? reason.message : 'Could not load context.'); }
+    }).finally(() => { if (!controller.signal.aborted) setLoadingContext(false); });
     return () => controller.abort();
   }, [request, sessionId]);
 
   useEffect(() => {
-    if (!location) { setEntries([]); return; }
+    if (!activeLocation) { setEntries([]); setLoadingEntries(false); return; }
     const controller = new AbortController();
-    const params = new URLSearchParams({ root: location.root.id, path: location.path });
+    const params = new URLSearchParams({ root: activeLocation.root.id, path: activeLocation.path });
     if (sessionId) params.set('session', sessionId);
-    setLoading(true);
+    setEntries([]);
+    setError('');
+    setLoadingEntries(true);
     request(`/api/native/files/browse?${params}`, { signal: controller.signal }).then(readJson).then(payload => {
+      if (controller.signal.aborted) return;
       setEntries(parseEntries(payload)); setError('');
     }).catch(reason => {
       if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Could not open this folder.');
-    }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    }).finally(() => { if (!controller.signal.aborted) setLoadingEntries(false); });
     return () => controller.abort();
-  }, [location, request, sessionId]);
+  }, [activeLocation, request, sessionId]);
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
-  const visibleTabs = tabs.filter(tab => `${tab.title} ${tab.url}`.toLocaleLowerCase().includes(normalizedQuery));
+  const isCurrentContext = contextSessionId === sessionId;
+  const visibleRoots = (isCurrentContext ? roots : []).filter(root => root.name.toLocaleLowerCase().includes(normalizedQuery));
+  const visibleTabs = (isCurrentContext ? tabs : []).filter(tab => `${tab.title} ${tab.url}`.toLocaleLowerCase().includes(normalizedQuery));
   const selectableSkills = [...nativeSkills, ...skills].filter((skill, index, items) => items.findIndex(item => item.path === skill.path) === index);
   const visibleSkills = selectableSkills.filter(skill => `${skill.name} ${skill.description ?? ''}`.toLocaleLowerCase().includes(normalizedQuery));
   const visibleEntries = entries.filter(entry => entry.name.toLocaleLowerCase().includes(normalizedQuery));
+  const isLoading = activeLocation ? isLoadingEntries : isLoadingContext || !isCurrentContext;
 
   function choose(reference: ContextReference) { onSelect(reference); onClose(); }
+  function openLocation(next?: PickerLocation) {
+    setQuery(''); setEntries([]); setError(''); setLoadingEntries(!!next); setLocation(next);
+  }
 
   return <Sheet title="Add to message" onClose={onClose} isWide>
     <div {...stylex.props(styles.header)}>
-      <div {...stylex.props(styles.titleRow)}>{location && <button type="button" aria-label="Back" {...stylex.props(styles.iconButton)} onClick={() => {
-        if (!location.path) { setLocation(undefined); return; }
-        setLocation({ ...location, path: location.path.split('/').slice(0, -1).join('/') });
-      }}><ArrowLeft size={20} strokeWidth={ICON_STROKE} /></button>}<div><h2 {...stylex.props(styles.title)}>{location ? location.root.name : 'Add to message'}</h2>{location?.path && <p {...stylex.props(styles.path)}>{location.path}</p>}</div></div>
+      <div {...stylex.props(styles.titleRow)}>{activeLocation && <button type="button" aria-label="Back" {...stylex.props(styles.iconButton)} onClick={() => {
+        if (!activeLocation.path) { openLocation(); return; }
+        openLocation({ ...activeLocation, path: activeLocation.path.split('/').slice(0, -1).join('/') });
+      }}><ArrowLeft size={20} strokeWidth={ICON_STROKE} /></button>}<div><h2 {...stylex.props(styles.title)}>{activeLocation ? activeLocation.root.name : 'Add to message'}</h2>{activeLocation?.path && <p {...stylex.props(styles.path)}>{activeLocation.path}</p>}</div></div>
       <div {...stylex.props(styles.actions)}><Button size="compact" onClick={() => { onChooseFiles(); onClose(); }}><ImagePlus size={17} />Upload files</Button><Button size="compact" onClick={() => { onChooseFolder(); onClose(); }}><FolderOpen size={17} />Upload folder</Button></div>
     </div>
     <label {...stylex.props(styles.search)}><Search size={18} strokeWidth={ICON_STROKE} aria-hidden="true" /><span {...stylex.props(styles.srOnly)}>Search context</span><input autoFocus value={query} placeholder="Search tabs, files, and skills" {...stylex.props(styles.searchInput)} onChange={event => setQuery(event.target.value)} /></label>
     {error && <p role="status" {...stylex.props(styles.error)}>{error}</p>}
     <div {...stylex.props(styles.list)}>
-      {location ? visibleEntries.map(entry => <div key={entry.path} {...stylex.props(styles.entry)}><button type="button" {...stylex.props(styles.entryMain)} onClick={() => {
-        if (entry.kind === 'folder') { setQuery(''); setLocation({ ...location, path: entry.path }); return; }
+      {activeLocation ? visibleEntries.map(entry => <div key={entry.path} {...stylex.props(styles.entry)}><button type="button" {...stylex.props(styles.entryMain)} onClick={() => {
+        if (entry.kind === 'folder') { openLocation({ ...activeLocation, path: entry.path }); return; }
         choose({ kind: 'file', label: entry.name, value: `[@file](${entry.absolutePath})` });
       }}>{entry.kind === 'folder' ? <Folder size={19} /> : <File size={19} />}<span {...stylex.props(styles.rowText)}><strong {...stylex.props(styles.rowTitle)}>{entry.name}</strong><small {...stylex.props(styles.rowMeta)}>{entry.kind === 'folder' ? 'Folder' : formatBytes(entry.bytes)}</small></span></button>{entry.kind === 'folder' && <Button size="compact" onClick={() => choose({ kind: 'folder', label: entry.name, value: `[@folder](${entry.absolutePath})` })}>Add</Button>}</div>) : <>
-        {roots.filter(root => root.name.toLocaleLowerCase().includes(normalizedQuery)).map(root => <button type="button" key={root.id} {...stylex.props(styles.row)} onClick={() => { setQuery(''); setLocation({ root, path: '' }); }}><Folder size={19} /><span {...stylex.props(styles.rowText)}><strong {...stylex.props(styles.rowTitle)}>{root.name}</strong><small {...stylex.props(styles.rowMeta)}>{root.path}</small></span></button>)}
+        {visibleRoots.map(root => <button type="button" key={root.id} {...stylex.props(styles.row)} onClick={() => openLocation({ root, path: '', sessionId })}><Folder size={19} /><span {...stylex.props(styles.rowText)}><strong {...stylex.props(styles.rowTitle)}>{root.name}</strong><small {...stylex.props(styles.rowMeta)}>{root.path}</small></span></button>)}
         {visibleTabs.map(tab => <button type="button" key={tab.targetId} {...stylex.props(styles.row)} onClick={() => choose({ kind: 'tab', label: tab.title || tab.url, value: `[@tab "${tab.title || 'Untitled tab'}"](${tab.url})` })}><Globe2 size={19} /><span {...stylex.props(styles.rowText)}><strong {...stylex.props(styles.rowTitle)}>{tab.title || 'Untitled tab'}</strong><small {...stylex.props(styles.rowMeta)}>{tab.url}</small></span></button>)}
         {visibleSkills.map(skill => <button type="button" key={skill.path} {...stylex.props(styles.row)} onClick={() => choose({ kind: 'skill', label: skill.name, value: `[@skill "${skill.name}"](${skill.path})` })}><Sparkles size={19} /><span {...stylex.props(styles.rowText)}><strong {...stylex.props(styles.rowTitle)}>{skill.name}</strong><small {...stylex.props(styles.rowMeta)}>{skill.description || skill.path}</small></span></button>)}
       </>}
-      {!isLoading && !error && (location ? visibleEntries.length === 0 : roots.length + visibleTabs.length + visibleSkills.length === 0) && <p {...stylex.props(styles.empty)}>No matching context.</p>}
+      {!isLoading && !error && (activeLocation ? visibleEntries.length === 0 : visibleRoots.length + visibleTabs.length + visibleSkills.length === 0) && <p {...stylex.props(styles.empty)}>No matching context.</p>}
       {isLoading && <p role="status" {...stylex.props(styles.empty)}>Loading…</p>}
     </div>
   </Sheet>;
