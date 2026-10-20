@@ -18,7 +18,7 @@ export function useModelSelection(chat: UseChat, notify: (text: string, kind?: '
   const [error, setError] = useState<string>();
   const [isUpdating, setUpdating] = useState(false);
   const generation = useRef(0);
-  const mutation = useRef(false);
+  const mutation = useRef<{ controller: AbortController; version: number } | undefined>(undefined);
   const { sessionId, isReady, authError, request } = chat;
   const [revision, setRevision] = useState(0);
   const loaded = catalog?.sessionId === sessionId ? catalog : undefined;
@@ -28,16 +28,25 @@ export function useModelSelection(chat: UseChat, notify: (text: string, kind?: '
     const controller = new AbortController();
     setError(undefined);
     if (isReady && !authError) void load();
-    return () => { generation.current += 1; controller.abort(); };
+    return () => {
+      generation.current += 1;
+      controller.abort();
+      const pending = mutation.current;
+      if (pending) {
+        pending.controller.abort();
+        mutation.current = undefined;
+        setUpdating(false);
+      }
+    };
 
     async function load() {
       try {
         const response = await request('/api/models' + (sessionId ? '?session_id=' + encodeURIComponent(sessionId) : ''), { signal: controller.signal });
         const result = parseModels(await response.json());
         if (controller.signal.aborted || version !== generation.current) return;
-        const savedModel = !sessionId && localStorage.getItem(MODEL_STORAGE_KEY);
+        const savedModel = !sessionId && readPreference(MODEL_STORAGE_KEY);
         const saved = !sessionId && result.items.find(model => savedModel ? `${model.provider}/${model.id}` === savedModel : model.id === result.current.modelId && model.provider === result.current.provider);
-        setCatalog({ sessionId, ...result, current: saved ? configureModel(saved, { ...result.current, thinkingLevel: localStorage.getItem(THINKING_STORAGE_KEY) ?? result.current.thinkingLevel }) : result.current });
+        setCatalog({ sessionId, ...result, current: saved ? configureModel(saved, { ...result.current, thinkingLevel: readPreference(THINKING_STORAGE_KEY) ?? result.current.thinkingLevel }) : result.current });
       } catch {
         if (!controller.signal.aborted && version === generation.current) setError('Could not load models.');
       }
@@ -46,8 +55,8 @@ export function useModelSelection(chat: UseChat, notify: (text: string, kind?: '
 
   async function select(model: AvailableModel, thinkingLevel?: string) {
     if (!loaded || mutation.current) return false;
-    const version = ++generation.current;
-    mutation.current = true;
+    const owner = { controller: new AbortController(), version: ++generation.current };
+    mutation.current = owner;
     setUpdating(true);
     const config = configureModel(model, thinkingLevel ? { ...loaded.current, thinkingLevel } : loaded.current);
     setCatalog({ ...loaded, current: config });
@@ -55,20 +64,35 @@ export function useModelSelection(chat: UseChat, notify: (text: string, kind?: '
       const current = sessionId
         ? parseModelConfig(await (await request('/api/sessions/' + encodeURIComponent(sessionId) + '/model', {
           method: 'PUT', body: JSON.stringify(config),
+          signal: AbortSignal.any([owner.controller.signal, AbortSignal.timeout(60_000)]),
         })).json())
         : config;
-      if (version !== generation.current) return false;
+      if (owner.version !== generation.current || mutation.current !== owner) return false;
       setCatalog({ ...loaded, current });
-      localStorage.setItem(MODEL_STORAGE_KEY, `${current.provider}/${current.modelId}`);
-      localStorage.setItem(THINKING_STORAGE_KEY, current.thinkingLevel);
+      if (!savePreference(current)) notify('Model selected, but this choice could not be saved.', 'error');
       return true;
     } catch {
-      if (version === generation.current) { setCatalog(loaded); notify('Could not update model settings. Try again.', 'error'); }
+      if (owner.version === generation.current && mutation.current === owner) { setCatalog(loaded); notify('Could not update model settings. Try again.', 'error'); }
       return false;
-    } finally { mutation.current = false; setUpdating(false); }
+    } finally {
+      if (mutation.current === owner) { mutation.current = undefined; setUpdating(false); }
+    }
   }
 
   return { items: loaded?.items ?? [], current: loaded?.current, error, isUpdating, select, reload: () => setRevision(value => value + 1) };
+}
+
+function readPreference(key: string) {
+  try { return localStorage.getItem(key); }
+  catch { return null; }
+}
+
+function savePreference(current: ModelConfig) {
+  try {
+    localStorage.setItem(MODEL_STORAGE_KEY, `${current.provider}/${current.modelId}`);
+    localStorage.setItem(THINKING_STORAGE_KEY, current.thinkingLevel);
+    return true;
+  } catch { return false; }
 }
 
 function configureModel(model: AvailableModel, current: ModelConfig): ModelConfig {
