@@ -13,6 +13,23 @@ import {
 } from '../../web/src/theme.ts'
 import { VISUAL_MESSAGE_PREFIX, visualDocument, visualTheme } from '../../web/src/visual.ts'
 
+test('visual font metadata rejects malformed values and only loads local font stylesheets', () => {
+  const environment = installDom()
+  try {
+    for (const value of ['{', '{}', '"bad"', JSON.stringify(['/api/font/css/wanted-sans', 'https://example.test/unsafe.css', 123])]) {
+      document.documentElement.dataset.fontStylesheets = value
+      const theme = visualTheme()
+      assert.ok(Array.isArray(theme.fontStylesheets))
+      assert.ok(theme.fontStylesheets.every(path => /^\/api\/font\/css\/[a-z-]+$/.test(path)))
+      const documentHtml = visualDocument('<p>Preview survives invalid font metadata.</p>', 'font-regression')
+      assert.ok(documentHtml.includes('Preview survives invalid font metadata.'))
+      assert.ok(!documentHtml.includes('unsafe.css'))
+    }
+  } finally {
+    environment.restore()
+  }
+})
+
 function installDom(html = '<!doctype html><html><head><meta name="color-scheme"><meta name="theme-color"></head><body></body></html>', url = 'https://aside.test/') {
   const dom = new JSDOM(html, { url })
   const previous = new Map()
