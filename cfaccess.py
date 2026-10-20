@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import math
 import time
 
 import httpx
@@ -40,6 +41,11 @@ def _b64u(data: str) -> bytes:
     return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
 
 
+def _is_finite_number(value: object) -> bool:
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and (not isinstance(value, float) or math.isfinite(value)))
+
+
 async def _load_jwks(client: httpx.AsyncClient, force: bool = False) -> dict[str, rsa.RSAPublicKey]:
     global _jwks, _jwks_at
     if not CERTS_URL:
@@ -48,13 +54,24 @@ async def _load_jwks(client: httpx.AsyncClient, force: bool = False) -> dict[str
         return _jwks
     r = await client.get(CERTS_URL, timeout=10)
     r.raise_for_status()
+    payload = r.json()
+    if not isinstance(payload, dict):
+        raise ValueError("invalid Access JWKS response")
+    jwks = payload.get("keys")
+    if not isinstance(jwks, list):
+        raise ValueError("invalid Access JWKS response")
     keys: dict[str, rsa.RSAPublicKey] = {}
-    for k in r.json().get("keys", []):
-        if k.get("kty") != "RSA" or not k.get("kid"):
+    for k in jwks:
+        if not isinstance(k, dict) or k.get("kty") != "RSA" or not isinstance(k.get("kid"), str):
             continue
-        n = int.from_bytes(_b64u(k["n"]), "big")
-        e = int.from_bytes(_b64u(k["e"]), "big")
-        keys[k["kid"]] = RSAPublicNumbers(e, n).public_key()
+        try:
+            n = int.from_bytes(_b64u(k["n"]), "big")
+            e = int.from_bytes(_b64u(k["e"]), "big")
+            keys[k["kid"]] = RSAPublicNumbers(e, n).public_key()
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not keys:
+        raise ValueError("Access JWKS contains no usable RSA keys")
     _jwks, _jwks_at = keys, time.time()
     return _jwks
 
@@ -73,10 +90,15 @@ async def verify(client: httpx.AsyncClient, token: str, *, aud: str,
     except Exception:
         return None
 
+    if not isinstance(header, dict) or not isinstance(payload, dict):
+        return None
+
     if header.get("alg") != "RS256":
         log.warning("reject: alg=%s", header.get("alg")); return None
 
     kid = header.get("kid")
+    if not isinstance(kid, str) or not kid:
+        log.warning("reject: invalid kid"); return None
     keys = await _load_jwks(client)
     key = keys.get(kid)
     if key is None:                       # 키 회전 직후일 수 있다 → 한 번만 강제 갱신
@@ -92,22 +114,30 @@ async def verify(client: httpx.AsyncClient, token: str, *, aud: str,
         log.warning("reject: signature %s", exc); return None
 
     now = time.time()
-    if payload.get("exp", 0) < now - 60:
+    exp = payload.get("exp")
+    nbf = payload.get("nbf", 0)
+    if not _is_finite_number(exp) or exp < now - 60:
         log.warning("reject: expired"); return None
-    if payload.get("nbf", 0) > now + 60:
+    if not _is_finite_number(nbf) or nbf > now + 60:
         log.warning("reject: nbf"); return None
     if payload.get("iss") != ISSUER:
         log.warning("reject: iss=%s expected=%s", payload.get("iss"), ISSUER); return None
-    auds = payload.get("aud")
-    auds = auds if isinstance(auds, list) else [auds]
+    claim_aud = payload.get("aud")
+    auds = claim_aud if isinstance(claim_aud, list) else [claim_aud]
     if aud not in auds:
         log.warning("reject: aud=%s expected=%s", auds, aud); return None
-    email = (payload.get("email") or "").lower()
+    claim_email = payload.get("email", "")
+    if not isinstance(claim_email, str):
+        log.warning("reject: invalid email claim"); return None
+    email = claim_email.lower()
     if email:
-        if allowed_emails and email not in allowed_emails:
+        if email not in allowed_emails:
             log.warning("reject: email=%r", email); return None
         return email
-    cn = (payload.get("common_name") or "").strip()
+    claim_cn = payload.get("common_name", "")
+    if not isinstance(claim_cn, str):
+        log.warning("reject: invalid common_name claim"); return None
+    cn = claim_cn.strip()
     if cn and allowed_cns and cn in allowed_cns:
         return f"svc:{cn}"
     log.warning("reject: no allowed principal (cn=%r, keys=%s)", cn, list(payload))

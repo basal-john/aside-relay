@@ -17,9 +17,11 @@ import contextlib
 import json
 import logging
 import re
+import secrets
 import subprocess
 import time
 import uuid
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -84,10 +86,14 @@ def _token_of(request: Request) -> str:
     return request.cookies.get(COOKIE, "")
 
 
+def _is_valid_token(token: str) -> bool:
+    return secrets.compare_digest(token.encode(), config.BEARER.encode())
+
+
 async def require_auth(request: Request) -> None:
     if not config.BEARER:          # 토큰 미설정 = 로컬 개발 모드
         return
-    if _token_of(request) != config.BEARER:
+    if not _is_valid_token(_token_of(request)):
         raise HTTPException(status_code=401, detail="unauthorized")
 
 
@@ -355,10 +361,14 @@ async def web_token(request: Request):
     assertion = request.headers.get("cf-access-jwt-assertion")
     if not assertion:
         raise HTTPException(401, "no Access assertion")
-    email = await cfaccess.verify(
-        _http, assertion, aud=config.ACCESS_AUD,
-        allowed_emails=config.ACCESS_EMAILS, allowed_cns=config.ACCESS_SERVICE_CNS,
-    )
+    try:
+        email = await cfaccess.verify(
+            _http, assertion, aud=config.ACCESS_AUD,
+            allowed_emails=config.ACCESS_EMAILS, allowed_cns=config.ACCESS_SERVICE_CNS,
+        )
+    except (httpx.HTTPError, OSError, ValueError) as error:
+        log.warning("Access verification unavailable: %s", error)
+        raise HTTPException(503, "Access verification unavailable") from error
     if not email:
         raise HTTPException(403, "Access assertion rejected")
     log.info("web-token issued to %s", email)
@@ -375,7 +385,7 @@ def _token_response(request: Request, via: str, email: str | None) -> JSONRespon
     body = {"token": config.BEARER, "via": via}
     if email:
         body["email"] = email
-    r = JSONResponse(body)
+    r = JSONResponse(body, headers={"Cache-Control": "no-store"})
     r.set_cookie(
         COOKIE, config.BEARER,
         max_age=60 * 60 * 24 * 30, httponly=True, samesite="lax",
@@ -1291,9 +1301,17 @@ async def api_run_request(request_id: str):
 async def ws_endpoint(ws: WebSocket):
     if config.BEARER:
         header = ws.headers.get("authorization", "")
-        supplied = (header[7:].strip() if header.lower().startswith("bearer ")
-                    else ws.cookies.get(COOKIE, ""))
-        if supplied != config.BEARER:
+        has_bearer = header.lower().startswith("bearer ")
+        supplied = header[7:].strip() if has_bearer else ws.cookies.get(COOKIE, "")
+        origin = ws.headers.get("origin")
+        host = ws.headers.get("host", "")
+        is_origin_allowed = True
+        if not has_bearer and origin:
+            try:
+                is_origin_allowed = urlsplit(origin).netloc.lower() == host.lower()
+            except ValueError:
+                is_origin_allowed = False
+        if not _is_valid_token(supplied) or not is_origin_allowed:
             await ws.close(code=4401)
             return
     await ws.accept()
