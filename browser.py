@@ -42,6 +42,7 @@ _shot_waiting = 0
 _tabs_cache: tuple[float, tuple[str | None, bool], list[dict]] | None = None
 _page_titles: dict[str, tuple[str, str]] = {}
 _tabs_lock = asyncio.Lock()
+_close_locks: dict[str, asyncio.Lock] = {}
 _shot_locks: dict[str, asyncio.Lock] = {}
 
 
@@ -272,21 +273,24 @@ async def open_tab(url: str, session_id: str | None = None) -> dict:
 
 
 async def close_tab(target_id: str, session_id: str | None = None, *, show_all: bool = False) -> dict:
-    tab = await find_tab(target_id, session_id=session_id, show_all=show_all)
     binding_session = session_id or (await mcp.repl_json(CURRENT_SESSION_CODE))["id"]
-    session = await daemon.call("sessions.get", {"accountId": ACCOUNT_ID, "sessionId": binding_session})
-    binding = {**session["browserBinding"], "windowId": tab["windowId"]}
-    await daemon.extension("Aside.controlTab", {"action": "close", "targetId": target_id, "url": tab["url"]}, binding)
-    tabs = await list_tabs(force=True, session_id=session_id, show_all=show_all)
-    if any(tab["targetId"] == target_id for tab in tabs):
-        raise ConnectionError("The browser tab is still open.")
-    if session_id:
-        _targets, active_target = await asyncio.to_thread(daemondb.browser_targets, session_id)
-        if active_target == target_id:
-            latest = max(tabs, key=lambda tab: tab.get("lastAccessed") or 0, default={})
-            await daemon.call("sessions.update", {"accountId": ACCOUNT_ID, "sessionId": session_id,
-                                                  "activeTabTargetId": latest.get("targetId")}, mutation=True)
-    return {"ok": True}
+    lock = _close_locks.setdefault(binding_session, asyncio.Lock())
+    async with lock:
+        tab = await find_tab(target_id, session_id=session_id, show_all=show_all)
+        session = await daemon.call("sessions.get", {"accountId": ACCOUNT_ID, "sessionId": binding_session})
+        binding = {**session["browserBinding"], "windowId": tab["windowId"]}
+        await daemon.extension("Aside.controlTab", {"action": "close", "targetId": target_id, "url": tab["url"]}, binding)
+        tabs = await list_tabs(force=True, session_id=session_id, show_all=show_all)
+        if any(tab["targetId"] == target_id for tab in tabs):
+            raise ConnectionError("The browser tab is still open.")
+        if session_id:
+            _targets, active_target = await asyncio.to_thread(daemondb.browser_targets, session_id)
+            if active_target == target_id:
+                session_tabs = tabs if not show_all else await list_tabs(force=True, session_id=session_id)
+                latest = max(session_tabs, key=lambda tab: tab.get("lastAccessed") or 0, default={})
+                await daemon.call("sessions.update", {"accountId": ACCOUNT_ID, "sessionId": session_id,
+                                                      "activeTabTargetId": latest.get("targetId")}, mutation=True)
+        return {"ok": True}
 
 
 async def focus_tab(target_id: str, session_id: str | None = None, *, show_all: bool = False) -> dict:
