@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -81,15 +82,23 @@ class MCPClient:
         log.info("aside mcp ready · pwd=%s", self.session_pwd)
 
     async def _teardown(self) -> None:
-        if self._reader_task:
-            self._reader_task.cancel()
-            self._reader_task = None
-        if self._proc and self._proc.returncode is None:
+        reader_task = self._reader_task
+        proc = self._proc
+        if proc and proc.returncode is None:
             try:
-                self._proc.kill()
+                proc.kill()
             except ProcessLookupError:
                 pass
-        self._proc = None
+        if reader_task:
+            reader_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await reader_task
+        if proc:
+            await proc.wait()
+        if self._reader_task is reader_task:
+            self._reader_task = None
+        if self._proc is proc:
+            self._proc = None
         for fut in self._pending.values():
             if not fut.done():
                 fut.set_exception(ConnectionError("aside mcp restarted"))
@@ -97,8 +106,11 @@ class MCPClient:
 
     async def close(self) -> None:
         if self._keepalive_task:
-            self._keepalive_task.cancel()
+            keepalive_task = self._keepalive_task
             self._keepalive_task = None
+            keepalive_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await keepalive_task
         await self._teardown()
 
     # ------------------------------------------------------------------ 전송
@@ -114,9 +126,9 @@ class MCPClient:
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[rid] = fut
         payload = json.dumps({"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
-        self._proc.stdin.write((payload + "\n").encode())
-        await self._proc.stdin.drain()
         try:
+            self._proc.stdin.write((payload + "\n").encode())
+            await self._proc.stdin.drain()
             return await asyncio.wait_for(fut, timeout=timeout)
         finally:
             self._pending.pop(rid, None)
@@ -147,6 +159,11 @@ class MCPClient:
         except Exception:
             log.exception("mcp read loop died")
         finally:
+            if self._proc is proc:
+                for fut in self._pending.values():
+                    if not fut.done():
+                        fut.set_exception(ConnectionError("aside mcp stdout closed"))
+            await proc.wait()
             log.warning("aside mcp stdout closed")
 
     # ------------------------------------------------------------------ repl
@@ -198,7 +215,8 @@ class MCPClient:
     async def _keepalive_loop(self) -> None:
         while True:
             try:
-                await asyncio.sleep(config.MCP_KEEPALIVE_SEC)
+                elapsed = time.time() - self.last_ok
+                await asyncio.sleep(max(0, config.MCP_KEEPALIVE_SEC - elapsed))
                 if time.time() - self.last_ok < config.MCP_KEEPALIVE_SEC:
                     continue
                 await self.repl("console.log('ka');", title="Keepalive", timeout=30)
