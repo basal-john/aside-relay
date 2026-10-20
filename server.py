@@ -856,8 +856,9 @@ async def api_tab_shot(target_id: str, full: bool = False, q: int = Query(62, ge
         await browser.find_tab(target_id, session_id=session, show_all=all)
     path, _meta = await browser.screenshot(target_id, full=full, quality=q,
                                            max_age=0 if fresh else None, session_id=session, show_all=all)
-    return FileResponse(path, media_type="image/jpeg",
-                        headers={"Cache-Control": "no-cache"})
+    frame = await asyncio.to_thread(path.read_bytes)
+    return Response(content=frame, media_type="image/jpeg",
+                    headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/tabs/{target_id}/text", dependencies=[Auth])
