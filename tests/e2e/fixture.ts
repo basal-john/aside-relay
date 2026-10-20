@@ -184,7 +184,7 @@ export class MockAside {
     const sessionDetails = url.pathname.match(/^\/api\/sessions\/([^/]+)\/details$/);
     if (sessionDetails && method === 'GET') {
       const item = this.sessions.find(entry => entry.id === decodeURIComponent(sessionDetails[1]));
-      return json(route, item ? { title: item.title, status: item.status, isPinned: item.isPinned } : {}, item ? 200 : 404);
+      return json(route, item ? { id: item.id, title: item.title, status: item.status, isPinned: item.isPinned } : {}, item ? 200 : 404);
     }
     const legacySession = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
     if (legacySession && method === 'PATCH') {

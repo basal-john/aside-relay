@@ -114,15 +114,19 @@ async def api_session_details(session_id: str):
     if sessions.session_dir(session_id) is None:
         raise HTTPException(404, "unknown session")
     try:
-        session = await daemon.call("sessions.get", {"accountId": ACCOUNT_ID, "sessionId": session_id})
-        previews = await daemon.call("sessions.listPreviewItems", {"accountId": ACCOUNT_ID,
-            "sessionIds": [session_id], "limit": 1, "archived": "include"})
-        preview = previews[0] if previews else {}
-        return {"id": session_id, "title": session.get("title") or "Conversation",
-                "status": session["status"], "isPinned": bool(preview.get("pinned"))}
+        return await _session_details(session_id)
     except Exception:
         log.exception("conversation details failed session=%s", session_id)
         raise HTTPException(502, "Could not load conversation options.")
+
+
+async def _session_details(session_id: str) -> dict:
+    session = await daemon.call("sessions.get", {"accountId": ACCOUNT_ID, "sessionId": session_id})
+    previews = await daemon.call("sessions.listPreviewItems", {"accountId": ACCOUNT_ID,
+        "sessionIds": [session_id], "limit": 1, "archived": "include"})
+    preview = previews[0] if previews else {}
+    return {"id": session_id, "title": session.get("title") or "Conversation",
+            "status": session["status"], "isPinned": bool(preview.get("pinned"))}
 
 
 @app.patch("/api/sessions/{session_id}", dependencies=[Auth])
@@ -144,9 +148,7 @@ async def api_update_session(session_id: str, payload: dict):
             if "isPinned" in payload:
                 await daemon.call("sessions.update", {"accountId": ACCOUNT_ID, "sessionId": session_id,
                     "pinned": payload["isPinned"]}, mutation=True)
-            return await api_session_details(session_id)
-        except HTTPException:
-            raise
+            return await _session_details(session_id)
         except Exception:
             log.exception("conversation update failed session=%s", session_id)
             raise HTTPException(502, "Could not update the conversation.")
