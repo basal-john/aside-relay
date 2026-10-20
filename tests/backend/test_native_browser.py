@@ -11,7 +11,7 @@ class NativeBrowserTests(support.IsolatedBackendTest):
     async def test_controls_forward_normalized_coordinates_and_conversation_scope(self):
         actions = [
             {"action": "click", "x": .25, "y": .75},
-            {"action": "scroll", "deltaX": 10, "deltaY": -300},
+            {"action": "scroll", "x": .25, "y": .75, "deltaX": 10, "deltaY": -300},
             {"action": "type", "text": "Find this"},
             {"action": "key", "key": "Enter"},
             {"action": "back"}, {"action": "forward"},

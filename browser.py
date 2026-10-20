@@ -21,6 +21,7 @@ import math
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 import config
 from daemon import ACCOUNT_ID, daemon, repair_browser_binding
@@ -65,6 +66,16 @@ class TabNotFound(RuntimeError):
 
 def _jsq(value) -> str:
     return json.dumps(str(value))
+
+
+def is_web_url(value: object) -> bool:
+    if not isinstance(value, str) or len(value) > 8_192:
+        return False
+    try:
+        parsed = urlparse(value)
+        return parsed.scheme in {"http", "https"} and bool(parsed.hostname)
+    except ValueError:
+        return False
 
 
 # JS 조각: targetId 로 안전하게 attach (타임아웃 레이스)
@@ -339,19 +350,31 @@ async def control_tab(target_id: str, action: str, *, session_id: str | None = N
     remains accurate when its rendered size differs from the desktop tab.
     """
     await _require_awake(target_id, session_id, show_all=show_all)
-    action_code = {
-        "click": f"""
+    if action == "click":
+        action_code = f"""
           const viewport = await pg.evaluate(() => ({{ width: innerWidth, height: innerHeight }}));
           await pg.mouse.click(viewport.width * {json.dumps(x)}, viewport.height * {json.dumps(y)});
-        """,
-        "scroll": f"await pg.mouse.wheel({int(delta_x)}, {int(delta_y)});",
-        "type": f"await pg.keyboard.insertText({_jsq(text)});",
-        "key": f"await pg.keyboard.press({_jsq(key)});",
-        "back": "await pg.goBack({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null);",
-        "forward": "await pg.goForward({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null);",
-        "reload": "await pg.reload({ waitUntil: 'domcontentloaded', timeout: 15000 });",
-        "navigate": f"await pg.goto({_jsq(url)}, {{ waitUntil: 'domcontentloaded', timeout: 20000 }});",
-    }[action]
+        """
+    elif action == "scroll":
+        action_code = f"""
+          const viewport = await pg.evaluate(() => ({{ width: innerWidth, height: innerHeight }}));
+          await pg.mouse.move(viewport.width * {json.dumps(x)}, viewport.height * {json.dumps(y)});
+          await pg.mouse.wheel({int(delta_x)}, {int(delta_y)});
+        """
+    elif action == "type":
+        action_code = f"await pg.keyboard.insertText({_jsq(text)});"
+    elif action == "key":
+        action_code = f"await pg.keyboard.press({_jsq(key)});"
+    elif action == "back":
+        action_code = "await pg.goBack({ waitUntil: 'domcontentloaded', timeout: 15000 });"
+    elif action == "forward":
+        action_code = "await pg.goForward({ waitUntil: 'domcontentloaded', timeout: 15000 });"
+    elif action == "reload":
+        action_code = "await pg.reload({ waitUntil: 'domcontentloaded', timeout: 15000 });"
+    elif action == "navigate":
+        action_code = f"await pg.goto({_jsq(url)}, {{ waitUntil: 'domcontentloaded', timeout: 20000 }});"
+    else:
+        raise ValueError("Unsupported browser action.")
     code = _ATTACH + f"""
   const pg = await __attach({_jsq(target_id)});
   {action_code}

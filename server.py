@@ -846,7 +846,12 @@ async def api_tabs(refresh: bool = False, session: str | None = None, all: bool 
     if session and sessions.session_dir(session) is None:
         raise HTTPException(404, "Conversation not found.")
     tabs = await browser.list_tabs(force=refresh, session_id=session, show_all=all)
-    return {"count": len(tabs), "tabs": tabs}
+    return {"count": len(tabs), "tabs": _public_tabs(tabs)}
+
+
+def _public_tabs(tabs: list[dict]) -> list[dict]:
+    fields = ("targetId", "title", "url", "favicon", "active", "loaded", "lastAccessed")
+    return [{key: tab[key] for key in fields if key in tab} for tab in tabs]
 
 
 @app.get("/api/tabs/{target_id}/shot", dependencies=[Auth])
@@ -869,8 +874,8 @@ async def api_tab_text(target_id: str, interactive: bool = False, session: str |
 @app.post("/api/tabs", dependencies=[Auth])
 async def api_open_tab(payload: dict, session: str | None = None):
     url = payload.get("url")
-    if not isinstance(url, str) or not url.strip():
-        raise HTTPException(400, "url required")
+    if not browser.is_web_url(url):
+        raise HTTPException(400, "Use a full http:// or https:// address.")
     return await browser.open_tab(url.strip(), session_id=session)
 
 
@@ -1517,7 +1522,7 @@ async def _handle_ws(ws: WebSocket, msg: dict) -> None:
             await _send(ws, {"op": "error", "requestId": rid,
                              "message": runner.safe_run_error(exc)})
             return
-        await _send(ws, {"op": "tabs", "requestId": rid, "count": len(tabs), "tabs": tabs})
+        await _send(ws, {"op": "tabs", "requestId": rid, "count": len(tabs), "tabs": _public_tabs(tabs)})
         return
 
     await _send(ws, {"op": "error", "requestId": rid, "message": f"unknown op: {op}"})

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -26,8 +25,8 @@ async def control_browser_tab(target_id: str, payload: dict, session: str | None
     if not isinstance(action, str) or action not in CONTROL_ACTIONS:
         raise HTTPException(400, "Unsupported browser action.")
     x, y = payload.get("x"), payload.get("y")
-    if action == "click" and not (_is_unit_number(x) and _is_unit_number(y)):
-        raise HTTPException(400, "Click coordinates must be between 0 and 1.")
+    if action in {"click", "scroll"} and not (_is_unit_number(x) and _is_unit_number(y)):
+        raise HTTPException(400, "Pointer coordinates must be between 0 and 1.")
     delta_x, delta_y = payload.get("deltaX", 0), payload.get("deltaY", 0)
     if action == "scroll" and not all(isinstance(value, int) and not isinstance(value, bool) and abs(value) <= 4000 for value in (delta_x, delta_y)):
         raise HTTPException(400, "Scroll distance is invalid.")
@@ -38,7 +37,7 @@ async def control_browser_tab(target_id: str, payload: dict, session: str | None
     if action == "key" and (not isinstance(key, str) or key not in KEYS):
         raise HTTPException(400, "Key is not supported.")
     url = payload.get("url", "")
-    if action == "navigate" and not _is_web_url(url):
+    if action == "navigate" and not browser.is_web_url(url):
         raise HTTPException(400, "Use a full http:// or https:// address.")
     return await browser.control_tab(
         target_id, action, session_id=session, show_all=show_all,
@@ -98,13 +97,3 @@ async def browser_preview_stream(request: Request, target_id: str,
 
 def _is_unit_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1
-
-
-def _is_web_url(value: object) -> bool:
-    if not isinstance(value, str) or len(value) > 8_192:
-        return False
-    try:
-        parsed = urlparse(value)
-        return parsed.scheme in {"http", "https"} and bool(parsed.hostname)
-    except ValueError:
-        return False
