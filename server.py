@@ -905,14 +905,35 @@ class Hub:
         self.clients: set[WebSocket] = set()
         self._subs: dict[str, set[WebSocket]] = {}
         self._tasks: dict[str, asyncio.Task] = {}
+        self._subscription_locks: dict[str, asyncio.Lock] = {}
         self._stream_tasks: dict[str, asyncio.Task] = {}
         self._committed_assistants: dict[str, list[tuple[object, object]]] = {}
 
     async def subscribe(self, ws: WebSocket, session_id: str, from_seq: int, from_offset: int) -> None:
-        self._subs.setdefault(session_id, set()).add(ws)
-        if session_id not in self._tasks or self._tasks[session_id].done():
-            self._tasks[session_id] = asyncio.create_task(
-                self._pump(session_id, from_offset, from_seq))
+        is_dead = False
+        lock = self._subscription_locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            self._subs.setdefault(session_id, set()).add(ws)
+            task = self._tasks.get(session_id)
+            if task and not task.done():
+                messages, offset = await asyncio.to_thread(sessions.read_messages, session_id)
+                try:
+                    for message in messages:
+                        if message["seq"] >= from_seq:
+                            await asyncio.wait_for(ws.send_text(json.dumps({
+                                "op": "msg", "sessionId": session_id, "message": message,
+                            }, ensure_ascii=False)), timeout=5)
+                except Exception:
+                    is_dead = True
+                if task.done():
+                    next_seq = messages[-1]["seq"] + 1 if messages else 0
+                    self._tasks[session_id] = asyncio.create_task(
+                        self._pump(session_id, offset, next_seq))
+            else:
+                self._tasks[session_id] = asyncio.create_task(
+                    self._pump(session_id, from_offset, from_seq))
+        if is_dead:
+            self.unsubscribe(ws, session_id)
 
     def unsubscribe(self, ws: WebSocket, session_id: str | None = None) -> None:
         targets = [session_id] if session_id else list(self._subs)
@@ -929,11 +950,13 @@ class Hub:
 
     async def broadcast(self, session_id: str, payload: dict) -> None:
         dead = []
-        for ws in list(self._subs.get(session_id, ())):
-            try:
-                await ws.send_text(json.dumps(payload, ensure_ascii=False))
-            except Exception:
-                dead.append(ws)
+        lock = self._subscription_locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            for ws in list(self._subs.get(session_id, ())):
+                try:
+                    await asyncio.wait_for(ws.send_text(json.dumps(payload, ensure_ascii=False)), timeout=5)
+                except Exception:
+                    dead.append(ws)
         for ws in dead:
             self.unsubscribe(ws)
 

@@ -434,10 +434,14 @@ export const useChat = (): UseChat => {
       ) {
         return false
       }
-      messagesRef.current = result.messages
-      setMessages(result.messages)
-      reconcileLiveAssistant(result.messages)
-      nextSeqRef.current = result.nextSeq
+      const newerMessages = messagesRef.current.filter((message) => message.seq >= result.nextSeq)
+      const nextMessages = newerMessages.length > 0
+        ? [...result.messages, ...newerMessages].sort((left, right) => left.seq - right.seq)
+        : result.messages
+      messagesRef.current = nextMessages
+      setMessages(nextMessages)
+      reconcileLiveAssistant(nextMessages)
+      nextSeqRef.current = Math.max(result.nextSeq, (nextMessages.at(-1)?.seq ?? -1) + 1)
       offsetRef.current = result.offset
       if (
         pendingPromptRef.current !== undefined &&
@@ -455,7 +459,7 @@ export const useChat = (): UseChat => {
         return result.running ? [...withoutSelected, selectedSessionId] : withoutSelected
       })
       subscribe(selectedSessionId)
-      return result.messages.length > 0 || result.running
+      return nextMessages.length > 0 || result.running
     },
     [api, reconcileLiveAssistant, subscribe],
   )
