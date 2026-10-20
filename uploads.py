@@ -15,7 +15,6 @@ import hashlib
 import io
 import logging
 import os
-import time
 import zipfile
 from pathlib import Path
 
@@ -202,16 +201,3 @@ def _safe_name(name: str | None) -> str:
     parts = [part.strip() for part in normalized.split("/") if part.strip() not in ("", ".", "..")]
     clean = "/".join("".join(character for character in part if character >= " " and character != "\x7f") for part in parts)
     return clean[:120]
-
-
-def sweep(max_age_days: int = 30) -> int:
-    """오래된 업로드 정리. 세션 로그에 경로가 남아 있으므로 너무 짧게 잡지 않는다."""
-    cutoff = time.time() - max_age_days * 86400
-    n = 0
-    for f in config.UPLOAD_DIR.glob("*"):
-        try:
-            if f.is_file() and f.stat().st_mtime < cutoff:
-                f.unlink(); n += 1
-        except OSError:
-            pass
-    return n
