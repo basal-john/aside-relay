@@ -175,11 +175,14 @@ async def _tail_stream_log(run: Run) -> None:
                 size = os.path.getsize(run.stream_log_path)
                 if size < offset:
                     offset, buf = 0, b""
-                if size > offset:
-                    with open(run.stream_log_path, "rb") as fh:
-                        fh.seek(offset)
-                        chunk = fh.read(size - offset)
-                    offset = size
+                if size > offset or (not run.running and buf):
+                    if size > offset:
+                        with open(run.stream_log_path, "rb") as fh:
+                            fh.seek(offset)
+                            chunk = fh.read(size - offset)
+                        offset = size
+                    else:
+                        chunk = b"\n"
                     buf += chunk
                     changed = True
                     *lines, buf = buf.split(b"\n")
@@ -187,6 +190,8 @@ async def _tail_stream_log(run: Run) -> None:
                         try:
                             event = json.loads(raw)
                         except (json.JSONDecodeError, UnicodeDecodeError):
+                            continue
+                        if not isinstance(event, dict):
                             continue
                         event_type = event.get("type")
                         message = event.get("message")
