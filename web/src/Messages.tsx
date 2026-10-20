@@ -119,12 +119,12 @@ export function Messages({ chat, listRef, onAtBottomChange, notify, onZoom, onOp
   const shouldReduceMotion = useReducedMotion();
   const sources = [...new Map(messages.flatMap(message => message.sources ?? []).map(source => [source.id, source])).values()];
   const messageById = new Map(messages.map(message => [String(message.seq), message]));
-  const { handlers, menu, selectableId } = useMessageMenu(id => {
+  const { handlers, menu, selectableId } = useMessageMenu({ textForMessage: id => {
     if (liveAssistant?.streamId === id) return formatCitations({ text: liveAssistant.text, sources, isStreaming: !liveAssistant.done });
     const message = messageById.get(id);
     if (!message) return '';
     return message.role === 'user' ? messageText(message).replace(attachmentPrompt, '') : formatCitations({ text: messageText(message), sources });
-  }, notify, { sessionId: chat.sessionId, request: chat.request, onOpenSession,
+  }, notify, sessionId: chat.sessionId, request: chat.request, onOpenSession,
     onRefreshMessages: async () => { await chat.refreshMessages(); }, onComposeContext, onAskSidechat,
     onNavigateTurns: () => setNavigatingTurns(true) });
   const [editingId, setEditingId] = useState<string>();
