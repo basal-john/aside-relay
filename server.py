@@ -30,7 +30,6 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 import browser
 import cfaccess
 import config
-import conversation_pins
 import daemondb
 import fonts
 import followups
@@ -526,7 +525,6 @@ async def api_delete_session(session_id: str):
             raise HTTPException(502, "Aside could not delete the conversation. Refresh the list and try again.")
     await hub.forget_session(session_id)
     await followup_queue.clear(session_id)
-    await asyncio.to_thread(conversation_pins.set_pinned, session_id, False)
     return {"deleted": True, "sessionId": session_id}
 
 

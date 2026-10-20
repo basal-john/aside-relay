@@ -1216,7 +1216,6 @@ this repository and can change its internal interfaces.
 | Push keys/subscriptions | `~/.aside-relay/web-push/` | Yes; losing the key requires resubscription |
 | Conversations and titles | `~/.aside/u/0/sessions/` | Yes; use the configured account's path |
 | Image attachments | `~/.aside/u/0/uploads/` | Yes |
-| Conversation pins | `<checkout>/cache/conversation-pins.sqlite` | Yes |
 | Browser preferences, draft, PiP position | Client origin's browser storage | Device-specific; a new origin has separate state |
 | Screenshots/media caches, logs, built UI | `cache/shots`, `cache/media`, `logs`, `web/dist` | Regenerable; not required for restoring conversations |
 | Proxy/TLS/tunnel state | Caddy data, certificate files, proxy config, SSH keys, or tunnel credentials | Preserve separately for the chosen route |
@@ -1233,9 +1232,6 @@ chmod 700 "$backup_dir"
 ditto "$HOME/.aside-relay" "$backup_dir/bridge-state"
 ditto "$HOME/.aside/u/0/sessions" "$backup_dir/sessions"
 ditto "$HOME/.aside/u/0/uploads" "$backup_dir/uploads"
-if [ -f cache/conversation-pins.sqlite ]; then
-    ditto cache/conversation-pins.sqlite "$backup_dir/conversation-pins.sqlite"
-fi
 .venv/bin/python scripts/setup.py --install-service
 ```
 
