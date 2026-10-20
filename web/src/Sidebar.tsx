@@ -7,11 +7,10 @@ import { ArrowDownUp, ChevronRight, Ellipsis, EyeOff, Grid2X2, List, Pin, Plus, 
 import type { ChatSession, SessionSettings, UseChat } from './types';
 import type { SessionMenuTarget } from './SessionMenu';
 import { tokens } from './tokens.stylex';
-import { ICON_STROKE, SESSION_CHANGE_EVENT, BrowserIcon, IconButton, styles as ui } from './ui';
+import { DEFAULT_RECENT_CHAT_LIMIT, ICON_STROKE, SESSION_CHANGE_EVENT, BrowserIcon, IconButton, styles as ui } from './ui';
 import { Button } from './Button';
 import { useAutoRefresh } from './useAutoRefresh';
 
-const RECENT_CONVERSATION_LIMIT = 3;
 const NATIVE_PAGE_SIZE = 50;
 const NATIVE_REFRESH_INTERVAL_MS = 5_000;
 type Project = { id: string; name: string };
@@ -24,16 +23,19 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen
 }) {
   const shouldReduceMotion = useReducedMotion();
   const [isShowingAll, setShowingAll] = useState(false);
-  const [recentLimit, setRecentLimit] = useState(RECENT_CONVERSATION_LIMIT);
+  const [recentLimit, setRecentLimit] = useState(DEFAULT_RECENT_CHAT_LIMIT);
   useEffect(() => {
     if (!chat.isReady || chat.authError) return;
     const controller = new AbortController();
+    let generation = 0;
     async function refreshPreference() {
+      const currentGeneration = ++generation;
       try {
         const response = await chat.request('/api/native/workspace/preferences', { signal: controller.signal });
         const value: unknown = await response.json();
-        const limit = typeof value === 'object' && value !== null ? Reflect.get(value, 'sidebarRecentChatLimit') : undefined;
-        if (typeof limit === 'number' && Number.isSafeInteger(limit) && limit >= 1 && limit <= 50) setRecentLimit(limit);
+        const preference = typeof value === 'object' && value !== null ? Reflect.get(value, 'sidebarRecentChatLimit') : undefined;
+        const limit = typeof preference === 'string' ? Number(preference) : preference;
+        if (currentGeneration === generation && typeof limit === 'number' && Number.isSafeInteger(limit) && limit >= 1 && limit <= 50) setRecentLimit(limit);
       } catch { /* Preserve the last known preference while disconnected. */ }
     }
     void refreshPreference();
