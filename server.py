@@ -1027,12 +1027,11 @@ class Hub:
         }
         if run.error or run.exit_code:
             payload["message"] = runner.safe_run_error(run.error or run.output)
-        await self.broadcast(sid, payload)
-        log.info("run.done broadcast session=%s", sid)
         notifications = [push_ntfy(sid, run)]
         if not run.is_aborted:
             notifications.append(self._push_answer(sid, run))
-        await asyncio.gather(*notifications)
+        await asyncio.gather(self.broadcast(sid, payload), *notifications)
+        log.info("run.done broadcast session=%s", sid)
 
     async def _push_answer(self, session_id: str, run: "runner.Run") -> None:
         try:
