@@ -1,5 +1,5 @@
 import { APP_NAME } from './brand';
-import { useEffect, useEffectEvent, useMemo, useState } from 'react';
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { AnimatePresence } from 'motion/react';
 import { Check, CheckCircle2, Circle, CircleDot, Files, ListTodo, LoaderCircle, MessageSquareMore } from 'lucide-react';
@@ -75,9 +75,24 @@ export function SessionWorkspace({ chat, notify, onOpenSession, onOutputs, onSta
   const [customAnswers, setCustomAnswers] = useState<Record<string, string>>({});
   const [customAnswer, setCustomAnswer] = useState('');
   const [isAlwaysAllowed, setAlwaysAllowed] = useState(false);
+  const suspensionRevisionRef = useRef(0);
+  const resolvingRevisionRef = useRef<number | undefined>(undefined);
   const sessionId = chat.sessionId;
+  const sessionIdRef = useRef(sessionId);
   const publishState = useEffectEvent((next: SessionWorkspaceState | undefined) => onStateChange?.(next));
   const suspensionKey = state?.suspension?.toolCallId;
+
+  useLayoutEffect(() => {
+    sessionIdRef.current = sessionId;
+    suspensionRevisionRef.current += 1;
+    resolvingRevisionRef.current = undefined;
+    setResolving(false);
+    return () => {
+      sessionIdRef.current = undefined;
+      suspensionRevisionRef.current += 1;
+      resolvingRevisionRef.current = undefined;
+    };
+  }, [sessionId]);
 
   useEffect(() => {
     const questions = state?.suspension?.questions ?? [];
@@ -105,11 +120,20 @@ export function SessionWorkspace({ chat, notify, onOpenSession, onOutputs, onSta
         timer = setTimeout(refresh, IDLE_POLL_INTERVAL_MS);
         return;
       }
+      if (resolvingRevisionRef.current !== undefined) {
+        timer = setTimeout(refresh, ACTIVE_POLL_INTERVAL_MS);
+        return;
+      }
       controller = new AbortController();
+      const suspensionRevision = suspensionRevisionRef.current;
       try {
         const response = await chat.request(`/api/native/sessions/${encodeURIComponent(sessionId!)}?brief=true`, { signal: controller.signal });
         const next = parseWorkspaceState(await response.json(), sessionId!);
         if (!isActive) return;
+        if (suspensionRevision !== suspensionRevisionRef.current) {
+          timer = setTimeout(refresh, ACTIVE_POLL_INTERVAL_MS);
+          return;
+        }
         setState(next);
         publishState(next);
         timer = setTimeout(refresh, next.status === 'running' || next.status === 'suspended' ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS);
@@ -145,25 +169,39 @@ export function SessionWorkspace({ chat, notify, onOpenSession, onOutputs, onSta
   }
 
   async function runSuspensionCommand(body: Record<string, unknown>, successMessage: string) {
-    if (!state?.suspension || isResolving) return;
+    if (!state?.suspension || isResolving || !sessionId) return;
     const suspension = state.suspension;
     const optimisticState = { ...state, suspension: undefined };
+    const commandSessionId = sessionId;
+    const commandRevision = suspensionRevisionRef.current + 1;
+    suspensionRevisionRef.current = commandRevision;
+    resolvingRevisionRef.current = commandRevision;
     setResolving(true);
     setState(optimisticState);
     publishState(optimisticState);
     try {
-      await chat.request(`/api/native/sessions/${encodeURIComponent(sessionId!)}/command`, {
+      await chat.request(`/api/native/sessions/${encodeURIComponent(commandSessionId)}/command`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      if (!isCurrentCommand()) return;
       notify(successMessage, 'success');
     } catch {
+      if (!isCurrentCommand()) return;
       setState(current => current ? { ...current, suspension } : current);
       publishState({ ...optimisticState, suspension });
       notify('Could not send the response. Try again.', 'error');
     } finally {
-      setResolving(false);
+      if (isCurrentCommand()) {
+        resolvingRevisionRef.current = undefined;
+        suspensionRevisionRef.current += 1;
+        setResolving(false);
+      }
+    }
+
+    function isCurrentCommand() {
+      return resolvingRevisionRef.current === commandRevision && sessionIdRef.current === commandSessionId;
     }
   }
 
