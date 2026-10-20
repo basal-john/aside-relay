@@ -47,6 +47,18 @@ class TransportMediaRegressionTests(support.IsolatedBackendTest):
         payload = json.loads(stdin.writes[0])
         self.assertEqual(payload["method"], "tools/call")
 
+    async def test_ambiguous_repl_failure_respawns_without_repeating_code(self):
+        client = mcp_client.MCPClient()
+        client.ensure = AsyncMock()
+        client._raw_repl = AsyncMock(side_effect=TimeoutError("unknown outcome"))
+        client._spawn = AsyncMock()
+
+        with self.assertRaises(TimeoutError):
+            await client.repl("dangerousMutation()", title="Mutation", timeout=1)
+
+        client._raw_repl.assert_awaited_once()
+        client._spawn.assert_awaited_once()
+        self.assertEqual(client.restarts, 1)
 
 
 

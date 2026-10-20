@@ -181,7 +181,7 @@ class MCPClient:
 
     async def repl(self, code: str, *, title: str = "Bridge", timeout: float | None = None,
                    wrap: bool = True) -> str:
-        """JS 실행 후 console.log 출력을 문자열로 반환. 프로세스가 죽었으면 1회 재시도."""
+        """JS 실행 후 console.log 출력을 문자열로 반환."""
         timeout = timeout or config.MCP_CALL_TIMEOUT
         body = _WRAP % code if wrap else code
         async with self._call_lock:
@@ -193,8 +193,11 @@ class MCPClient:
                     raise
                 log.warning("repl call failed (%s) — respawning", exc)
                 self.restarts += 1
-                await self._spawn()
-                out = await self._raw_repl(body, title, timeout)
+                try:
+                    await self._spawn()
+                except Exception:
+                    log.exception("failed to respawn aside mcp")
+                raise
             self.last_ok = time.time()
             return out
 
