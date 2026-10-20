@@ -18,7 +18,9 @@ export function Artifacts({ sessionId, request, notify, onClose, onZoom }: {
 }) {
   const [items, setItems] = useState<Artifact[]>([]);
   const [selected, setSelected] = useState<Artifact>();
-  const [textPreview, setTextPreview] = useState('');
+  const [textPreview, setTextPreview] = useState<string>();
+  const [previewError, setPreviewError] = useState('');
+  const [previewRevision, setPreviewRevision] = useState(0);
   const [isLoading, setLoading] = useState(true);
   const [isRenaming, setRenaming] = useState(false);
   const [isDeleting, setDeleting] = useState(false);
@@ -31,6 +33,7 @@ export function Artifacts({ sessionId, request, notify, onClose, onZoom }: {
       const response = await request(`/api/native/files/sessions/${encodeURIComponent(sessionId)}/artifacts`, { signal });
       if (!response.ok) throw new Error(await response.text());
       const next = parseArtifacts(await response.json());
+      if (signal?.aborted) return;
       setItems(next);
       setSelected(current => current && next.find(item => item.path === current.path));
     } catch (error) {
@@ -42,17 +45,25 @@ export function Artifacts({ sessionId, request, notify, onClose, onZoom }: {
 
   useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort(); }, [sessionId]);
   useEffect(() => {
-    if (!selected || !['text', 'csv'].includes(selected.kind)) { setTextPreview(''); return; }
+    if (!selected || !['text', 'csv'].includes(selected.kind)) { setTextPreview(undefined); setPreviewError(''); return; }
     const controller = new AbortController();
     const params = new URLSearchParams({ path: selected.path });
+    setTextPreview(undefined);
+    setPreviewError('');
     request(`/api/native/files/sessions/${encodeURIComponent(sessionId)}/artifact-preview?${params}`, { signal: controller.signal }).then(async response => {
       if (!response.ok) throw new Error(await response.text());
       const payload: unknown = await response.json();
       if (!isRecord(payload) || typeof payload.content !== 'string') throw new Error('Invalid file preview.');
+      if (controller.signal.aborted) return;
       setTextPreview(payload.content);
-    }).catch(error => { if (!controller.signal.aborted) notify(error instanceof Error ? error.message : 'Could not preview this file.', 'error'); });
+    }).catch(error => {
+      if (!controller.signal.aborted) {
+        const message = error instanceof Error ? error.message : 'Could not preview this file.';
+        setPreviewError(message); notify(message, 'error');
+      }
+    });
     return () => controller.abort();
-  }, [request, selected, sessionId]);
+  }, [previewRevision, request, selected, sessionId]);
 
   const selectedUrl = selected && `/api/native/files/sessions/${encodeURIComponent(sessionId)}/artifacts/${selected.path.split('/').map(encodeURIComponent).join('/')}`;
 
@@ -87,8 +98,8 @@ export function Artifacts({ sessionId, request, notify, onClose, onZoom }: {
         {selected.kind === 'image' && (onZoom ? <button type="button" aria-label={`Open ${selected.name}`} {...stylex.props(styles.mediaButton)} onClick={() => onZoom(selectedUrl!)}><img src={selectedUrl} alt={selected.name} {...stylex.props(styles.media)} /></button> : <img src={selectedUrl} alt={selected.name} {...stylex.props(styles.media)} />)}
         {selected.kind === 'pdf' && <iframe src={selectedUrl} title={selected.name} {...stylex.props(styles.frame)} />}
         {selected.kind === 'html' && <iframe src={selectedUrl} title={selected.name} sandbox="" {...stylex.props(styles.frame)} />}
-        {selected.kind === 'text' && <pre {...stylex.props(styles.code)}>{textPreview || 'Loading preview…'}</pre>}
-        {selected.kind === 'csv' && <CsvPreview content={textPreview} />}
+        {selected.kind === 'text' && (previewError ? <PreviewError message={previewError} onRetry={() => setPreviewRevision(value => value + 1)} /> : <pre {...stylex.props(styles.code)}>{textPreview ?? 'Loading preview…'}</pre>)}
+        {selected.kind === 'csv' && (previewError ? <PreviewError message={previewError} onRetry={() => setPreviewRevision(value => value + 1)} /> : <CsvPreview content={textPreview} />)}
         {selected.kind === 'binary' && <div {...stylex.props(styles.emptyPreview)}><File size={36} /><p {...stylex.props(styles.emptyText)}>This file cannot be previewed here.</p><a href={`${selectedUrl}?download=true`} download={selected.name} {...stylex.props(styles.emptyLink)}>Download file</a></div>}
       </> : <div {...stylex.props(styles.emptyPreview)}><FileText size={36} /><p {...stylex.props(styles.emptyText)}>Select a file to preview it.</p></div>}</div>
     </div>
@@ -110,10 +121,14 @@ function parseArtifacts(value: unknown) {
   });
 }
 
-function CsvPreview({ content }: { content: string }) {
-  if (!content) return <p role="status" {...stylex.props(styles.empty)}>Loading preview…</p>;
+function CsvPreview({ content }: { content?: string }) {
+  if (content === undefined) return <p role="status" {...stylex.props(styles.empty)}>Loading preview…</p>;
   const rows = parseCsv(content).slice(0, 200);
   return <div {...stylex.props(styles.tableWrap)}><table {...stylex.props(styles.table)}><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.slice(0, 50).map((cell, cellIndex) => rowIndex === 0 ? <th key={cellIndex} {...stylex.props(styles.cell, styles.headingCell)}>{cell}</th> : <td key={cellIndex} {...stylex.props(styles.cell)}>{cell}</td>)}</tr>)}</tbody></table></div>;
+}
+
+function PreviewError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return <div role="alert" {...stylex.props(styles.emptyPreview)}><FileText size={36} /><p {...stylex.props(styles.emptyText)}>{message}</p><Button size="compact" onClick={onRetry}>Try again</Button></div>;
 }
 
 function parseCsv(content: string) {
