@@ -1,6 +1,10 @@
 import { expect, SESSION_A, test } from './fixture';
 import type { Page, Route } from '@playwright/test';
 
+const PUBLIC_KEY = 'A'.repeat(87);
+const PUSH_CONFIG_PATH = '/api/push/config';
+const PUSH_SUBSCRIPTIONS_PATH = '/api/push/subscriptions';
+
 async function installSocketSequence(page: Page, closeCodes: (number | undefined)[]) {
   await page.addInitScript(({ closeCodes }) => {
     const state = { created: 0, sent: [] as string[] };
@@ -46,6 +50,77 @@ async function installSocketSequence(page: Page, closeCodes: (number | undefined
     Object.defineProperty(window, 'WebSocket', { configurable: true, value: SyntheticWebSocket });
     Reflect.set(window, '__authSocketRegression', state);
   }, { closeCodes });
+}
+
+async function installPushHarness(page: Page, initialSubscription: 'matching' | 'stale') {
+  await page.addInitScript(({ initialSubscription, publicKey }) => {
+    const decodeKey = (value: string) => Uint8Array.from(
+      atob(value.replace(/-/g, '+').replace(/_/g, '/') + '='),
+      character => character.charCodeAt(0),
+    ).buffer;
+    const expectedKey = decodeKey(publicKey);
+    const staleKey = new Uint8Array(expectedKey.byteLength).fill(1).buffer;
+    const state = { getCalls: 0, subscribeCalls: 0, unsubscribeCalls: 0 };
+
+    class SyntheticSubscription {
+      readonly options: { applicationServerKey: ArrayBuffer };
+
+      constructor(key: ArrayBuffer) {
+        this.options = { applicationServerKey: key };
+      }
+
+      async unsubscribe() {
+        state.unsubscribeCalls += 1;
+        currentSubscription = undefined;
+        return true;
+      }
+
+      toJSON() {
+        return {
+          endpoint: 'https://push.example.test/subscription',
+          expirationTime: null,
+          keys: { auth: 'auth', p256dh: 'p256dh' },
+        };
+      }
+    }
+
+    let currentSubscription: SyntheticSubscription | undefined = new SyntheticSubscription(initialSubscription === 'matching' ? expectedKey : staleKey);
+    const pushManager = {
+      async getSubscription() {
+        state.getCalls += 1;
+        return currentSubscription;
+      },
+      async subscribe() {
+        state.subscribeCalls += 1;
+        currentSubscription = new SyntheticSubscription(expectedKey);
+        return currentSubscription;
+      },
+    };
+    const registration = { active: {}, pushManager };
+    const serviceWorker = {
+      ready: Promise.resolve(registration),
+      async register() { return registration; },
+      addEventListener() {},
+      removeEventListener() {},
+    };
+
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
+    Object.defineProperty(window, 'Notification', {
+      configurable: true,
+      value: { permission: 'granted', async requestPermission() { return 'granted'; } },
+    });
+    Object.defineProperty(window, 'PushManager', { configurable: true, value: class PushManager {} });
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: serviceWorker });
+    Object.defineProperty(navigator, 'standalone', { configurable: true, value: true });
+    Reflect.set(window, '__pushRegression', state);
+  }, { initialSubscription, publicKey: PUBLIC_KEY });
+}
+
+async function openSettings(page: Page) {
+  const openDrawer = page.getByRole('button', { name: /Open conversations/ });
+  if (await openDrawer.isVisible()) await openDrawer.click();
+  await page.getByRole('button', { name: /Settings/ }).click();
+  return page.getByRole('dialog', { name: 'Settings' });
 }
 
 function fulfillJson(route: Route, value: unknown, status = 200) {
@@ -105,4 +180,78 @@ test('stops refreshing authentication after a repeated pre-open 4401', async ({ 
   await page.waitForTimeout(1_200);
   expect(await page.evaluate(() => Reflect.get(window, '__authSocketRegression').created)).toBe(2);
   expect(mockAside.calls.filter(call => call.method === 'POST' && call.path === '/api/auth')).toHaveLength(1);
+});
+
+test('finishes disabling after an in-flight notification restore', async ({ page }) => {
+  await installPushHarness(page, 'matching');
+  let subscriptionPuts = 0;
+  let subscriptionDeletes = 0;
+  let holdNextPut = false;
+  let releaseHeldPut = () => {};
+  let markHeldPutStarted = () => {};
+  const heldPutStarted = new Promise<void>(resolve => { markHeldPutStarted = resolve; });
+  await page.route('**/api/push/**', async route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === 'GET' && url.pathname === PUSH_CONFIG_PATH) {
+      return fulfillJson(route, { publicKey: PUBLIC_KEY });
+    }
+    if (request.method() === 'PUT' && url.pathname === PUSH_SUBSCRIPTIONS_PATH) {
+      subscriptionPuts += 1;
+      if (holdNextPut) {
+        holdNextPut = false;
+        markHeldPutStarted();
+        await new Promise<void>(resolve => { releaseHeldPut = resolve; });
+      }
+      return fulfillJson(route, { id: 'a'.repeat(64) });
+    }
+    if (request.method() === 'DELETE' && url.pathname.startsWith(PUSH_SUBSCRIPTIONS_PATH + '/')) {
+      subscriptionDeletes += 1;
+      return fulfillJson(route, { deleted: true });
+    }
+    return fulfillJson(route, { ok: true });
+  });
+
+  await page.goto(`/?session=${SESSION_A}`);
+  const settings = await openSettings(page);
+  await expect(settings.getByText('Enabled', { exact: true })).toBeVisible();
+  holdNextPut = true;
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await heldPutStarted;
+  const disable = settings.getByRole('button', { name: 'Turn off notifications' });
+  await disable.click();
+  releaseHeldPut();
+
+  await expect(settings.getByText('Off', { exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => Reflect.get(window, '__pushRegression').unsubscribeCalls)).toBe(1);
+  expect(subscriptionPuts).toBeGreaterThanOrEqual(2);
+  expect(subscriptionDeletes).toBe(1);
+});
+
+test('replaces a stale VAPID subscription before enabling notifications', async ({ page }) => {
+  await installPushHarness(page, 'stale');
+  let subscriptionPuts = 0;
+  await page.route('**/api/push/**', route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === 'GET' && url.pathname === PUSH_CONFIG_PATH) {
+      return fulfillJson(route, { publicKey: PUBLIC_KEY });
+    }
+    if (request.method() === 'PUT' && url.pathname === PUSH_SUBSCRIPTIONS_PATH) {
+      subscriptionPuts += 1;
+      return fulfillJson(route, { id: 'b'.repeat(64) });
+    }
+    return fulfillJson(route, { ok: true });
+  });
+
+  await page.goto(`/?session=${SESSION_A}`);
+  const settings = await openSettings(page);
+  await expect(settings.getByText('Off', { exact: true })).toBeVisible();
+  await settings.getByRole('button', { name: 'Enable notifications' }).click();
+
+  await expect(settings.getByText('Enabled', { exact: true })).toBeVisible();
+  const state = await page.evaluate(() => Reflect.get(window, '__pushRegression'));
+  expect(state.unsubscribeCalls).toBe(1);
+  expect(state.subscribeCalls).toBe(1);
+  expect(subscriptionPuts).toBe(1);
 });

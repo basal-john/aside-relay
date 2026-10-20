@@ -63,6 +63,7 @@ export function App() {
   const [draft, setDraft] = useState(''); const [revision, setRevision] = useState(0);
   const [isKeyboardOpen, setKeyboardOpen] = useState(false);
   const [localToasts, setLocalToasts] = useState<Toast[]>([]);
+  const localToastIdRef = useRef(0);
   const listRef = useRef<VirtuosoHandle>(null);
   const [canJump, setCanJump] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -73,9 +74,9 @@ export function App() {
 
   function changeAtBottom(isAtBottom: boolean) { setCanJump(!isAtBottom); }
 
-  function notify(message: string, kind: 'success' | 'error' = 'success') {
-    const id = crypto.randomUUID(); setLocalToasts(current => [...current, { id, createdAt: Date.now(), message, tone: kind }]);
-  }
+  const notify = useCallback((message: string, kind: 'success' | 'error' = 'success') => {
+    const id = `local:${++localToastIdRef.current}`; setLocalToasts(current => [...current, { id, createdAt: Date.now(), message, tone: kind }]);
+  }, []);
   const notifications = usePushNotifications(chat, notify);
   const dismissToast = useCallback((id: string) => { chat.dismissToast(id); setLocalToasts(current => current.filter(toast => toast.id !== id)); }, [chat.dismissToast]);
   function changeTextSize(size: number) {
