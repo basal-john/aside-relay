@@ -18,6 +18,7 @@ import hashlib
 import json
 import logging
 import math
+import tempfile
 import time
 from pathlib import Path
 
@@ -213,15 +214,35 @@ async def _capture(target_id: str, dest: Path, full: bool, quality: int, tab: di
   console.log(JSON.stringify({{ path: fp, bytes: buf.length, url: pg.url(), title, heading }}));
 """
     info = await mcp.repl_json(code, title="Capturing tab", timeout=40)
-    if not info["title"] or _title_key(info["title"]) == _title_key(info["url"]):
-        info["title"] = info["heading"]
-    _page_titles[target_id] = (info["url"], info["title"])
     src = Path(info["path"])
-    dest.write_bytes(src.read_bytes())
     try:
-        src.unlink()
-    except OSError:
-        pass
+        if not info["title"] or _title_key(info["title"]) == _title_key(info["url"]):
+            info["title"] = info["heading"]
+        _page_titles[target_id] = (info["url"], info["title"])
+        data = src.read_bytes()
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=dest.parent,
+                prefix=f".{dest.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as output:
+                temporary = Path(output.name)
+                output.write(data)
+            temporary.replace(dest)
+            temporary = None
+        finally:
+            if temporary is not None:
+                try:
+                    temporary.unlink()
+                except OSError:
+                    pass
+    finally:
+        try:
+            src.unlink()
+        except OSError:
+            pass
     return dest, {
         "cached": False,
         "bytes": info.get("bytes"),
