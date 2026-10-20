@@ -38,7 +38,12 @@ Browser failures save screenshots, traces, and an HTML report under
 `output/playwright/`; CI uploads that folder on failure. Inspect a trace with
 `npx playwright show-trace <trace.zip>`.
 
-## How the checks are organized
+## SMURF test strategy
+
+The suite follows [Google's SMURF tradeoffs](https://testing.googleblog.com/2024/10/smurf-beyond-test-pyramid.html):
+speed, maintainability, resource utilization, reliability, and fidelity. Choose
+the smallest check that detects a user-visible failure; use broader checks when
+the browser, native bridge, or operating system supplies the behavior.
 
 | Criterion | Implementation | Observable result |
 | --- | --- | --- |
@@ -48,10 +53,32 @@ Browser failures save screenshots, traces, and an HTML report under
 | Reliability | Condition-based browser assertions, explicit race gates, zero retries, repeated execution command | A first-run failure remains visible; a late response can be released at a chosen point |
 | Fidelity | Production bundle, two browser engines, real ASGI routes and actual service-worker source | Compiler, DOM, routing, protocol, and bridge behavior are exercised together |
 
+For browser control, use the following boundaries before changing production
+behavior:
+
+| Boundary | Behavior to establish | Failure evidence |
+| --- | --- | --- |
+| Pure transforms | Preview coordinates, key normalization, destination parsing | Deterministic input/output assertions against production functions |
+| Actual HTTP routes | Payload validation, conversation ownership, supported native commands | Real ASGI requests reject invalid input before any native mutation |
+| Built browser UI | Opening PiP enables direct control; clicks, wheel gestures, keys, and text reach the selected tab | Chromium and mobile WebKit assertions observe requests produced by real DOM events |
+| Recovery | Missing, sleeping, switched, or disconnected tabs cannot receive stale commands or display another tab's frame | Explicit request gates and controlled responses expose races without retries |
+| Live native integration | Click, scroll, type, key input, and navigation change a task-owned real browser tab | Inspect the destination tab's DOM and viewport, then delete only the test tab and temporary data |
+
+Add a focused regression before each behavior fix and run it against the
+unmodified implementation. Preserve that failure and rerun the same assertion
+afterward. Existing feature assertions remain in place during structural
+cleanup; a changed assertion must correspond to an explicitly changed product
+contract. Mock HTTP success alone is not evidence of live browser control.
+
 The WebKit build used in Linux CI reports the unsupported `interactive-widget`
 viewport option as a console error. The fixture ignores only that exact browser
 diagnostic in WebKit. Other console errors and page errors still fail the test. The viewport
 option remains in the app for browsers that support keyboard-driven resizing.
+
+Mobile WebKit cannot synthesize a native mouse wheel. Its wheel-listener check
+dispatches a DOM event; Chromium uses native wheel input. Both engines exercise
+pointer dragging. Actual native tab scrolling requires the live integration
+check above, including a nested scroll area whose parent must remain still.
 
 Browser contexts are recreated per test. Unexpected API requests fail the
 fixture instead of receiving a generic successful response. Backend tests set
@@ -75,9 +102,9 @@ otherwise launch queue workers and warm the browser MCP connection.
 | Unread completed dot, running indicator precedence, stable distinct subagent colors and tool paths | `e2e/activity-status.spec.ts` |
 | Message long press/release, editing, quoting, turn navigation, native branch/side chat | `e2e/message-actions.spec.ts`, `backend/test_native_sessions.py` |
 | Approval, child approval policy, confirmation, question/cancel, tasks and subagents | `backend/test_native_sessions.py`, `e2e/workspace-browser-files.spec.ts`, `e2e/activity-status.spec.ts` |
-| Native projects, routines, memory, context, skills, MCP, tools, providers, devices and preferences | `backend/test_native_workspace.py`, `e2e/workspace-navigation.spec.ts` cover contracts, section navigation, project edits, redaction and preference recovery |
-| Browser control, invalid coordinates/actions/keys/URLs, history/bookmarks/groups, keep-tab cleanup, finite MJPEG stream | `backend/test_native_browser.py`, `unit/browser-errors.test.mjs`, `e2e/browser-controls.spec.ts` |
-| PiP movement/persistence/minimize/restore/expand/close | `e2e/workspace-browser-files.spec.ts` waits for settled geometry before comparing restored position |
+| Native projects, routines, memory, context, skills, MCP, tools, providers, devices and preferences | `backend/test_native_workspace.py`, `e2e/workspace-navigation.spec.ts`, `e2e/workspace-contract-regression.spec.ts` cover contracts, section navigation, project edits, redaction, failed reads and preference recovery |
+| Browser control, invalid coordinates/actions/keys/URLs, history/bookmarks/groups, keep-tab cleanup, finite MJPEG stream | `backend/test_native_browser.py`, `backend/test_browser_control_contracts.py`, `unit/browser-errors.test.mjs`, `e2e/browser-controls.spec.ts`, `e2e/browser-control-regression.spec.ts` |
+| PiP movement/persistence/minimize/restore/expand/close, corrupt frames, background return and tab ownership | `e2e/browser-preview-regression.spec.ts`; `e2e/workspace-browser-files.spec.ts` waits for settled geometry before comparing restored position |
 | Upload signatures/limits/dedup, active content isolation, symlink/traversal rejection, artifact lifecycle | `backend/test_uploads.py`, `backend/test_files_security.py`, `e2e/workspace-browser-files.spec.ts` |
 | Citation transport tags, streaming fragments, nested sources, Markdown/code preservation, unsafe links | `unit/citations.test.mjs` |
 | Visual HTML policy/theme/messages, long-word constraints, source formatting, bounded long-history DOM | `unit/theme-visual.test.mjs`, `e2e/rendering.spec.ts` |
