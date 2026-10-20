@@ -165,8 +165,8 @@ async def _require_awake(target_id: str, session_id: str | None = None, *, show_
 
 
 # --------------------------------------------------------------------- 캡처
-def _shot_path(target_id: str, full: bool) -> Path:
-    key = hashlib.sha1(f"{target_id}:{int(full)}".encode()).hexdigest()[:20]
+def _shot_path(target_id: str, full: bool, quality: int) -> Path:
+    key = hashlib.sha1(f"{target_id}:{int(full)}:{quality}".encode()).hexdigest()[:20]
     return config.SHOT_DIR / f"{key}.jpg"
 
 
@@ -179,7 +179,8 @@ async def screenshot(target_id: str, *, full: bool = False, quality: int = 62,
     """
     global _shot_waiting
     max_age = config.SHOT_CACHE_TTL if max_age is None else max_age
-    dest = _shot_path(target_id, full)
+    tab = await _require_awake(target_id, session_id, show_all=show_all)
+    dest = _shot_path(target_id, full, quality)
 
     # 캐시 히트는 큐를 타지 않는다.
     if dest.exists() and time.time() - dest.stat().st_mtime < max_age:
@@ -191,15 +192,15 @@ async def screenshot(target_id: str, *, full: bool = False, quality: int = 62,
     _shot_waiting += 1
     try:
         async with _shot_sem, lock:
+            tab = await _require_awake(target_id, session_id, show_all=show_all)
             if dest.exists() and time.time() - dest.stat().st_mtime < max_age:
                 return dest, {"cached": True}
-            return await _capture(target_id, dest, full, quality, session_id, show_all)
+            return await _capture(target_id, dest, full, quality, tab)
     finally:
         _shot_waiting -= 1
 
 
-async def _capture(target_id: str, dest: Path, full: bool, quality: int, session_id: str | None, show_all: bool) -> tuple[Path, dict]:
-    tab = await _require_awake(target_id, session_id, show_all=show_all)
+async def _capture(target_id: str, dest: Path, full: bool, quality: int, tab: dict) -> tuple[Path, dict]:
     code = _ATTACH + f"""
   const dir = pwd + '/artifacts';
   await fs.mkdir(dir, {{ recursive: true }});

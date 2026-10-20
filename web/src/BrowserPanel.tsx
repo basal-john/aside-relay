@@ -569,6 +569,11 @@ function PreviewCard({ tab, sessionId, isShowingAll, onOpen }: {
   onOpen: () => void
 }) {
   const [hasError, setHasError] = useState(false)
+  useEffect(() => {
+    if (!hasError) return
+    const retry = window.setTimeout(() => setHasError(false), THUMBNAIL_REFRESH_INTERVAL_MS)
+    return () => window.clearTimeout(retry)
+  }, [hasError])
   return <button type="button" {...stylex.props(styles.liveCard)} onClick={onOpen}>
     {!hasError ? <img src={getBrowserStreamUrl(tab.targetId, sessionId, isShowingAll, .5)} alt="" {...stylex.props(styles.liveImage)} onError={() => setHasError(true)} /> : <Globe2 size={24} aria-hidden="true" />}
     <span {...stylex.props(styles.liveTitle)}>{tab.title || "Untitled tab"}</span>
