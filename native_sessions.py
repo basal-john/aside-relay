@@ -110,7 +110,14 @@ async def get_native_session(session_id: str, brief: bool = Query(False)):
             _call("sessions.listRuns", {"accountId": ACCOUNT_ID, "sessionId": session_id}),
             _call("sessions.messageRows", {"accountId": ACCOUNT_ID, "sessionId": session_id}),
         ))
-    results = await asyncio.gather(*tasks)
+    pending = [asyncio.create_task(task) for task in tasks]
+    try:
+        results = await asyncio.gather(*pending)
+    except BaseException:
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        raise
     children, outputs, preview_items = results[:3]
     runs, message_rows = results[3:] if not brief else ([], [])
     if isinstance(preview_items, list) and preview_items:
