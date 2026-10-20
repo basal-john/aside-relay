@@ -8,21 +8,22 @@ import {
   Focus,
   Globe2,
   History,
+  Maximize2,
   MousePointer2,
   Search,
   Send,
   Trash2,
   X,
 } from "lucide-react"
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react"
 import { AnimatePresence } from "motion/react"
 import { formatRequestError } from "./errors"
 
 import { tokens } from "./tokens.stylex"
 import { focusDialogSurface, styles as ui } from "./ui"
 import { useAutoRefresh } from "./useAutoRefresh"
-import type { BrowserTab } from "./types"
-import { getBrowserStreamUrl, getWebsiteUrl, isTabResponse, OPEN_IN_BROWSER_LABEL, parseBrowserLibrary, type BrowserLibraryItem } from "./browser"
+import type { BrowserTab, UseChat } from "./types"
+import { browserScrollDelta, getBrowserKey, getBrowserStreamUrl, getWebsiteUrl, isTabResponse, OPEN_IN_BROWSER_LABEL, parseBrowserLibrary, type BrowserControl, type BrowserLibraryItem } from "./browser"
 import { ImagePreview } from "./ImagePreview"
 import { Button } from "./Button"
 import { Dialog, DialogActions, DialogDescription } from "./Dialog"
@@ -30,11 +31,12 @@ import { Dialog, DialogActions, DialogDescription } from "./Dialog"
 const TAB_REFRESH_INTERVAL_MS = 2_000
 const PREVIEW_REFRESH_INTERVAL_MS = 1_000
 const THUMBNAIL_REFRESH_INTERVAL_MS = 10_000
+const BROWSER_REQUEST_TIMEOUT_MS = 60_000
 const ICON_SIZE = 20
 const ICON_STROKE = 1.8
 
 type BrowserPanelProps = {
-  request: (path: string, init?: RequestInit) => Promise<Response>
+  request: UseChat['request']
   notify: (message: string, kind?: "error" | "success") => void
   onStart: (prompt: string) => void
   onClose: () => void
@@ -58,11 +60,10 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
   const [newTabUrl, setNewTabUrl] = useState("")
   const [openingTabs, setOpeningTabs] = useState<{ id: string; url: string }[]>([])
   const closingTabsRef = useRef(new Set<string>())
-  const [previewUrl, setPreviewUrl] = useState<string>()
-  const [isStreamUnavailable, setStreamUnavailable] = useState(false)
+  const [previewFrame, setPreviewFrame] = useState<{ targetId: string; url: string }>()
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>("idle")
   const [isPreviewExpanded, setPreviewExpanded] = useState(false)
-  const [isDirectControl, setDirectControl] = useState(false)
+  const [isDirectControl, setDirectControl] = useState(true)
   const [controlText, setControlText] = useState("")
   const [address, setAddress] = useState("")
   const [listMode, setListMode] = useState<"tabs" | "history" | "bookmarks">("tabs")
@@ -75,6 +76,9 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
   const captureGenerationRef = useRef(0)
   const previewUrlRef = useRef<string | undefined>(undefined)
   const panelRef = useRef<HTMLElement>(null)
+  const controlSurfaceRef = useRef<HTMLButtonElement>(null)
+  const controlAbortRef = useRef<AbortController | undefined>(undefined)
+  const controlTailRef = useRef<Promise<boolean | void>>(Promise.resolve())
   const backButtonRef = useRef<HTMLButtonElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
@@ -84,11 +88,11 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
   const previewGestureRef = useRef<{ x: number; y: number; pointerId: number } | undefined>(undefined)
   const selectedTabId = selectedTab?.targetId
   const websiteUrl = selectedTab && getWebsiteUrl(selectedTab.url)
-  const streamUrl = selectedTabId ? getBrowserStreamUrl(selectedTabId, sessionId, isShowingAllTabs) : undefined
-  const previewSource = !isStreamUnavailable ? streamUrl : previewUrl
+  const previewSource = previewFrame?.targetId === selectedTabId ? previewFrame?.url : undefined
   const isClosingTab = busyAction === "close"
   const isSelectedTabAsleep = selectedTab?.loaded === false
   const isSelectedTabMissing = !!selectedTabId && !tabs.some((tab) => tab.targetId === selectedTabId)
+  const canControl = !!selectedTabId && !isSelectedTabAsleep && !isSelectedTabMissing
 
   useLayoutEffect(() => {
     const dialog = panelRef.current?.closest("dialog")
@@ -145,6 +149,7 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
     if (!selectedTabId || isSelectedTabAsleep || isSelectedTabMissing) return
     const generation = ++captureGenerationRef.current
     if (!previewUrlRef.current) setPreviewStatus("loading")
+    let nextUrl: string | undefined
     try {
       const response = await request(
         `/api/tabs/${encodeURIComponent(selectedTabId)}/shot?fresh=true${sessionQuery}`,
@@ -152,20 +157,23 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
       )
       const blob = await response.blob()
       if (!blob.type.startsWith("image/")) throw new Error("The preview was not an image.")
-      const nextUrl = URL.createObjectURL(blob)
-      if (signal.aborted || generation !== captureGenerationRef.current) {
-        URL.revokeObjectURL(nextUrl)
-        return
-      }
+      nextUrl = URL.createObjectURL(blob)
+      const image = new Image()
+      image.src = nextUrl
+      await image.decode()
+      if (signal.aborted || generation !== captureGenerationRef.current) return
       const previousUrl = previewUrlRef.current
       previewUrlRef.current = nextUrl
-      setPreviewUrl(nextUrl)
+      setPreviewFrame({ targetId: selectedTabId, url: nextUrl })
+      nextUrl = undefined
       setPreviewStatus("ready")
       if (previousUrl) URL.revokeObjectURL(previousUrl)
     } catch (error) {
       if (signal.aborted || generation !== captureGenerationRef.current) return
       const status = getErrorStatus(error)
       setPreviewStatus(status === 409 ? "asleep" : status === 404 ? "missing" : "error")
+    } finally {
+      if (nextUrl) URL.revokeObjectURL(nextUrl)
     }
   }, [request, selectedTabId, isSelectedTabAsleep, isSelectedTabMissing, sessionQuery])
 
@@ -173,10 +181,10 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
     captureGenerationRef.current += 1
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
     previewUrlRef.current = undefined
-    setPreviewUrl(undefined)
-    setStreamUnavailable(false)
+    setPreviewFrame(undefined)
+    setBusyAction(undefined)
     setPreviewExpanded(false)
-    setDirectControl(false)
+    setDirectControl(true)
     setControlText("")
     setAddress(selectedTab?.url ?? "")
     setIsConfirmingClose(false)
@@ -184,7 +192,7 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
     return () => { captureGenerationRef.current += 1 }
   }, [selectedTabId])
 
-  useAutoRefresh(capturePreview, PREVIEW_REFRESH_INTERVAL_MS, !!selectedTabId && isStreamUnavailable && !isSelectedTabAsleep && !isSelectedTabMissing && !isClosingTab)
+  useAutoRefresh(capturePreview, PREVIEW_REFRESH_INTERVAL_MS, !!selectedTabId && !isSelectedTabAsleep && !isSelectedTabMissing && !isClosingTab)
 
   useEffect(() => {
     return () => {
@@ -240,7 +248,7 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
         await loadTabs()
       } else {
         try {
-          await request(`/api/tabs/${encodeURIComponent(selectedTab.targetId)}?${sessionQuery.slice(1)}`, { method: "DELETE", signal: AbortSignal.timeout(60_000) })
+          await request(`/api/tabs/${encodeURIComponent(selectedTab.targetId)}?${sessionQuery.slice(1)}`, { method: "DELETE", signal: AbortSignal.timeout(BROWSER_REQUEST_TIMEOUT_MS) })
         } catch (error) {
           if (getErrorStatus(error) !== 404) throw error
         }
@@ -262,32 +270,70 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
     }
   }
 
-  const sendControl = async (payload: Record<string, unknown>) => {
-    if (!selectedTab || busyAction || isSelectedTabAsleep || isSelectedTabMissing) return
-    setBusyAction(String(payload.action))
-    try {
-      const response = await request(
-        `/api/native/browser/tabs/${encodeURIComponent(selectedTab.targetId)}/control?${sessionQuery.slice(1)}`,
-        { method: "POST", body: JSON.stringify(payload) },
-      )
-      const value: unknown = await response.json()
-      if (typeof value === "object" && value !== null) {
+  useEffect(() => {
+    const controller = new AbortController()
+    controlAbortRef.current = controller
+    controlTailRef.current = Promise.resolve()
+    return () => controller.abort()
+  }, [selectedTabId, sessionQuery])
+
+  const sendControl = useCallback((payload: BrowserControl): Promise<boolean> => {
+    const controller = controlAbortRef.current
+    if (!selectedTabId || !canControl || !controller || controller.signal.aborted) return Promise.resolve(false)
+    const send = async () => {
+      if (controller.signal.aborted) return false
+      setBusyAction(payload.action)
+      try {
+        const response = await request(
+          `/api/native/browser/tabs/${encodeURIComponent(selectedTabId)}/control?${sessionQuery.slice(1)}`,
+          { method: "POST", body: JSON.stringify(payload), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(BROWSER_REQUEST_TIMEOUT_MS)]) },
+        )
+        const value: unknown = await response.json()
+        if (controller.signal.aborted) return false
+        if (typeof value !== "object" || value === null) throw new Error("Invalid browser response.")
         const nextUrl = Reflect.get(value, "url")
         const nextTitle = Reflect.get(value, "title")
         if (typeof nextUrl === "string") setAddress(nextUrl)
-        setSelectedTab(current => current && ({
+        setSelectedTab(current => current?.targetId === selectedTabId ? {
           ...current,
           url: typeof nextUrl === "string" ? nextUrl : current.url,
           title: typeof nextTitle === "string" && nextTitle ? nextTitle : current.title,
-        }))
+        } : current)
+        void capturePreview(controller.signal)
+        return true
+      } catch (error) {
+        if (!controller.signal.aborted) notify(getErrorMessage(error), "error")
+        return false
+      } finally {
+        if (!controller.signal.aborted) setBusyAction(undefined)
       }
-      captureGenerationRef.current += 1
-      if (isStreamUnavailable) void capturePreview(new AbortController().signal)
-    } catch (error) {
-      notify(getErrorMessage(error), "error")
-    } finally {
-      setBusyAction(undefined)
     }
+    const pending = controlTailRef.current.then(send)
+    controlTailRef.current = pending
+    return pending
+  }, [request, selectedTabId, canControl, sessionQuery, capturePreview, notify])
+
+  useEffect(() => {
+    const surface = controlSurfaceRef.current
+    if (!surface || !isDirectControl || !canControl) return
+    const scroll = (event: WheelEvent) => {
+      if (event.ctrlKey) return
+      event.preventDefault()
+      event.stopPropagation()
+      const point = normalizedPreviewPoint(surface, event.clientX, event.clientY)
+      if (point) void sendControl({ action: "scroll", ...point, deltaX: browserScrollDelta(event.deltaX), deltaY: browserScrollDelta(event.deltaY) })
+    }
+    surface.addEventListener("wheel", scroll, { passive: false })
+    return () => surface.removeEventListener("wheel", scroll)
+  }, [previewSource, isDirectControl, canControl, sendControl])
+
+  function controlKey(event: KeyboardEvent<HTMLButtonElement>) {
+    if (!isDirectControl || !canControl || event.nativeEvent.isComposing || event.ctrlKey || event.metaKey || event.altKey) return
+    const key = getBrowserKey(event.key)
+    if (!key && event.key.length !== 1) return
+    event.preventDefault()
+    event.stopPropagation()
+    void sendControl(key ? { action: "key", key } : { action: "type", text: event.key })
   }
 
   const openLibraryItem = async (item: BrowserLibraryItem) => {
@@ -308,7 +354,7 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
 
   const openNewTab = async () => {
     const enteredUrl = newTabUrl
-    const url = getWebUrl(enteredUrl)
+    const url = getWebsiteUrl(enteredUrl)
     if (!url) {
       notify("Enter a full http:// or https:// URL.", "error")
       return
@@ -363,12 +409,12 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
             <h3 {...stylex.props(styles.tabTitle)}>{selectedTab.title || "Untitled tab"}</h3>
             <form {...stylex.props(styles.addressBar)} onSubmit={event => {
               event.preventDefault()
-              const url = getWebUrl(address)
+              const url = getWebsiteUrl(address)
               if (!url) return notify("Enter a full http:// or https:// URL.", "error")
               void sendControl({ action: "navigate", url })
             }}>
               <input {...stylex.props(styles.addressInput)} aria-label="Website address" value={address} inputMode="url" autoCapitalize="none" autoCorrect="off" onChange={event => setAddress(event.target.value)} />
-              <button type="submit" {...stylex.props(styles.smallIconButton)} aria-label="Go to address" disabled={!!busyAction}><CornerDownLeft size={17} strokeWidth={ICON_STROKE} /></button>
+              <button type="submit" {...stylex.props(styles.smallIconButton)} aria-label="Go to address" disabled={!canControl || !!busyAction}><CornerDownLeft size={17} strokeWidth={ICON_STROKE} /></button>
             </form>
           </div>
 
@@ -377,14 +423,17 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
           </Button>}
 
           <div {...stylex.props(styles.navigationBar)}>
-            <button type="button" {...stylex.props(styles.smallIconButton)} aria-label="Back" disabled={!!busyAction} onClick={() => void sendControl({ action: "back" })}><ArrowLeft size={18} strokeWidth={ICON_STROKE} /></button>
-            <button type="button" {...stylex.props(styles.smallIconButton)} aria-label="Forward" disabled={!!busyAction} onClick={() => void sendControl({ action: "forward" })}><ArrowRight size={18} strokeWidth={ICON_STROKE} /></button>
-            <Button size="compact" variant={isDirectControl ? "primary" : undefined} aria-pressed={isDirectControl} onClick={() => setDirectControl(current => !current)}><MousePointer2 size={16} strokeWidth={ICON_STROKE} />Control</Button>
+            <button type="button" {...stylex.props(styles.smallIconButton)} aria-label="Back" disabled={!canControl || !!busyAction} onClick={() => void sendControl({ action: "back" })}><ArrowLeft size={18} strokeWidth={ICON_STROKE} /></button>
+            <button type="button" {...stylex.props(styles.smallIconButton)} aria-label="Forward" disabled={!canControl || !!busyAction} onClick={() => void sendControl({ action: "forward" })}><ArrowRight size={18} strokeWidth={ICON_STROKE} /></button>
+            <Button size="compact" variant={isDirectControl ? "primary" : undefined} aria-pressed={isDirectControl} disabled={!canControl} onClick={() => setDirectControl(current => !current)}><MousePointer2 size={16} strokeWidth={ICON_STROKE} />Control</Button>
+            {isDirectControl && <button type="button" aria-label="Expand browser view" disabled={!previewSource || !canControl} {...stylex.props(styles.smallIconButton)} onClick={() => setPreviewExpanded(true)}><Maximize2 size={18} strokeWidth={ICON_STROKE} /></button>}
           </div>
 
           <div {...stylex.props(styles.previewFrame)}>
             {previewSource && !isSelectedTabAsleep && !isSelectedTabMissing && <button
+              ref={controlSurfaceRef}
               type="button"
+              onKeyDown={controlKey}
               aria-label={isDirectControl ? "Control browser page" : "Expand browser view"}
               aria-haspopup={isDirectControl ? undefined : "dialog"}
               {...stylex.props(styles.expandPreview, isDirectControl && styles.controlPreview)}
@@ -392,16 +441,15 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
               onPointerUp={event => endPreviewGesture(event)}
               onPointerCancel={() => { previewGestureRef.current = undefined }}
               onClick={() => { if (!isDirectControl) setPreviewExpanded(true) }}
-            ><img {...stylex.props(styles.preview)} src={previewSource} alt={`Current view of ${selectedTab.title || "browser tab"}`} draggable={false} onLoad={() => setPreviewStatus("ready")} onError={() => { setPreviewStatus("error"); setStreamUnavailable(true) }} /></button>}
+            ><img {...stylex.props(styles.preview)} src={previewSource} alt={`Current view of ${selectedTab.title || "browser tab"}`} draggable={false} onLoad={() => setPreviewStatus("ready")} onError={() => { setPreviewStatus("error"); setPreviewFrame(undefined) }} /></button>}
             {(isSelectedTabAsleep || isSelectedTabMissing || previewStatus !== "ready") && <PreviewMessage status={isSelectedTabMissing ? "missing" : isSelectedTabAsleep ? "asleep" : previewStatus} />}
           </div>
 
-          {isDirectControl && <form {...stylex.props(styles.typeBar)} onSubmit={event => {
+          {isDirectControl && canControl && <form {...stylex.props(styles.typeBar)} onSubmit={event => {
             event.preventDefault()
             const text = controlText
             if (!text) return
-            setControlText("")
-            void sendControl({ action: "type", text })
+            void sendControl({ action: "type", text }).then(isSent => { if (isSent) setControlText(current => current === text ? "" : current) })
           }}>
             <input {...stylex.props(styles.typeInput)} value={controlText} placeholder="Type into the focused field" aria-label="Text to type in browser" onChange={event => setControlText(event.target.value)} />
             <Button size="compact" type="submit" disabled={!controlText || !!busyAction}>Type</Button>
@@ -499,7 +547,9 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
   )
 
   function beginPreviewGesture(event: PointerEvent<HTMLButtonElement>) {
-    if (!isDirectControl || event.button !== 0) return
+    if (!isDirectControl || !canControl || event.button !== 0) return
+    event.stopPropagation()
+    event.currentTarget.focus({ preventScroll: true })
     previewGestureRef.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId }
     event.currentTarget.setPointerCapture(event.pointerId)
   }
@@ -507,11 +557,13 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
   function endPreviewGesture(event: PointerEvent<HTMLButtonElement>) {
     const start = previewGestureRef.current
     previewGestureRef.current = undefined
-    if (!isDirectControl || !start || start.pointerId !== event.pointerId) return
+    if (!isDirectControl || !canControl || !start || start.pointerId !== event.pointerId) return
+    event.stopPropagation()
     const dx = event.clientX - start.x
     const dy = event.clientY - start.y
     if (Math.hypot(dx, dy) > 10) {
-      void sendControl({ action: "scroll", deltaX: Math.round(-dx * 3), deltaY: Math.round(-dy * 3) })
+      const point = normalizedPreviewPoint(event.currentTarget, start.x, start.y)
+      if (point) void sendControl({ action: "scroll", ...point, deltaX: browserScrollDelta(-dx * 3), deltaY: browserScrollDelta(-dy * 3) })
       return
     }
     const point = normalizedPreviewPoint(event.currentTarget, event.clientX, event.clientY)
@@ -575,7 +627,7 @@ function PreviewCard({ tab, sessionId, isShowingAll, onOpen }: {
     return () => window.clearTimeout(retry)
   }, [hasError])
   return <button type="button" {...stylex.props(styles.liveCard)} onClick={onOpen}>
-    {!hasError ? <img src={getBrowserStreamUrl(tab.targetId, sessionId, isShowingAll, .5)} alt="" {...stylex.props(styles.liveImage)} onError={() => setHasError(true)} /> : <Globe2 size={24} aria-hidden="true" />}
+    {!hasError ? <img src={getBrowserStreamUrl({ targetId: tab.targetId, sessionId, isShowingAll, fps: .5 })} alt="" {...stylex.props(styles.liveImage)} onError={() => setHasError(true)} /> : <Globe2 size={24} aria-hidden="true" />}
     <span {...stylex.props(styles.liveTitle)}>{tab.title || "Untitled tab"}</span>
   </button>
 }
@@ -604,15 +656,6 @@ function getErrorMessage(error: unknown) {
   if (error instanceof DOMException && error.name === "TimeoutError") return formatRequestError({ status: 504 })
   if (getErrorStatus(error) === 404) return "This tab is no longer available."
   return formatRequestError({ message: error instanceof Error ? error.message : undefined })
-}
-
-function getWebUrl(value: string) {
-  try {
-    const url = new URL(value.trim())
-    return url.protocol === "http:" || url.protocol === "https:" ? url.href : undefined
-  } catch {
-    return undefined
-  }
 }
 
 function normalizedPreviewPoint(element: HTMLButtonElement, clientX: number, clientY: number) {

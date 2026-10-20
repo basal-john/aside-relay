@@ -3,7 +3,7 @@ import { ExternalLink, Maximize2, Minus, X } from 'lucide-react';
 import { AnimatePresence, motion, useDragControls, useMotionValue, useReducedMotion } from 'motion/react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { getWebsiteUrl, isTabResponse, OPEN_IN_BROWSER_LABEL } from './browser';
-import type { BrowserTab } from './types';
+import type { BrowserTab, UseChat } from './types';
 import { tokens } from './tokens.stylex';
 import { ICON_STROKE } from './ui';
 import { useAutoRefresh } from './useAutoRefresh';
@@ -13,7 +13,7 @@ const POSITION_STORAGE_KEY = 'asideBrowserPreviewPosition';
 
 export function BrowserLive({ sessionId, request, onOpen, isVisible, isBrowserOpen }: {
   sessionId: string;
-  request: (path: string, init?: RequestInit) => Promise<Response>;
+  request: UseChat['request'];
   onOpen: (targetId: string) => void;
   isVisible: boolean;
   isBrowserOpen: boolean;
@@ -104,7 +104,6 @@ export function BrowserLive({ sessionId, request, onOpen, isVisible, isBrowserOp
     let nextUrl: string | undefined;
     try {
       const response = await request(`/api/tabs/${encodeURIComponent(targetId)}/shot?fresh=true${sessionQuery}`, { cache: 'no-store', signal });
-      if (!response.ok) throw new Error('Could not load preview.');
       const blob = await response.blob();
       if (signal.aborted) return;
       if (!blob.type.startsWith('image/')) throw new Error('Invalid preview.');
