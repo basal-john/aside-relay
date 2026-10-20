@@ -1,3 +1,4 @@
+import { parseProjects } from './responses';
 import { APP_NAME } from './brand';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
@@ -123,7 +124,7 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen
   useEffect(() => {
     if (!isShowingAll) return;
     const controller = new AbortController();
-    void chat.request('/api/native/projects', { cache: 'no-store', signal: controller.signal }).then(response => response.json()).then(value => { if (!controller.signal.aborted) setProjects(readProjects(value)); }).catch(() => undefined);
+    void chat.request('/api/native/projects', { cache: 'no-store', signal: controller.signal }).then(response => response.json()).then(value => { if (!controller.signal.aborted) setProjects(parseProjects(value).filter(project => !project.archivedAt)); }).catch(() => undefined);
     return () => controller.abort();
   }, [chat.request, isShowingAll]);
   const visibleSessions: SidebarSession[] = isExpanded ? nativeSessions.filter(session => !!session.archived === (view === 'archived')) : [...pinnedSessions, ...recentSessions.slice(0, recentLimit)];
@@ -243,18 +244,6 @@ function readNativePage(value: unknown, isArchived: boolean) {
   });
   const cursor = Reflect.get(value, 'nextCursor');
   return { items, nextCursor: typeof cursor === 'number' && Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : null };
-}
-
-function readProjects(value: unknown) {
-  if (typeof value !== 'object' || value === null) return [];
-  const list = Reflect.get(value, 'items') ?? Reflect.get(value, 'projects');
-  if (!Array.isArray(list)) return [];
-  return list.flatMap((item): Project[] => {
-    if (typeof item !== 'object' || item === null) return [];
-    if (Reflect.get(item, 'archivedAt')) return [];
-    const id = Reflect.get(item, 'id'); const name = Reflect.get(item, 'name') ?? Reflect.get(item, 'title');
-    return typeof id === 'string' && typeof name === 'string' ? [{ id, name }] : [];
-  });
 }
 
 function stringValue(value: unknown) { return typeof value === 'string' ? value : ''; }
