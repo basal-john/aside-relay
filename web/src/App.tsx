@@ -234,24 +234,50 @@ export function App() {
   useEffect(() => {
     const viewport = window.visualViewport;
     if (!viewport) return;
-    let expandedHeight = viewport.height;
-    let viewportWidth = viewport.width;
+    let expandedHeight = window.innerHeight;
+    let viewportWidth = window.innerWidth;
+    let frame = 0;
+    let settleTimers: number[] = [];
     const resize = () => {
-      if (viewport.width !== viewportWidth) { expandedHeight = viewport.height; viewportWidth = viewport.width; }
-      expandedHeight = Math.max(expandedHeight, viewport.height);
       const root = viewportRef.current;
       if (!root) return;
-      const isKeyboardVisible = document.activeElement?.id === 'draft' && matchMedia('(pointer: coarse)').matches && expandedHeight - viewport.height > 150;
+      const hasDraftFocus = document.activeElement?.id === 'draft';
+      const layoutHeight = Math.max(window.innerHeight, document.documentElement.clientHeight);
+      if (window.innerWidth !== viewportWidth) { expandedHeight = layoutHeight; viewportWidth = window.innerWidth; }
+      else expandedHeight = Math.max(expandedHeight, layoutHeight);
+      const isKeyboardVisible = hasDraftFocus && matchMedia('(pointer: coarse)').matches && expandedHeight - viewport.height > 150;
       setKeyboardOpen(isKeyboardVisible);
-      root.style.height = viewport.height + 'px';
-      root.style.top = viewport.offsetTop + 'px';
+      if (isKeyboardVisible) {
+        root.style.height = viewport.height + 'px';
+        root.style.top = viewport.offsetTop + 'px';
+      } else {
+        root.style.removeProperty('height');
+        root.style.removeProperty('top');
+      }
       root.style.setProperty('--keyboard-tools-display', isKeyboardVisible ? 'flex' : 'none');
       if (isKeyboardVisible) root.style.setProperty('--composer-bottom-padding', '6px');
       else root.style.removeProperty('--composer-bottom-padding');
     };
-    resize(); viewport.addEventListener('resize', resize); viewport.addEventListener('scroll', resize);
-    document.addEventListener('focusin', resize); document.addEventListener('focusout', resize);
-    return () => { viewport.removeEventListener('resize', resize); viewport.removeEventListener('scroll', resize); document.removeEventListener('focusin', resize); document.removeEventListener('focusout', resize); };
+    const scheduleResize = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(resize);
+      settleTimers.forEach(window.clearTimeout);
+      settleTimers = [100, 350].map(delay => window.setTimeout(resize, delay));
+    };
+    const onVisibilityChange = () => { if (document.visibilityState === 'visible') scheduleResize(); };
+    resize(); viewport.addEventListener('resize', scheduleResize); viewport.addEventListener('scroll', scheduleResize);
+    window.addEventListener('resize', scheduleResize); window.addEventListener('orientationchange', scheduleResize);
+    window.addEventListener('focus', scheduleResize); window.addEventListener('pageshow', scheduleResize);
+    document.addEventListener('focusin', scheduleResize); document.addEventListener('focusout', scheduleResize); document.addEventListener('input', scheduleResize);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      cancelAnimationFrame(frame); settleTimers.forEach(window.clearTimeout);
+      viewport.removeEventListener('resize', scheduleResize); viewport.removeEventListener('scroll', scheduleResize);
+      window.removeEventListener('resize', scheduleResize); window.removeEventListener('orientationchange', scheduleResize);
+      window.removeEventListener('focus', scheduleResize); window.removeEventListener('pageshow', scheduleResize);
+      document.removeEventListener('focusin', scheduleResize); document.removeEventListener('focusout', scheduleResize); document.removeEventListener('input', scheduleResize);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, []);
   useEffect(() => {
     let frame = 0;
