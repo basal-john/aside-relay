@@ -186,7 +186,7 @@ export function Messages({ chat, listRef, onAtBottomChange, notify, onZoom, onOp
   function renderGroup(group: typeof groups[number]) {
     if (group.kind === 'activity') return <Activity messages={group.messages} results={results} onZoom={onZoom} expanded={expanded} onExpandedChange={changeExpanded} onOpenSession={onOpenSession} agentIds={agentIds} />;
     if (group.kind === 'pending') return <article aria-label="Sending message" {...stylex.props(styles.message, styles.user)}>{chat.pendingAttachments.map(attachment => attachment.mime.startsWith('image/') ? <img key={attachment.id} src={attachment.url} alt={attachment.name} {...stylex.props(styles.image)} /> : <a key={attachment.id} href={attachment.url} target="_blank" rel="noopener noreferrer" {...stylex.props(styles.fileAttachment)}><FileText size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /><span>{attachment.name}</span></a>)}<div {...stylex.props(styles.userText)}>{pendingPrompt}</div></article>;
-    if (group.kind === 'live' && liveAssistant) return <article data-message-id={liveAssistant.streamId} data-message-role="assistant" data-selectable={selectableId === liveAssistant.streamId} tabIndex={0} aria-haspopup="menu" aria-keyshortcuts="Shift+F10" aria-label="Response" aria-busy={!liveAssistant.done} data-streaming={!liveAssistant.done} {...stylex.props(styles.message)}><ResponseMarkdown text={formatCitations({ text: liveAssistant.text, sources, isStreaming: !liveAssistant.done })} isStreaming={!liveAssistant.done} notify={notify} onZoom={onZoom} /></article>;
+    if (group.kind === 'live' && liveAssistant) return <article data-message-id={liveAssistant.streamId} data-message-role="assistant" data-selectable={selectableId === liveAssistant.streamId} tabIndex={0} aria-haspopup="menu" aria-keyshortcuts="Shift+F10" aria-label="Response" aria-busy={!liveAssistant.done} data-streaming={!liveAssistant.done} {...stylex.props(styles.message)}><ResponseMarkdown text={formatCitations({ text: liveAssistant.text, sources, isStreaming: !liveAssistant.done })} sessionId={chat.sessionId} isStreaming={!liveAssistant.done} notify={notify} onZoom={onZoom} /></article>;
     if (group.kind === 'working') return <div role="status" aria-label="Working" {...stylex.props(styles.working)}><motion.span {...stylex.props(styles.pulse)} animate={{ opacity: shouldReduceMotion ? 1 : [.4, 1, .4] }} transition={{ duration: 1.2, repeat: shouldReduceMotion ? 0 : Infinity }} />Working…</div>;
     if (group.kind === 'queue') {
       const message = chat.queuedMessages[group.index];
@@ -201,17 +201,17 @@ export function Messages({ chat, listRef, onAtBottomChange, notify, onZoom, onOp
     const attachments = attachmentMatch ? attachmentMatch[1].trim().split('\n').flatMap(line => { const match = line.match(/^- (.*) → (.+\/([^/]+))$/); return match ? [{ name: match[1], src: '/api/upload/' + encodeURIComponent(match[3]) }] : []; }) : [];
     return <article key={message.seq} data-message-id={message.seq} data-message-role={message.role} data-turn-index={groups.indexOf(group)} data-selectable={selectableId === String(message.seq)} tabIndex={text ? 0 : undefined} aria-haspopup={text ? 'menu' : undefined} aria-keyshortcuts={text ? 'Shift+F10' : undefined} aria-label={message.role === 'user' ? 'Your message' : 'Response'} {...stylex.props(styles.message, message.role === 'user' && styles.user)}>
       {attachments.map(attachment => /\.(?:png|jpe?g|gif|webp|avif)$/i.test(attachment.src) ? <button key={attachment.src} {...stylex.props(styles.imageButton)} onClick={() => onZoom(attachment.src)}><img src={attachment.src} alt={attachment.name} {...stylex.props(styles.image)} /></button> : <a key={attachment.src} href={attachment.src} target="_blank" rel="noopener noreferrer" {...stylex.props(styles.fileAttachment)}><FileText size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /><span>{attachment.name}</span></a>)}
-      {message.role === 'user' ? <div {...stylex.props(styles.userText)}>{text}</div> : <ResponseMarkdown text={text} notify={notify} onZoom={onZoom} />}
+      {message.role === 'user' ? <div {...stylex.props(styles.userText)}>{text}</div> : <ResponseMarkdown text={text} sessionId={chat.sessionId} notify={notify} onZoom={onZoom} />}
       {message.blocks.filter(block => block.type === 'image').map((block, index) => block.type === 'image' ? <button key={index} {...stylex.props(styles.imageButton)} onClick={() => onZoom('/api/media/' + block.mediaId)}><img src={'/api/media/' + block.mediaId} alt="Attachment" loading="lazy" {...stylex.props(styles.image)} /></button> : undefined)}
     </article>;
   }
 }
 
-function ResponseMarkdown({ text, notify, onZoom, isStreaming = false }: { text: string; notify: (text: string, kind?: 'success' | 'error') => void; onZoom: (src: string) => void; isStreaming?: boolean }) {
-  return <MarkdownContext value={{ text, notify, onZoom, isStreaming }}><div className="markdown"><ReactMarkdown remarkPlugins={markdownPlugins} rehypePlugins={highlightPlugins} components={markdownComponents}>{text}</ReactMarkdown></div></MarkdownContext>;
+function ResponseMarkdown({ text, sessionId, notify, onZoom, isStreaming = false }: { text: string; sessionId?: string; notify: (text: string, kind?: 'success' | 'error') => void; onZoom: (src: string) => void; isStreaming?: boolean }) {
+  return <MarkdownContext value={{ text, sessionId, notify, onZoom, isStreaming }}><div className="markdown"><ReactMarkdown remarkPlugins={markdownPlugins} rehypePlugins={highlightPlugins} components={markdownComponents}>{text}</ReactMarkdown></div></MarkdownContext>;
 }
 
-const MarkdownContext = createContext<{ text: string; isStreaming: boolean; notify: (text: string, kind?: 'success' | 'error') => void; onZoom: (src: string) => void }>({ text: '', isStreaming: false, notify: () => {}, onZoom: () => {} });
+const MarkdownContext = createContext<{ text: string; sessionId?: string; isStreaming: boolean; notify: (text: string, kind?: 'success' | 'error') => void; onZoom: (src: string) => void }>({ text: '', isStreaming: false, notify: () => {}, onZoom: () => {} });
 const markdownComponents: Components = {
   pre: function MarkdownCode({ children, node }) {
     const { text, notify, isStreaming } = useContext(MarkdownContext);
@@ -219,8 +219,9 @@ const markdownComponents: Components = {
   },
   table: ({ children }) => <div role="region" aria-label="Response table" tabIndex={0} {...stylex.props(styles.tableScroll)}><table>{children}</table></div>,
   img: function MarkdownImage({ src, alt }) {
-    const { onZoom } = useContext(MarkdownContext);
-    return <button {...stylex.props(styles.imageButton)} onClick={() => src && onZoom(src)}><img src={src} alt={alt || 'Attachment'} loading="lazy" {...stylex.props(styles.image)} /></button>;
+    const { onZoom, sessionId } = useContext(MarkdownContext);
+    const imageSrc = src && sessionId && !/^(?:[a-z][a-z\d+.-]*:|[/#?])/i.test(src) ? `/api/sessions/${encodeURIComponent(sessionId)}/file/${src}` : src;
+    return <button {...stylex.props(styles.imageButton)} onClick={() => imageSrc && onZoom(imageSrc)}><img src={imageSrc} alt={alt || 'Attachment'} loading="lazy" {...stylex.props(styles.image)} /></button>;
   },
   a: ({ href, children, title }) => <a href={href} title={title} aria-label={title?.startsWith(CITATION_TITLE_PREFIX) ? title : undefined} {...stylex.props(title?.startsWith(CITATION_TITLE_PREFIX) && styles.citation)} target="_blank" rel="noopener noreferrer">{children}</a>,
 };
