@@ -3,6 +3,8 @@ import react, { reactCompilerPreset } from '@vitejs/plugin-react';
 import babel from '@rolldown/plugin-babel';
 import stylex from '@stylexjs/unplugin';
 
+const backendTarget = 'http://127.0.0.1:8800';
+
 export default defineConfig({
   root: 'web',
   plugins: [stylex.vite({ useCSSLayers: true }), react(), babel({ presets: [reactCompilerPreset()] })],
@@ -11,12 +13,12 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://127.0.0.1:8800',
+      '/api': backendTarget,
       '/ws': { target: 'ws://127.0.0.1:8800', ws: true },
-      '/icons': 'http://127.0.0.1:8800',
-      '/vendor': 'http://127.0.0.1:8800',
-      '/sw.js': 'http://127.0.0.1:8800',
-      '/manifest.webmanifest': 'http://127.0.0.1:8800'
+      '/icons': backendTarget,
+      '/vendor': backendTarget,
+      '/sw.js': backendTarget,
+      '/manifest.webmanifest': backendTarget
     }
   }
 });
