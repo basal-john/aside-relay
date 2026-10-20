@@ -689,23 +689,30 @@ async def abort(session_id: str) -> bool:
     데몬에 중단을 시킨다 → 그걸 먼저 부르고, 그 다음 붙어 있던 로컬 PTY 클라이언트를 정리한다.
     stop 은 이미 끝난 세션에도 안전하다(상태 문자열만 찍고 exit 0).
     """
-    run = _runs.get(session_id)
-    if run and run.running:
-        run.is_aborted = True
-    stopped = await stop_session(session_id)
+    async with session_lock:
+        run = _runs.get(session_id)
+        was_running = bool(run and run.running)
+        stopped = await stop_session(session_id)
 
-    run = _runs.get(session_id)
-    if run and run.running:
-        try:
-            os.killpg(os.getpgid(run.proc.pid), signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
+        run = _runs.get(session_id)
+        is_terminated = False
+        if stopped and run and run.running:
             try:
-                run.proc.terminate()
-            except ProcessLookupError:
-                pass
-        log.info("run aborted session=%s", session_id)
-        return True
-    return stopped
+                os.killpg(os.getpgid(run.proc.pid), signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                try:
+                    run.proc.terminate()
+                except ProcessLookupError:
+                    pass
+                else:
+                    is_terminated = True
+            else:
+                is_terminated = True
+        if was_running and run and stopped:
+            run.is_aborted = True
+        if is_terminated:
+            log.info("local run client terminated session=%s", session_id)
+        return stopped
 
 
 async def stop_session(session_id: str) -> bool:

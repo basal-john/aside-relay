@@ -66,6 +66,30 @@ class CompletionRegressionTests(support.IsolatedBackendTest):
                 release.set()
                 await watching
 
+    async def test_failed_abort_preserves_the_run_without_marking_or_terminating_it(self):
+        for finishes_during_stop in (False, True):
+            with self.subTest(finishes_during_stop=finishes_during_stop):
+                process = SimpleNamespace(pid=123, terminate=Mock())
+                run = runner.Run(SESSION_ID, "prompt", process, -1, "stream.log")
+
+                async def fail_stop(_session_id):
+                    if finishes_during_stop:
+                        run.finished_at = time.time()
+                    return False
+
+                stop = AsyncMock(side_effect=fail_stop)
+                with patch.dict(runner._runs, {SESSION_ID: run}, clear=True), \
+                        patch("runner.stop_session", new=stop), \
+                        patch("runner.os.getpgid") as getpgid, \
+                        patch("runner.os.killpg") as killpg:
+                    result = await runner.abort(SESSION_ID)
+
+                    self.assertFalse(result)
+                    self.assertIs(runner.get_run(SESSION_ID), run)
+                    self.assertFalse(run.is_aborted)
+                    getpgid.assert_not_called()
+                    killpg.assert_not_called()
+                    process.terminate.assert_not_called()
 
     async def test_filtered_trailer_keeps_rest_and_tail_sequences_equal(self):
         directory = self.root / "session"
