@@ -374,9 +374,10 @@ async def memories():
 @router.patch("/memories/preferences")
 async def update_memory_preferences(payload: dict):
     value = _input(payload, {"enabled", "episodicRetentionDays", "dreamingMinHours", "dreamingMinSessions"})
-    current = (await _settings()).get("memory", {})
-    updated = {**current, **value}
-    return await _call("settings.set", {"key": "memory", "value": updated}, mutation=True)
+    async with PREFERENCE_WRITE_LOCK:
+        current = (await _settings()).get("memory", {})
+        updated = {**current, **value}
+        return await _call("settings.set", {"key": "memory", "value": updated}, mutation=True)
 
 
 @router.get("/memories/file")
@@ -414,9 +415,10 @@ async def update_context_awareness(payload: dict):
     value = _input(payload, {
         "enabled", "captureTypedText", "pausedUntil", "retentionDays", "rules", "screenOcr",
     })
-    current = (await _settings()).get("contextAwareness", {})
-    updated = {**current, **value}
-    return await _call("settings.set", {"key": "contextAwareness", "value": updated}, mutation=True)
+    async with PREFERENCE_WRITE_LOCK:
+        current = (await _settings()).get("contextAwareness", {})
+        updated = {**current, **value}
+        return await _call("settings.set", {"key": "contextAwareness", "value": updated}, mutation=True)
 
 
 @router.get("/context-awareness/history")
@@ -430,7 +432,8 @@ async def context_history(from_ms: int = Query(alias="from"), to_ms: int = Query
 async def clear_context_history(payload: dict):
     value = _input(payload, {"target"}, required={"target"})
     target = value["target"]
-    if not isinstance(target, dict) or target.get("kind") not in {"all", "today", "timeRange"}:
+    if (not isinstance(target, dict) or not isinstance(target.get("kind"), str)
+            or target["kind"] not in {"all", "today", "timeRange"}):
         raise HTTPException(400, "Invalid history selection.")
     if target["kind"] == "timeRange" and not {
         "from", "to"
@@ -613,24 +616,25 @@ async def update_tool_permission(payload: dict):
     policy = value["policy"]
     if not isinstance(policy, str) or policy not in {"allow", "ask", "deny", "inherit"}:
         raise HTTPException(400, "Invalid tool permission policy.")
-    settings = await _settings()
-    current = settings.get("permission") if isinstance(settings.get("permission"), dict) else {}
-    current_rules = current.get("rules") if isinstance(current.get("rules"), dict) else {}
-    rules = {}
-    for group in ("allow", "ask", "deny"):
-        items = current_rules.get(group) if isinstance(current_rules.get(group), list) else []
-        rules[group] = [
-            item for item in items
-            if not (isinstance(item, dict) and item.get("type") == "tool" and item.get("tool") == tool)
-        ]
-    if policy != "inherit":
-        rules[policy].append({"type": "tool", "tool": tool})
-    rules["default"] = current_rules.get("default", "allow")
-    updated = {
-        **current,
-        "rules": {**current_rules, **rules},
-    }
-    return await _call("settings.set", {"key": "permission", "value": updated}, mutation=True)
+    async with PREFERENCE_WRITE_LOCK:
+        settings = await _settings()
+        current = settings.get("permission") if isinstance(settings.get("permission"), dict) else {}
+        current_rules = current.get("rules") if isinstance(current.get("rules"), dict) else {}
+        rules = {}
+        for group in ("allow", "ask", "deny"):
+            items = current_rules.get(group) if isinstance(current_rules.get(group), list) else []
+            rules[group] = [
+                item for item in items
+                if not (isinstance(item, dict) and item.get("type") == "tool" and item.get("tool") == tool)
+            ]
+        if policy != "inherit":
+            rules[policy].append({"type": "tool", "tool": tool})
+        rules["default"] = current_rules.get("default", "allow")
+        updated = {
+            **current,
+            "rules": {**current_rules, **rules},
+        }
+        return await _call("settings.set", {"key": "permission", "value": updated}, mutation=True)
 
 
 @router.get("/connections")
