@@ -60,7 +60,32 @@ class TransportMediaRegressionTests(support.IsolatedBackendTest):
         client._spawn.assert_awaited_once()
         self.assertEqual(client.restarts, 1)
 
+    async def test_iso_media_brands_distinguish_avif_from_unsupported_heif(self):
+        avif = ftyp(b"isom", b"avif", b"mif1")
+        heif_samples = (ftyp(b"heic"), ftyp(b"isom", b"mif1"))
 
+        self.assertEqual(uploads.sniff(avif, "photo.bin"), ("image/avif", "avif"))
+        for raw in heif_samples:
+            with self.subTest(brand=raw[8:12]):
+                self.assertIsNone(uploads.sniff(raw, "photo.avif"))
+
+        media_root = self.root / "media"
+        media_root.mkdir()
+        with patch.object(config, "MEDIA_DIR", media_root):
+            stored = sessions.store_media(base64.b64encode(avif).decode())
+        self.assertEqual(stored["mime"], "image/avif")
+        self.assertTrue(stored["mediaId"].endswith(".avif"))
+
+    async def test_riff_wave_is_never_classified_as_webp(self):
+        wave = b"RIFF\x10\x00\x00\x00WAVEfmt "
+        self.assertIsNone(uploads.sniff(wave, "audio.webp"))
+
+        media_root = self.root / "media"
+        media_root.mkdir()
+        with patch.object(config, "MEDIA_DIR", media_root):
+            stored = sessions.store_media(base64.b64encode(wave).decode())
+        self.assertEqual(stored["mime"], "application/octet-stream")
+        self.assertTrue(stored["mediaId"].endswith(".bin"))
 
 
 if __name__ == "__main__":

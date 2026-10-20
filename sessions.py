@@ -23,20 +23,13 @@ from urllib.parse import urlparse
 import httpx
 
 import config
+import uploads
 from daemon import ACCOUNT_ID, daemon
 
 log = logging.getLogger("aside-relay.sessions")
 
 _dir_index: dict[str, Path] = {}
 _dir_index_at: float = 0.0
-
-_MAGIC = [
-    (b"\xff\xd8\xff", "image/jpeg", "jpg"),
-    (b"\x89PNG\r\n\x1a\n", "image/png", "png"),
-    (b"GIF8", "image/gif", "gif"),
-    (b"RIFF", "image/webp", "webp"),
-]
-
 
 # --------------------------------------------------------------------- 디렉토리
 def session_dir(session_id: str) -> Path | None:
@@ -97,11 +90,8 @@ def store_media(b64: str) -> dict:
         raise ValueError("Media cache is unavailable")
     raw = base64.b64decode(b64)
     digest = hashlib.sha256(raw).hexdigest()[:32]
-    mime, ext = "application/octet-stream", "bin"
-    for magic, m, e in _MAGIC:
-        if raw.startswith(magic):
-            mime, ext = m, e
-            break
+    kind = uploads.sniff(raw)
+    mime, ext = kind if kind and kind[0].startswith("image/") else ("application/octet-stream", "bin")
     path = config.MEDIA_DIR / f"{digest}.{ext}"
     if path.is_symlink():
         raise ValueError("Media cache path is unsafe")

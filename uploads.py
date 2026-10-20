@@ -59,6 +59,14 @@ def sniff(raw: bytes, name: str | None = None) -> tuple[str, str] | None:
             return mime, ext
     if len(raw) >= 12 and raw[4:8] == b"ftyp":
         brand = raw[8:12]
+        box_size = int.from_bytes(raw[:4], "big")
+        brands = {brand}
+        if 16 <= box_size <= len(raw):
+            brands.update(raw[offset:offset + 4] for offset in range(16, box_size - 3, 4))
+        if brands.intersection((b"avif", b"avis")):
+            return "image/avif", "avif"
+        if brands.intersection((b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"hevm", b"hevs", b"mif1", b"msf1")):
+            return None
         return ("video/quicktime", "mov") if brand == b"qt  " else ("video/mp4", "mp4")
     if raw.startswith(b"PK\x03\x04"):
         try:
