@@ -629,23 +629,8 @@ async def _start_run(prompt: str, *, model: str | None = None, effort: str | Non
     return run
 
 
-async def continue_run(session_id: str, prompt: str, *, model: str | None = None,
-                       effort: str | None = None, speed: str | None = None,
-                       provider: str | None = None, permission: str | None = None,
-                       host: str | None = None) -> Run:
-    """기존 세션 이어하기. 디렉토리를 이미 아니까 탐지 과정이 없다 = 안전하다.
-
-    `aside session resume <id> <prompt>` 를 쓴다. 이 서브커맨드는 --account 외의
-    옵션(-m/--effort/-s/--permission/--host)을 받지 않는다 — 넘기면 unknown option 으로
-    죽는다. 세션이 만들어질 때의 설정을 그대로 이어간다. 호출부 호환을 위해 인자는
-    받되 무시하고 로그만 남긴다.
-    """
-    ignored = {k: v for k, v in (("model", model), ("effort", effort), ("speed", speed),
-                                 ("provider", provider), ("permission", permission),
-                                 ("host", host)) if v}
-    if ignored:
-        log.info("resume ignores exec-only options %s (session=%s)", ignored, session_id)
-
+async def continue_run(session_id: str, prompt: str) -> Run:
+    """Resume a conversation with its existing model and permission settings."""
     return await _resume_run(session_id, prompt)
 
 
