@@ -9,13 +9,12 @@ import {
   Globe2,
   History,
   Maximize2,
-  MousePointer2,
   Search,
   Send,
   Trash2,
   X,
 } from "lucide-react"
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "motion/react"
 import { formatRequestError } from "./errors"
 
@@ -23,8 +22,9 @@ import { tokens } from "./tokens.stylex"
 import { focusDialogSurface, styles as ui } from "./ui"
 import { useAutoRefresh } from "./useAutoRefresh"
 import type { BrowserTab, UseChat } from "./types"
-import { browserScrollDelta, getBrowserKey, getBrowserStreamUrl, getWebsiteUrl, isTabResponse, OPEN_IN_BROWSER_LABEL, parseBrowserLibrary, type BrowserControl, type BrowserLibraryItem } from "./browser"
+import { getBrowserStreamUrl, getWebsiteUrl, isTabResponse, OPEN_IN_BROWSER_LABEL, parseBrowserLibrary, type BrowserControl, type BrowserLibraryItem } from "./browser"
 import { ImagePreview } from "./ImagePreview"
+import { useBrowserInput } from "./useBrowserInput"
 import { Button } from "./Button"
 import { Dialog, DialogActions, DialogDescription } from "./Dialog"
 
@@ -63,7 +63,6 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
   const [previewFrame, setPreviewFrame] = useState<{ targetId: string; url: string }>()
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>("idle")
   const [isPreviewExpanded, setPreviewExpanded] = useState(false)
-  const [isDirectControl, setDirectControl] = useState(true)
   const [controlText, setControlText] = useState("")
   const [address, setAddress] = useState("")
   const [listMode, setListMode] = useState<"tabs" | "history" | "bookmarks">("tabs")
@@ -76,7 +75,6 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
   const captureGenerationRef = useRef(0)
   const previewUrlRef = useRef<string | undefined>(undefined)
   const panelRef = useRef<HTMLElement>(null)
-  const controlSurfaceRef = useRef<HTMLButtonElement>(null)
   const controlAbortRef = useRef<AbortController | undefined>(undefined)
   const controlTailRef = useRef<Promise<boolean | void>>(Promise.resolve())
   const backButtonRef = useRef<HTMLButtonElement>(null)
@@ -85,7 +83,6 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
   const cancelCloseRef = useRef<HTMLButtonElement>(null)
   const wasClosingRef = useRef(false)
   const selectedTargetRef = useRef<string | undefined>(undefined)
-  const previewGestureRef = useRef<{ x: number; y: number; pointerId: number } | undefined>(undefined)
   const selectedTabId = selectedTab?.targetId
   const websiteUrl = selectedTab && getWebsiteUrl(selectedTab.url)
   const previewSource = previewFrame?.targetId === selectedTabId ? previewFrame?.url : undefined
@@ -184,7 +181,6 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
     setPreviewFrame(undefined)
     setBusyAction(undefined)
     setPreviewExpanded(false)
-    setDirectControl(true)
     setControlText("")
     setAddress(selectedTab?.url ?? "")
     setIsConfirmingClose(false)
@@ -313,28 +309,9 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
     return pending
   }, [request, selectedTabId, canControl, sessionQuery, capturePreview, notify])
 
-  useEffect(() => {
-    const surface = controlSurfaceRef.current
-    if (!surface || !isDirectControl || !canControl) return
-    const scroll = (event: WheelEvent) => {
-      if (event.ctrlKey) return
-      event.preventDefault()
-      event.stopPropagation()
-      const point = normalizedPreviewPoint(surface, event.clientX, event.clientY)
-      if (point) void sendControl({ action: "scroll", ...point, deltaX: browserScrollDelta(event.deltaX), deltaY: browserScrollDelta(event.deltaY) })
-    }
-    surface.addEventListener("wheel", scroll, { passive: false })
-    return () => surface.removeEventListener("wheel", scroll)
-  }, [previewSource, isDirectControl, canControl, sendControl])
-
-  function controlKey(event: KeyboardEvent<HTMLButtonElement>) {
-    if (!isDirectControl || !canControl || event.nativeEvent.isComposing || event.ctrlKey || event.metaKey || event.altKey) return
-    const key = getBrowserKey(event.key)
-    if (!key && event.key.length !== 1) return
-    event.preventDefault()
-    event.stopPropagation()
-    void sendControl(key ? { action: "key", key } : { action: "type", text: event.key })
-  }
+  const controlInput = useBrowserInput<HTMLButtonElement>({
+    onControl: previewSource && canControl && !isPreviewExpanded ? sendControl : undefined,
+  })
 
   const openLibraryItem = async (item: BrowserLibraryItem) => {
     const id = crypto.randomUUID()
@@ -384,6 +361,17 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
     )
   })
 
+  const browserTypeBar = canControl && <form {...stylex.props(styles.typeBar)} onSubmit={event => {
+    event.preventDefault()
+    const text = controlText
+    if (!text) return
+    void sendControl({ action: "type", text }).then(isSent => { if (isSent) setControlText(current => current === text ? "" : current) })
+  }}>
+    <input {...stylex.props(styles.typeInput)} value={controlText} placeholder="Type into the focused field" aria-label="Text to type in browser" onChange={event => setControlText(event.target.value)} />
+    <Button size="compact" type="submit" disabled={!controlText || !!busyAction}>Type</Button>
+    <button type="button" {...stylex.props(styles.smallIconButton)} aria-label="Press Enter" disabled={!!busyAction} onClick={() => void sendControl({ action: "key", key: "Enter" })}><CornerDownLeft size={18} strokeWidth={ICON_STROKE} /></button>
+  </form>
+
   return (
     <section ref={panelRef} {...stylex.props(styles.panel)} aria-label="Browser tabs">
       <header {...stylex.props(styles.header)}>
@@ -425,36 +413,20 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
           <div {...stylex.props(styles.navigationBar)}>
             <button type="button" {...stylex.props(styles.smallIconButton)} aria-label="Back" disabled={!canControl || !!busyAction} onClick={() => void sendControl({ action: "back" })}><ArrowLeft size={18} strokeWidth={ICON_STROKE} /></button>
             <button type="button" {...stylex.props(styles.smallIconButton)} aria-label="Forward" disabled={!canControl || !!busyAction} onClick={() => void sendControl({ action: "forward" })}><ArrowRight size={18} strokeWidth={ICON_STROKE} /></button>
-            <Button size="compact" variant={isDirectControl ? "primary" : undefined} aria-pressed={isDirectControl} disabled={!canControl} onClick={() => setDirectControl(current => !current)}><MousePointer2 size={16} strokeWidth={ICON_STROKE} />Control</Button>
-            {isDirectControl && <button type="button" aria-label="Expand browser view" disabled={!previewSource || !canControl} {...stylex.props(styles.smallIconButton)} onClick={() => setPreviewExpanded(true)}><Maximize2 size={18} strokeWidth={ICON_STROKE} /></button>}
+            <button type="button" aria-label="Expand browser view" disabled={!previewSource || !canControl} {...stylex.props(styles.smallIconButton)} onClick={() => setPreviewExpanded(true)}><Maximize2 size={18} strokeWidth={ICON_STROKE} /></button>
           </div>
 
           <div {...stylex.props(styles.previewFrame)}>
             {previewSource && !isSelectedTabAsleep && !isSelectedTabMissing && <button
-              ref={controlSurfaceRef}
+              {...controlInput}
               type="button"
-              onKeyDown={controlKey}
-              aria-label={isDirectControl ? "Control browser page" : "Expand browser view"}
-              aria-haspopup={isDirectControl ? undefined : "dialog"}
-              {...stylex.props(styles.expandPreview, isDirectControl && styles.controlPreview)}
-              onPointerDown={event => beginPreviewGesture(event)}
-              onPointerUp={event => endPreviewGesture(event)}
-              onPointerCancel={() => { previewGestureRef.current = undefined }}
-              onClick={() => { if (!isDirectControl) setPreviewExpanded(true) }}
+              aria-label="Control browser page"
+              {...stylex.props(styles.controlPreview)}
             ><img {...stylex.props(styles.preview)} src={previewSource} alt={`Current view of ${selectedTab.title || "browser tab"}`} draggable={false} onLoad={() => setPreviewStatus("ready")} onError={() => { setPreviewStatus("error"); setPreviewFrame(undefined) }} /></button>}
             {(isSelectedTabAsleep || isSelectedTabMissing || previewStatus !== "ready") && <PreviewMessage status={isSelectedTabMissing ? "missing" : isSelectedTabAsleep ? "asleep" : previewStatus} />}
           </div>
 
-          {isDirectControl && canControl && <form {...stylex.props(styles.typeBar)} onSubmit={event => {
-            event.preventDefault()
-            const text = controlText
-            if (!text) return
-            void sendControl({ action: "type", text }).then(isSent => { if (isSent) setControlText(current => current === text ? "" : current) })
-          }}>
-            <input {...stylex.props(styles.typeInput)} value={controlText} placeholder="Type into the focused field" aria-label="Text to type in browser" onChange={event => setControlText(event.target.value)} />
-            <Button size="compact" type="submit" disabled={!controlText || !!busyAction}>Type</Button>
-            <button type="button" {...stylex.props(styles.smallIconButton)} aria-label="Press Enter" disabled={!!busyAction} onClick={() => void sendControl({ action: "key", key: "Enter" })}><CornerDownLeft size={18} strokeWidth={ICON_STROKE} /></button>
-          </form>}
+          {!isPreviewExpanded && browserTypeBar}
 
           <textarea
             {...stylex.props(styles.textarea)}
@@ -542,33 +514,10 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
         </div>
       )}
       <AnimatePresence>{isConfirmingClose && selectedTab && <Dialog title="Close this tab?" initialFocus={cancelCloseRef} onClose={() => setIsConfirmingClose(false)}><DialogDescription>{selectedTab.title || "Untitled tab"}</DialogDescription><DialogActions><Button ref={cancelCloseRef} onClick={() => setIsConfirmingClose(false)}>Cancel</Button><Button variant="danger" disabled={!!busyAction} onClick={() => { void runTabAction("close") }}>Close tab</Button></DialogActions></Dialog>}</AnimatePresence>
-      <AnimatePresence>{isPreviewExpanded && previewSource && selectedTab && !isSelectedTabAsleep && !isSelectedTabMissing && <ImagePreview kind="browser" key={selectedTab.targetId} src={previewSource} title={selectedTab.title || "Browser"} url={websiteUrl} onClose={() => setPreviewExpanded(false)} />}</AnimatePresence>
+      <AnimatePresence>{isPreviewExpanded && previewSource && selectedTab && !isSelectedTabAsleep && !isSelectedTabMissing && <ImagePreview kind="browser" key={selectedTab.targetId} src={previewSource} title={selectedTab.title || "Browser"} url={websiteUrl} onControl={sendControl} browserInput={browserTypeBar} onClose={() => setPreviewExpanded(false)} />}</AnimatePresence>
     </section>
   )
 
-  function beginPreviewGesture(event: PointerEvent<HTMLButtonElement>) {
-    if (!isDirectControl || !canControl || event.button !== 0) return
-    event.stopPropagation()
-    event.currentTarget.focus({ preventScroll: true })
-    previewGestureRef.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId }
-    event.currentTarget.setPointerCapture(event.pointerId)
-  }
-
-  function endPreviewGesture(event: PointerEvent<HTMLButtonElement>) {
-    const start = previewGestureRef.current
-    previewGestureRef.current = undefined
-    if (!isDirectControl || !canControl || !start || start.pointerId !== event.pointerId) return
-    event.stopPropagation()
-    const dx = event.clientX - start.x
-    const dy = event.clientY - start.y
-    if (Math.hypot(dx, dy) > 10) {
-      const point = normalizedPreviewPoint(event.currentTarget, start.x, start.y)
-      if (point) void sendControl({ action: "scroll", ...point, deltaX: browserScrollDelta(-dx * 3), deltaY: browserScrollDelta(-dy * 3) })
-      return
-    }
-    const point = normalizedPreviewPoint(event.currentTarget, event.clientX, event.clientY)
-    if (point) void sendControl({ action: "click", ...point })
-  }
 }
 
 function TabThumbnail({ tab, request, sessionQuery }: { tab: BrowserTab; request: BrowserPanelProps["request"]; sessionQuery: string }) {
@@ -658,19 +607,6 @@ function getErrorMessage(error: unknown) {
   return formatRequestError({ message: error instanceof Error ? error.message : undefined })
 }
 
-function normalizedPreviewPoint(element: HTMLButtonElement, clientX: number, clientY: number) {
-  const image = element.querySelector("img")
-  if (!image?.naturalWidth || !image.naturalHeight) return
-  const bounds = element.getBoundingClientRect()
-  const scale = Math.min(bounds.width / image.naturalWidth, bounds.height / image.naturalHeight)
-  const width = image.naturalWidth * scale
-  const height = image.naturalHeight * scale
-  const left = bounds.left + (bounds.width - width) / 2
-  const top = bounds.top + (bounds.height - height) / 2
-  if (clientX < left || clientX > left + width || clientY < top || clientY > top + height) return
-  return { x: (clientX - left) / width, y: (clientY - top) / height }
-}
-
 const styles = stylex.create({
   panel: { display: "flex", flexDirection: "column", width: "100%", height: "100%", minWidth: 0, overflow: "hidden", backgroundColor: tokens.canvas, color: tokens.text, fontFamily: tokens.font },
   header: { minHeight: 58, display: "grid", gridTemplateColumns: "44px 1fr 44px", alignItems: "center", padding: "7px 12px", borderBottomWidth: 1, borderBottomStyle: "solid", borderBottomColor: tokens.border },
@@ -696,8 +632,7 @@ const styles = stylex.create({
   url: { marginTop: 3, overflowWrap: "anywhere", color: tokens.muted, fontSize: '0.75rem', lineHeight: 1.45, userSelect: "text" },
   previewFrame: { position: "relative", minHeight: 180, maxHeight: "min(46vh, 430px)", aspectRatio: "16 / 10", display: "grid", placeItems: "center", overflow: "hidden", borderWidth: 1, borderStyle: "solid", borderColor: tokens.border, borderRadius: 16, backgroundColor: tokens.surface },
   preview: { display: "block", width: "100%", height: "100%", objectFit: "contain", backgroundColor: tokens.canvas },
-  expandPreview: { width: "100%", height: "100%", minHeight: 0, padding: 0, borderWidth: 0, overflow: "hidden", backgroundColor: "transparent", cursor: "zoom-in" },
-  controlPreview: { touchAction: "none", cursor: "crosshair" },
+  controlPreview: { width: "100%", height: "100%", minHeight: 0, padding: 0, borderWidth: 0, overflow: "hidden", backgroundColor: "transparent", touchAction: "none", overscrollBehavior: "none", cursor: "crosshair" },
   previewMessage: { display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: 24, textAlign: "center", color: tokens.muted, fontSize: '0.8125rem' },
   previewActivity: { position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" },
   previewSpinner: { width: 22, height: 22, borderRadius: 999, borderWidth: 2, borderStyle: "solid", borderColor: tokens.border, borderTopColor: tokens.text, animationName: stylex.keyframes({ to: { transform: "rotate(360deg)" } }), animationDuration: "800ms", animationTimingFunction: "linear", animationIterationCount: "infinite" },

@@ -194,7 +194,7 @@ Click any image to view it at full size.
 | Browse generated files | Session options → Files & outputs |
 | Switch between an HTML visual and its code | Source / Preview inside the visual card |
 | Watch or control a browser tab | Open the PiP or Drawer → Browser; select a tab to click, scroll, type and use keys |
-| Zoom a browser preview | Use Expand browser view in the browser sheet; zoom, pinch or pan |
+| Use a browser fullscreen | Expand browser view keeps page controls active; drag to scroll, use two fingers or zoom buttons to magnify |
 | Manage projects, routines, skills or MCP | Drawer → Settings → Workspace & preferences |
 
 Rename, confirmation, model, appearance and workspace controls use dialogs.
