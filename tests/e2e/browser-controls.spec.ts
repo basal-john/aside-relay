@@ -46,7 +46,7 @@ test('active tab exposes its destination and sends exact browser control command
 
   await sheet.getByRole('button', { name: 'Back', exact: true }).click();
   await sheet.getByRole('button', { name: 'Forward', exact: true }).click();
-  await expect(sheet.getByRole('button', { name: 'Control', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(sheet.getByRole('button', { name: 'Control', exact: true })).toHaveCount(0);
   await sheet.getByRole('textbox', { name: 'Text to type in browser' }).fill(BROWSER_INPUT);
   await sheet.getByRole('button', { name: 'Type', exact: true }).click();
   await sheet.getByRole('button', { name: 'Press Enter' }).click();
