@@ -175,11 +175,14 @@ async def _tail_stream_log(run: Run) -> None:
                 size = os.path.getsize(run.stream_log_path)
                 if size < offset:
                     offset, buf = 0, b""
-                if size > offset:
-                    with open(run.stream_log_path, "rb") as fh:
-                        fh.seek(offset)
-                        chunk = fh.read(size - offset)
-                    offset = size
+                if size > offset or (not run.running and buf):
+                    if size > offset:
+                        with open(run.stream_log_path, "rb") as fh:
+                            fh.seek(offset)
+                            chunk = fh.read(size - offset)
+                        offset = size
+                    else:
+                        chunk = b"\n"
                     buf += chunk
                     changed = True
                     *lines, buf = buf.split(b"\n")
@@ -187,6 +190,8 @@ async def _tail_stream_log(run: Run) -> None:
                         try:
                             event = json.loads(raw)
                         except (json.JSONDecodeError, UnicodeDecodeError):
+                            continue
+                        if not isinstance(event, dict):
                             continue
                         event_type = event.get("type")
                         message = event.get("message")
@@ -331,7 +336,8 @@ def _newest_real_dir(names: set[str]) -> str | None:
     데몬이 5~6초마다 빈 세션 디렉토리를 만들어 두는 게 관측된다(2026-09-09).
     빈 껍데기를 잡으면 존재하지 않는 세션 id 를 물게 되므로 반드시 걸러야 한다.
     """
-    real = [n for n in names if (config.SESSIONS_DIR / n / "messages.jsonl").exists()]
+    real = [n for n in names
+            if "_" in n and (config.SESSIONS_DIR / n / "messages.jsonl").exists()]
     if not real:
         return None
     return max(real, key=lambda n: (config.SESSIONS_DIR / n).stat().st_mtime)
@@ -393,7 +399,7 @@ async def _start_native_run(prompt: str, *, model: str | None, effort: str | Non
         raise RuntimeError("Aside did not return a conversation id")
     try:
         return await _resume_run(session_id, prompt)
-    except Exception:
+    except (Exception, asyncio.CancelledError):
         try:
             await daemon.call("sessions.delete", {
                 "accountId": ACCOUNT_ID,
@@ -562,16 +568,15 @@ async def _start_run(prompt: str, *, model: str | None = None, effort: str | Non
     id 확정은 `aside session list` 의 diff 가 1순위다. 디렉토리 diff 는 데몬이
     5~6 초마다 만드는 빈 세션 디렉토리 때문에 단독으로는 못 믿는다.
     """
+    before_ids = set(await list_session_ids())
+    before_dirs = sessions.snapshot_dirs()
     stream_log_path = _stream_log()
     args = ["--log-dump", stream_log_path, "exec",
             *_exec_opts(model=model, effort=effort, speed=speed,
                         provider=provider, permission=permission, host=host), prompt]
-
-    before_ids = set(await list_session_ids())
-    before_dirs = sessions.snapshot_dirs()
     try:
         proc, master = await _spawn(args)
-    except Exception:
+    except (Exception, asyncio.CancelledError):
         _remove_stream_log(stream_log_path)
         raise
     run = Run(session_id=None, prompt=prompt, proc=proc, master_fd=master,
@@ -580,9 +585,10 @@ async def _start_run(prompt: str, *, model: str | None = None, effort: str | Non
     asyncio.create_task(_drain(run))
     asyncio.create_task(_tail_stream_log(run))
 
-    deadline = time.time() + config.RUN_SESSION_DETECT_SEC
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + config.RUN_SESSION_DETECT_SEC
     sid = None
-    while time.time() < deadline:
+    while loop.time() < deadline:
         await asyncio.sleep(0.5)
         if not run.running and run.exit_code:
             break
@@ -623,23 +629,8 @@ async def _start_run(prompt: str, *, model: str | None = None, effort: str | Non
     return run
 
 
-async def continue_run(session_id: str, prompt: str, *, model: str | None = None,
-                       effort: str | None = None, speed: str | None = None,
-                       provider: str | None = None, permission: str | None = None,
-                       host: str | None = None) -> Run:
-    """기존 세션 이어하기. 디렉토리를 이미 아니까 탐지 과정이 없다 = 안전하다.
-
-    `aside session resume <id> <prompt>` 를 쓴다. 이 서브커맨드는 --account 외의
-    옵션(-m/--effort/-s/--permission/--host)을 받지 않는다 — 넘기면 unknown option 으로
-    죽는다. 세션이 만들어질 때의 설정을 그대로 이어간다. 호출부 호환을 위해 인자는
-    받되 무시하고 로그만 남긴다.
-    """
-    ignored = {k: v for k, v in (("model", model), ("effort", effort), ("speed", speed),
-                                 ("provider", provider), ("permission", permission),
-                                 ("host", host)) if v}
-    if ignored:
-        log.info("resume ignores exec-only options %s (session=%s)", ignored, session_id)
-
+async def continue_run(session_id: str, prompt: str) -> Run:
+    """Resume a conversation with its existing model and permission settings."""
     return await _resume_run(session_id, prompt)
 
 
@@ -649,27 +640,25 @@ async def resume_queue(session_id: str) -> Run:
 
 
 async def _resume_run(session_id: str, prompt: str | None) -> Run:
-    stream_log_path = _stream_log()
-    args = ["--log-dump", stream_log_path,
-            "session", "resume", *_account_args(), session_id]
-    if prompt is not None:
-        args.append(prompt)
     async with session_lock:
         import daemondb
         has_native_session = await asyncio.to_thread(daemondb.has_row, session_id)
         if sessions.session_dir(session_id) is None and has_native_session is not True:
-            _remove_stream_log(stream_log_path)
             raise FileNotFoundError(SESSION_NOT_FOUND_MESSAGE)
         existing = _runs.get(session_id)
         if existing and existing.running:
-            _remove_stream_log(stream_log_path)
             raise FileExistsError(RUN_ALREADY_RUNNING_MESSAGE)
+        stream_log_path = _stream_log()
+        args = ["--log-dump", stream_log_path,
+                "session", "resume", *_account_args(), session_id]
+        if prompt is not None:
+            args.append(prompt)
         try:
             await repair_browser_binding(session_id)
             messages, _offset = await asyncio.to_thread(sessions.read_messages, session_id)
             next_seq = messages[-1]["seq"] + 1 if messages else 0
             proc, master = await _spawn(args)
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             _remove_stream_log(stream_log_path)
             raise
         run = Run(session_id=session_id, prompt=prompt or "", proc=proc, master_fd=master,
@@ -689,23 +678,30 @@ async def abort(session_id: str) -> bool:
     데몬에 중단을 시킨다 → 그걸 먼저 부르고, 그 다음 붙어 있던 로컬 PTY 클라이언트를 정리한다.
     stop 은 이미 끝난 세션에도 안전하다(상태 문자열만 찍고 exit 0).
     """
-    run = _runs.get(session_id)
-    if run and run.running:
-        run.is_aborted = True
-    stopped = await stop_session(session_id)
+    async with session_lock:
+        run = _runs.get(session_id)
+        was_running = bool(run and run.running)
+        stopped = await stop_session(session_id)
 
-    run = _runs.get(session_id)
-    if run and run.running:
-        try:
-            os.killpg(os.getpgid(run.proc.pid), signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
+        run = _runs.get(session_id)
+        is_terminated = False
+        if stopped and run and run.running:
             try:
-                run.proc.terminate()
-            except ProcessLookupError:
-                pass
-        log.info("run aborted session=%s", session_id)
-        return True
-    return stopped
+                os.killpg(os.getpgid(run.proc.pid), signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                try:
+                    run.proc.terminate()
+                except ProcessLookupError:
+                    pass
+                else:
+                    is_terminated = True
+            else:
+                is_terminated = True
+        if was_running and run and stopped:
+            run.is_aborted = True
+        if is_terminated:
+            log.info("local run client terminated session=%s", session_id)
+        return stopped
 
 
 async def stop_session(session_id: str) -> bool:

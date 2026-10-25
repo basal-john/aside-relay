@@ -11,6 +11,21 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByRole('article', { name: 'Response' })).toBeVisible();
 });
 
+test('native-only conversation options load pin details from the real details contract', async ({ page, mockAside }) => {
+  const title = 'Native-only conversation';
+  const id = 'nativeonlysession01';
+  mockAside.sessions.unshift({ ...mockAside.sessions[0], id, title, isPinned: true, pinned: true });
+  await page.route('**/api/sessions?*', route => {
+    const items = mockAside.sessions.filter(session => session.id !== id);
+    return route.fulfill({ json: { items, total: items.length, matched: items.length } });
+  });
+  const sidebar = await openConversations(page);
+  await sidebar.getByRole('button', { name: 'Show all', exact: true }).click();
+  await sidebar.getByRole('button', { name: `Options for ${title}`, exact: true }).click();
+  await expect.poll(() => mockAside.calls.some(call => call.path === `/api/sessions/${id}/details`)).toBe(true);
+  await expect(page.getByRole('menuitem', { name: 'Unpin conversation', exact: true })).toBeVisible();
+});
+
 test('show all sends server-side status and search filters', async ({ page, mockAside }) => {
   const sidebar = await openConversations(page);
   await sidebar.getByRole('button', { name: 'Show all' }).click();

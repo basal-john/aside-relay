@@ -5,6 +5,7 @@ import { motion, usePresence, useReducedMotion, useTransform, type HTMLMotionPro
 import { tokens } from './tokens.stylex';
 
 export const ICON_STROKE = 1.8;
+export const DEFAULT_RECENT_CHAT_LIMIT = 10;
 export const SESSION_MENU_LABEL = 'Session options';
 export const SESSION_MENU_TITLE = 'Session';
 export const SESSION_CHANGE_EVENT = 'aside:sessions-changed';

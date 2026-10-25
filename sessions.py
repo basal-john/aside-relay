@@ -17,26 +17,19 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import AsyncIterator, Iterable
+from typing import AsyncIterator
 from urllib.parse import urlparse
 
 import httpx
 
 import config
+import uploads
 from daemon import ACCOUNT_ID, daemon
 
 log = logging.getLogger("aside-relay.sessions")
 
 _dir_index: dict[str, Path] = {}
 _dir_index_at: float = 0.0
-
-_MAGIC = [
-    (b"\xff\xd8\xff", "image/jpeg", "jpg"),
-    (b"\x89PNG\r\n\x1a\n", "image/png", "png"),
-    (b"GIF8", "image/gif", "gif"),
-    (b"RIFF", "image/webp", "webp"),
-]
-
 
 # --------------------------------------------------------------------- 디렉토리
 def session_dir(session_id: str) -> Path | None:
@@ -97,11 +90,8 @@ def store_media(b64: str) -> dict:
         raise ValueError("Media cache is unavailable")
     raw = base64.b64decode(b64)
     digest = hashlib.sha256(raw).hexdigest()[:32]
-    mime, ext = "application/octet-stream", "bin"
-    for magic, m, e in _MAGIC:
-        if raw.startswith(magic):
-            mime, ext = m, e
-            break
+    kind = uploads.sniff(raw)
+    mime, ext = kind if kind and kind[0].startswith("image/") else ("application/octet-stream", "bin")
     path = config.MEDIA_DIR / f"{digest}.{ext}"
     if path.is_symlink():
         raise ValueError("Media cache path is unsafe")
@@ -182,19 +172,23 @@ def session_file(session_id: str, rel: str) -> Path | None:
     return target if target.is_file() else None
 
 
-def _blocks(raw: Iterable) -> list[dict]:
+def _blocks(raw: object) -> list[dict]:
     out: list[dict] = []
     if isinstance(raw, str):
         return [{"type": "text", "text": rewrite_local_paths(raw)}] if raw.strip() else []
-    for b in raw or []:
+    if not isinstance(raw, list):
+        return out
+    for b in raw:
         if not isinstance(b, dict):
             continue
         t = b.get("type")
         if t == "text":
-            if b.get("text"):
-                out.append({"type": "text", "text": rewrite_local_paths(b["text"])})
+            text = b.get("text")
+            if isinstance(text, str) and text:
+                out.append({"type": "text", "text": rewrite_local_paths(text)})
         elif t == "thinking":
-            txt = (b.get("thinking") or "").strip()
+            thinking = b.get("thinking")
+            txt = thinking.strip() if isinstance(thinking, str) else ""
             # thinkingSignature 는 암호화된 reasoning 원문이라 앱엔 무의미. 버린다.
             out.append({"type": "thinking", "text": txt})
         elif t == "toolCall":
@@ -257,13 +251,14 @@ def normalize(line_obj: dict, seq: int) -> dict | None:
     sources = _sources(details.get("sources") if isinstance(details, dict) else None)
     if sources:
         msg["sources"] = sources
-    usage = line_obj.get("usage") or {}
-    if usage:
+    usage = line_obj.get("usage")
+    if isinstance(usage, dict) and usage:
+        cost = usage.get("cost")
         msg["usage"] = {
             "input": usage.get("input"),
             "output": usage.get("output"),
             "total": usage.get("totalTokens"),
-            "cost": (usage.get("cost") or {}).get("total"),
+            "cost": cost.get("total") if isinstance(cost, dict) else None,
         }
     if not msg["blocks"] and role == "toolResult":
         msg["blocks"] = [{"type": "text", "text": ""}]
@@ -278,23 +273,37 @@ def read_messages(session_id: str, *, tail: int | None = None) -> tuple[list[dic
     f = d / "messages.jsonl"
     if not f.exists():
         return [], 0
-    data = f.read_bytes()
+    try:
+        data = f.read_bytes()
+    except OSError:
+        return [], 0
+    if data and not data.endswith(b"\n"):
+        trailing_start = data.rfind(b"\n") + 1
+        try:
+            json.loads(data[trailing_start:])
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            data = data[:trailing_start]
     msgs: list[dict] = []
-    seq = 0
-    for raw in data.splitlines():
+    offset = seq = cursor = 0
+    for raw in data.splitlines(keepends=True):
+        cursor += len(raw)
         if not raw.strip():
             continue
         try:
             obj = json.loads(raw)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if not isinstance(obj, dict):
+            seq += 1
             continue
         m = normalize(obj, seq)
         seq += 1
         if m:
             msgs.append(m)
+            offset = cursor
     if tail:
         msgs = msgs[-tail:]
-    return msgs, len(data)
+    return msgs, offset
 
 
 async def tail_messages(session_id: str, start_offset: int = 0,
@@ -327,7 +336,10 @@ async def tail_messages(session_id: str, start_offset: int = 0,
                             continue
                         try:
                             obj = json.loads(raw)
-                        except json.JSONDecodeError:
+                        except (json.JSONDecodeError, UnicodeDecodeError):
+                            continue
+                        if not isinstance(obj, dict):
+                            seq += 1
                             continue
                         m = normalize(obj, seq)
                         seq += 1
@@ -444,8 +456,9 @@ def _texts(node) -> list[str]:
     if isinstance(node, str):
         return [node] if node.strip() else []
     if isinstance(node, dict):
-        if node.get("type") == "text" and node.get("text"):
-            return [node["text"]]
+        text = node.get("text")
+        if node.get("type") == "text" and isinstance(text, str) and text:
+            return [text]
         return _texts(node.get("content"))
     if isinstance(node, list):
         out: list[str] = []
@@ -611,7 +624,7 @@ def _head_user_text(f: str, lines: int = 10) -> str:
             obj = json.loads(raw)
         except Exception:
             continue
-        if obj.get("role") == "user":
+        if isinstance(obj, dict) and obj.get("role") == "user":
             t = " ".join(_texts(obj.get("content")))
             if t.strip():
                 return t
@@ -634,7 +647,7 @@ def _tail_asst_text(f: str, size: int, win: int = _TAIL_BYTES) -> str:
             obj = json.loads(raw)
         except Exception:
             continue
-        if obj.get("role") == "assistant":
+        if isinstance(obj, dict) and obj.get("role") == "assistant":
             t = " ".join(_texts(obj.get("content")))
             if t.strip():
                 return t

@@ -19,7 +19,7 @@ export function DraftCard({ language, data, source, notify, onAction }: { langua
   useEffect(() => { if (!isArmed) return; const timer = setTimeout(() => setArmed(false), 4000); return () => clearTimeout(timer); }, [isArmed]);
   const fields = draft.fields.filter(([, value]) => value);
   async function copy() {
-    try { await navigator.clipboard.writeText(draft.body); notify('Draft copied', 'success'); }
+    try { await navigator.clipboard.writeText(draft.body || fields.map(([name, value]) => `${name}: ${value}`).join('\n') || source); notify('Draft copied', 'success'); }
     catch { notify('Could not copy. Select the text to copy it.', 'error'); }
   }
   function act() {

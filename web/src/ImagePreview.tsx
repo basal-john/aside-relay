@@ -1,11 +1,12 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { animate, motion, useMotionValue, useReducedMotion } from 'motion/react';
 import { Minus, Plus, X } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { tokens } from './tokens.stylex';
 import { Sheet, IconButton, ICON_STROKE } from './ui';
 import { OPEN_IN_BROWSER_LABEL } from './browser';
+import { useBrowserInput, type BrowserControlHandler } from './useBrowserInput';
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 5;
@@ -14,11 +15,17 @@ const KEYBOARD_PAN_STEP = 48;
 const PERCENT_SCALE = 100;
 const SWIPE_THRESHOLD = 8;
 
-export function ImagePreview({ src, title = 'Image', url, kind = 'image', onClose }: { src: string; title?: string; url?: string; kind?: 'image' | 'browser'; onClose: () => void }) {
+type ImagePreviewProps = { src: string; title?: string; url?: string; onClose: () => void } & (
+  | { kind: 'browser'; onControl: BrowserControlHandler; browserInput: ReactNode }
+  | { kind?: 'image'; onControl?: never; browserInput?: never }
+);
+
+export function ImagePreview({ src, title = 'Image', url, kind = 'image', onClose, onControl, browserInput }: ImagePreviewProps) {
   const isBrowser = kind === 'browser';
   const dialogTitle = isBrowser ? 'Browser preview' : 'Image';
   const viewerRef = useRef<HTMLElement>(null);
-  const viewportRef = useRef<HTMLDivElement>(null);
+  const controlInput = useBrowserInput<HTMLDivElement>({ onControl });
+  const viewportRef = controlInput.ref;
   const imageRef = useRef<HTMLImageElement>(null);
   const pointersRef = useRef<{ id: number; x: number; y: number; isViewport: boolean }[]>([]);
   const gestureRef = useRef<{ x: number; y: number; distance: number; scale: number; offsetX: number; offsetY: number; mode: 'pending' | 'pan' | 'dismiss'; canDismiss: boolean; lastY: number; time: number; velocity: number } | undefined>(undefined);
@@ -36,27 +43,31 @@ export function ImagePreview({ src, title = 'Image', url, kind = 'image', onClos
     const observer = new ResizeObserver(() => applyTransform(scale.get(), x.get(), y.get()));
     observer.observe(viewport);
     const wheel = (event: WheelEvent) => {
+      if (isBrowser && !event.ctrlKey) return;
       event.preventDefault();
+      event.stopPropagation();
       zoomAt(scale.get() * Math.exp(-event.deltaY * .002), event.clientX, event.clientY);
     };
     viewport.addEventListener('wheel', wheel, { passive: false });
     return () => { swipeY.stop(); observer.disconnect(); viewport.removeEventListener('wheel', wheel); };
-  }, [scale, x, y, swipeY]);
+  }, [scale, x, y, swipeY, isBrowser]);
 
   return <Sheet title={dialogTitle} isFullScreen swipeY={swipeY} onClose={onClose}>
     <section ref={viewerRef} {...stylex.props(styles.viewer)}
         onPointerDown={event => {
-          if (isDismissingRef.current || event.button !== 0 || pointersRef.current.length >= 2 || event.target instanceof Element && event.target.closest('button, a')) return;
+          if (isDismissingRef.current || event.button !== 0 || pointersRef.current.length >= 2 || event.target instanceof Element && event.target.closest('button, a, input, textarea, select, [contenteditable="true"]')) return;
           swipeY.stop();
           swipeY.set(0);
-          event.currentTarget.setPointerCapture(event.pointerId);
-          pointersRef.current.push({ id: event.pointerId, x: event.clientX, y: event.clientY, isViewport: event.target instanceof Node && !!viewportRef.current?.contains(event.target) });
+          const isViewport = event.target instanceof Node && !!viewportRef.current?.contains(event.target);
+          if (!isBrowser || !isViewport) event.currentTarget.setPointerCapture(event.pointerId);
+          pointersRef.current.push({ id: event.pointerId, x: event.clientX, y: event.clientY, isViewport });
           beginGesture();
         }} onPointerMove={event => {
           const pointer = pointersRef.current.find(point => point.id === event.pointerId);
           const gesture = gestureRef.current;
           if (!pointer || !gesture) return;
           pointer.x = event.clientX; pointer.y = event.clientY;
+          if (isBrowser && pointersRef.current.every(point => point.isViewport) && pointersRef.current.length < 2) return;
           const current = readPointers();
           const dx = current.x - gesture.x;
           const dy = current.y - gesture.y;
@@ -79,8 +90,9 @@ export function ImagePreview({ src, title = 'Image', url, kind = 'image', onClos
         }} onPointerUp={endGesture} onPointerCancel={endGesture} onLostPointerCapture={endGesture}
       >
       <header {...stylex.props(styles.header)}><div {...stylex.props(styles.identity)}><h2 {...stylex.props(styles.title)}>{title}</h2>{url && <a href={url} target="_blank" rel="noopener noreferrer external" aria-label={OPEN_IN_BROWSER_LABEL} {...stylex.props(styles.url)}>{url}</a>}</div><IconButton label={`Close ${dialogTitle.toLowerCase()}`} onClick={onClose}><X size={22} strokeWidth={ICON_STROKE} /></IconButton></header>
-      <div ref={viewportRef} role="region" aria-label={isBrowser ? 'Zoomable browser view' : 'Zoomable image'} aria-description="Pinch to zoom, drag to move. Swipe down at 100% or from the title to close. Use plus and minus to zoom, arrow keys to move, or zero to reset." tabIndex={0} {...stylex.props(styles.viewport)}
+      <div {...controlInput} role={isBrowser ? 'button' : 'region'} aria-label={isBrowser ? 'Control browser page' : 'Zoomable image'} aria-description={isBrowser ? 'Click to interact, drag or use the wheel to scroll the remote page. Use two fingers or the zoom buttons to zoom. Drag the title to close.' : 'Pinch to zoom, drag to move. Swipe down at 100% or from the title to close. Use plus and minus to zoom, arrow keys to move, or zero to reset.'} tabIndex={0} {...stylex.props(styles.viewport, isBrowser && styles.browserViewport)}
         onKeyDown={event => {
+          if (isBrowser) { controlInput.onKeyDown(event); return; }
           if (event.key === '+' || event.key === '=') zoomAt(scale.get() * ZOOM_STEP);
           else if (event.key === '-') zoomAt(scale.get() / ZOOM_STEP);
           else if (event.key === '0') applyTransform(MIN_ZOOM, 0, 0);
@@ -90,6 +102,7 @@ export function ImagePreview({ src, title = 'Image', url, kind = 'image', onClos
         }}>
         <motion.img ref={imageRef} src={src} alt={isBrowser ? `Current view of ${title}` : 'Expanded attachment'} draggable={false} {...stylex.props(styles.image)} style={{ x, y, scale }} onLoad={() => applyTransform(scale.get(), x.get(), y.get())} />
       </div>
+      {isBrowser && <div {...stylex.props(styles.browserInput)}>{browserInput}</div>}
       <footer {...stylex.props(styles.controls)}><IconButton label="Zoom out" disabled={zoom === MIN_ZOOM * PERCENT_SCALE} onClick={() => zoomAt(scale.get() / ZOOM_STEP)}><Minus size={22} strokeWidth={ICON_STROKE} /></IconButton><button type="button" aria-label={`Reset zoom, ${zoom}%`} {...stylex.props(styles.reset)} onClick={() => applyTransform(MIN_ZOOM, 0, 0)}>{zoom}%</button><IconButton label="Zoom in" disabled={zoom === MAX_ZOOM * PERCENT_SCALE} onClick={() => zoomAt(scale.get() * ZOOM_STEP)}><Plus size={22} strokeWidth={ICON_STROKE} /></IconButton></footer>
     </section>
   </Sheet>;
@@ -124,7 +137,7 @@ export function ImagePreview({ src, title = 'Image', url, kind = 'image', onClos
 
   function beginGesture(isContinuing = false) {
     const pointers = pointersRef.current;
-    gestureRef.current = pointers.length ? { ...readPointers(), scale: scale.get(), offsetX: x.get(), offsetY: y.get(), mode: isContinuing || pointers.length > 1 ? 'pan' : 'pending', canDismiss: pointers.length === 1 && (!pointers[0].isViewport || scale.get() === MIN_ZOOM), lastY: pointers[0].y, time: performance.now(), velocity: 0 } : undefined;
+    gestureRef.current = pointers.length ? { ...readPointers(), scale: scale.get(), offsetX: x.get(), offsetY: y.get(), mode: isContinuing || pointers.length > 1 ? 'pan' : 'pending', canDismiss: pointers.length === 1 && (!pointers[0].isViewport || !isBrowser && scale.get() === MIN_ZOOM), lastY: pointers[0].y, time: performance.now(), velocity: 0 } : undefined;
   }
 
   function endGesture(event: ReactPointerEvent<HTMLElement>) {
@@ -153,6 +166,8 @@ const styles = stylex.create({
   title: { margin: 0, fontSize: '0.9375rem', lineHeight: 1.4, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   url: { display: 'block', fontSize: '0.6875rem', lineHeight: 1.5, color: tokens.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'none' },
   viewport: { flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', position: 'relative', touchAction: 'none', overscrollBehavior: 'none', cursor: 'grab' },
+  browserViewport: { cursor: 'crosshair' },
+  browserInput: { padding: '8px max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left))', flexShrink: 0 },
   image: { display: 'block', width: '100%', height: '100%', objectFit: 'contain', touchAction: 'none', pointerEvents: 'none', willChange: 'transform' },
   controls: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, flexShrink: 0, padding: '8px 12px max(12px, env(safe-area-inset-bottom))' },
   reset: { minWidth: 64, minHeight: 44, borderWidth: 0, borderRadius: 22, backgroundColor: tokens.surface, color: tokens.text, fontSize: '0.8125rem', fontVariantNumeric: 'tabular-nums' },

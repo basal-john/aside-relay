@@ -42,6 +42,20 @@ const RUN_REQUEST_RECOVERY_INTERVAL_MS = 750
 const RUN_REQUEST_RECOVERY_MAX_ATTEMPTS = 48
 const MAX_STALE_STREAM_KEYS = 128
 
+const storeSessionSelection = (sessionId?: string) => {
+  try {
+    if (sessionId) {
+      localStorage.setItem(LAST_SESSION_KEY, sessionId)
+      localStorage.setItem(LAST_SESSION_MODE_KEY, "session")
+    } else {
+      localStorage.removeItem(LAST_SESSION_KEY)
+      localStorage.setItem(LAST_SESSION_MODE_KEY, "new")
+    }
+  } catch {
+    // Session navigation still works when persistent storage is unavailable.
+  }
+}
+
 const getRouteSessionId = () => location.pathname.match(/^\/c\/([A-Za-z0-9_-]{1,64})\/?$/)?.[1]
 
 type PendingRequest = {
@@ -223,6 +237,8 @@ export const useChat = (): UseChat => {
   const socketRef = useRef<WebSocket | undefined>(undefined)
   const reconnectTimerRef = useRef<number | undefined>(undefined)
   const reconnectAttemptsRef = useRef(0)
+  const hasRefreshedSocketAuthRef = useRef(false)
+  const tokenSaveRevisionRef = useRef(0)
   const sessionIdRef = useRef<string | undefined>(undefined)
   const searchQueryRef = useRef("")
   const cursorRef = useRef<string | undefined>(undefined)
@@ -300,6 +316,14 @@ export const useChat = (): UseChat => {
     },
     [],
   )
+
+  const storeToken = useCallback((token: string) => {
+    try {
+      localStorage.setItem(TOKEN_KEY, token)
+    } catch {
+      pushToast("Connected for this tab, but the access token couldn't be saved.")
+    }
+  }, [pushToast])
 
   const dismissToast = useCallback((toastId: string) => {
     setToasts((current) => current.filter((toast) => toast.id !== toastId))
@@ -410,10 +434,14 @@ export const useChat = (): UseChat => {
       ) {
         return false
       }
-      messagesRef.current = result.messages
-      setMessages(result.messages)
-      reconcileLiveAssistant(result.messages)
-      nextSeqRef.current = result.nextSeq
+      const newerMessages = messagesRef.current.filter((message) => message.seq >= result.nextSeq)
+      const nextMessages = newerMessages.length > 0
+        ? [...result.messages, ...newerMessages].sort((left, right) => left.seq - right.seq)
+        : result.messages
+      messagesRef.current = nextMessages
+      setMessages(nextMessages)
+      reconcileLiveAssistant(nextMessages)
+      nextSeqRef.current = Math.max(result.nextSeq, (nextMessages.at(-1)?.seq ?? -1) + 1)
       offsetRef.current = result.offset
       if (
         pendingPromptRef.current !== undefined &&
@@ -431,7 +459,7 @@ export const useChat = (): UseChat => {
         return result.running ? [...withoutSelected, selectedSessionId] : withoutSelected
       })
       subscribe(selectedSessionId)
-      return result.messages.length > 0 || result.running
+      return nextMessages.length > 0 || result.running
     },
     [api, reconcileLiveAssistant, subscribe],
   )
@@ -529,8 +557,7 @@ export const useChat = (): UseChat => {
       setIsOpening(true)
       nextSeqRef.current = 0
       offsetRef.current = 0
-      localStorage.setItem(LAST_SESSION_KEY, selectedSessionId)
-      localStorage.setItem(LAST_SESSION_MODE_KEY, "session")
+      storeSessionSelection(selectedSessionId)
       if (
         shouldNavigate &&
         location.pathname !== `/c/${encodeURIComponent(selectedSessionId)}`
@@ -542,7 +569,7 @@ export const useChat = (): UseChat => {
         if (!exists && generation === openGenerationRef.current) {
           sessionIdRef.current = undefined
           setSessionId(undefined)
-          localStorage.removeItem(LAST_SESSION_KEY)
+          storeSessionSelection()
           if (location.pathname.startsWith("/c/")) history.replaceState({}, "", "/")
           pushToast("That conversation is no longer available.")
         }
@@ -592,8 +619,14 @@ export const useChat = (): UseChat => {
 
   const restoreSavedSession = useCallback(async (sessionPage?: Promise<void>) => {
     const routeSessionId = getRouteSessionId()
-    const mode = localStorage.getItem(LAST_SESSION_MODE_KEY)
-    const savedSessionId = localStorage.getItem(LAST_SESSION_KEY)
+    let mode: string | null = null
+    let savedSessionId: string | null = null
+    try {
+      mode = localStorage.getItem(LAST_SESSION_MODE_KEY)
+      savedSessionId = localStorage.getItem(LAST_SESSION_KEY)
+    } catch {
+      // Restore the available session list when persistent storage is unavailable.
+    }
     const lastSessionId = routeSessionId ?? (mode === "new" ? undefined : savedSessionId)
     if (lastSessionId) {
       const restored = await openSession(lastSessionId, Boolean(routeSessionId))
@@ -631,8 +664,7 @@ export const useChat = (): UseChat => {
     setIsOpening(false)
     nextSeqRef.current = 0
     offsetRef.current = 0
-    localStorage.removeItem(LAST_SESSION_KEY)
-    localStorage.setItem(LAST_SESSION_MODE_KEY, "new")
+    storeSessionSelection()
     if (location.pathname !== "/") history.pushState({}, "", "/")
   }, [cancelPendingRequests, releaseQueueEdit, retireLiveAssistant, sendSocket])
 
@@ -677,8 +709,7 @@ export const useChat = (): UseChat => {
         sessionIdRef.current = acceptedSessionId
         setSessionId(acceptedSessionId)
         bindStartingQueue({ sessionId: acceptedSessionId, previousGeneration: accepted.generation, generation })
-        localStorage.setItem(LAST_SESSION_KEY, acceptedSessionId)
-        localStorage.setItem(LAST_SESSION_MODE_KEY, "session")
+        storeSessionSelection(acceptedSessionId)
         nextSeqRef.current = 0
         offsetRef.current = 0
         history.pushState({}, "", `/c/${encodeURIComponent(acceptedSessionId)}`)
@@ -967,9 +998,12 @@ export const useChat = (): UseChat => {
     if (current?.readyState === WebSocket.OPEN || current?.readyState === WebSocket.CONNECTING) return
     const protocol = location.protocol === "https:" ? "wss:" : "ws:"
     const socket = new WebSocket(`${protocol}//${location.host}/ws`)
+    let didOpen = false
     socketRef.current = socket
     socket.onopen = () => {
       if (socketRef.current !== socket) return
+      didOpen = true
+      hasRefreshedSocketAuthRef.current = false
       reconnectAttemptsRef.current = 0
       setIsConnected(true)
       const selectedSessionId = sessionIdRef.current
@@ -987,15 +1021,59 @@ export const useChat = (): UseChat => {
     }
     socket.onmessage = handleSocketMessage
     socket.onerror = () => undefined
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       if (socketRef.current !== socket || isUnmountedRef.current) return
       socketRef.current = undefined
       setIsConnected(false)
+      const closedWithToken = tokenRef.current
+      const tokenSaveRevision = tokenSaveRevisionRef.current
       pendingRequestsRef.current.forEach((_pending, requestId) => {
         void recoverPendingRequest(requestId)
       })
-      const delay = Math.min(20_000, 1_000 * 2 ** reconnectAttemptsRef.current++)
-      reconnectTimerRef.current = window.setTimeout(connectSocket, delay)
+      if (event.code === 4401 && hasRefreshedSocketAuthRef.current) {
+        setAuthError("Authentication failed. Sign in again to reconnect.")
+        return
+      }
+      if (
+        (!didOpen || event.code === 4401) &&
+        closedWithToken &&
+        !hasRefreshedSocketAuthRef.current
+      ) {
+        void fetch("/api/auth", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${closedWithToken}` },
+          signal: AbortSignal.timeout(FOLLOWUP_REQUEST_TIMEOUT_MS),
+        }).then(async (response) => {
+          if (
+            isUnmountedRef.current ||
+            closedWithToken !== tokenRef.current ||
+            tokenSaveRevision !== tokenSaveRevisionRef.current
+          ) return
+          if (response.ok) {
+            hasRefreshedSocketAuthRef.current = true
+            connectSocket()
+            return
+          }
+          if (response.status === 401 || response.status === 403) {
+            setAuthError(`Authentication failed. ${await parseApiError(response)}`)
+            return
+          }
+          scheduleReconnect()
+        }).catch(scheduleReconnect)
+        return
+      }
+      scheduleReconnect()
+
+      function scheduleReconnect() {
+        if (
+          isUnmountedRef.current ||
+          socketRef.current ||
+          closedWithToken !== tokenRef.current ||
+          tokenSaveRevision !== tokenSaveRevisionRef.current
+        ) return
+        const delay = Math.min(20_000, 1_000 * 2 ** reconnectAttemptsRef.current++)
+        reconnectTimerRef.current = window.setTimeout(connectSocket, delay)
+      }
     }
   }, [fetchMessages, handleSocketMessage, recoverPendingRequest, subscribe])
 
@@ -1067,8 +1145,7 @@ export const useChat = (): UseChat => {
             sessionIdRef.current = result.sessionId
             setSessionId(result.sessionId)
             bindStartingQueue({ sessionId: result.sessionId, previousGeneration: generation, generation })
-            localStorage.setItem(LAST_SESSION_KEY, result.sessionId)
-            localStorage.setItem(LAST_SESSION_MODE_KEY, "session")
+            storeSessionSelection(result.sessionId)
             subscribe(result.sessionId)
             history.pushState({}, "", `/c/${encodeURIComponent(result.sessionId)}`)
           }
@@ -1247,14 +1324,17 @@ export const useChat = (): UseChat => {
         pushToast("Enter an access token.")
         return false
       }
+      const revision = ++tokenSaveRevisionRef.current
       try {
         const response = await fetch("/api/auth", {
           method: "POST",
           headers: { Authorization: `Bearer ${normalized}` },
         })
+        if (isUnmountedRef.current || revision !== tokenSaveRevisionRef.current) return false
         if (!response.ok) throw new ApiError(response.status, await parseApiError(response))
         tokenRef.current = normalized
-        localStorage.setItem(TOKEN_KEY, normalized)
+        hasRefreshedSocketAuthRef.current = false
+        storeToken(normalized)
         setAuthError(undefined)
         socketRef.current?.close()
         socketRef.current = undefined
@@ -1264,11 +1344,13 @@ export const useChat = (): UseChat => {
         pushToast("Access token saved.", "success")
         return true
       } catch (error) {
+        if (isUnmountedRef.current || revision !== tokenSaveRevisionRef.current) return false
         pushToast(`Couldn't verify the access token. ${getErrorMessage(error)}`)
+        connectSocket()
         return false
       }
     },
-    [connectSocket, loadSessionPage, pushToast, restoreSavedSession],
+    [connectSocket, loadSessionPage, pushToast, restoreSavedSession, storeToken],
   )
 
   const deleteSession = useCallback(
@@ -1415,19 +1497,27 @@ export const useChat = (): UseChat => {
   useEffect(() => {
     isUnmountedRef.current = false
     const boot = async () => {
-      const savedToken = localStorage.getItem(TOKEN_KEY) ?? ""
-      let hasAccess = false
+      let savedToken = ""
+      try {
+        savedToken = localStorage.getItem(TOKEN_KEY) ?? ""
+      } catch {
+        // The web token can still connect this tab when persistent storage is unavailable.
+      }
+      let accessToken = ""
+      let authenticationError: unknown
       try {
         const response = await fetch("/api/web-token")
-        if (response.ok) {
-          const value: unknown = await response.json()
-          if (!isRecord(value) || typeof value.token !== "string") {
-            throw new Error("The authentication response was invalid.")
-          }
-          tokenRef.current = value.token
-          localStorage.setItem(TOKEN_KEY, value.token)
-          hasAccess = true
-        } else if (savedToken) {
+        if (!response.ok) throw new ApiError(response.status, await parseApiError(response))
+        const value: unknown = await response.json()
+        if (!isRecord(value) || typeof value.token !== "string") {
+          throw new Error("The authentication response was invalid.")
+        }
+        accessToken = value.token
+      } catch (error) {
+        authenticationError = error
+      }
+      if (!accessToken && savedToken) {
+        try {
           const savedResponse = await fetch("/api/auth", {
             method: "POST",
             headers: { Authorization: `Bearer ${savedToken}` },
@@ -1435,18 +1525,25 @@ export const useChat = (): UseChat => {
           if (!savedResponse.ok) {
             throw new ApiError(savedResponse.status, await parseApiError(savedResponse))
           }
-          tokenRef.current = savedToken
-          hasAccess = true
-        } else {
-          throw new ApiError(response.status, await parseApiError(response))
+          accessToken = savedToken
+        } catch (error) {
+          authenticationError = error
+          if (
+            error instanceof TypeError ||
+            error instanceof ApiError && error.status >= 500
+          ) {
+            accessToken = savedToken
+          }
         }
-      } catch (error) {
-        setAuthError(`Authentication failed. ${getErrorMessage(error)}`)
       }
-      if (!hasAccess || isUnmountedRef.current) {
+      if (!accessToken) {
+        setAuthError(`Authentication failed. ${getErrorMessage(authenticationError)}`)
         setIsReady(true)
         return
       }
+      tokenRef.current = accessToken
+      storeToken(accessToken)
+      if (isUnmountedRef.current) return
       await restoreSavedSession(loadSessionPage("reset"))
       connectSocket()
       if (!isUnmountedRef.current) setIsReady(true)
@@ -1462,7 +1559,7 @@ export const useChat = (): UseChat => {
       pendingRequestsRef.current.forEach((pending) => pending.resolve(false))
       pendingRequestsRef.current.clear()
     }
-  }, [connectSocket, loadSessionPage, restoreSavedSession])
+  }, [connectSocket, loadSessionPage, restoreSavedSession, storeToken])
 
   useEffect(() => {
     window.addEventListener("pagehide", releaseQueueEdit)
@@ -1497,8 +1594,7 @@ export const useChat = (): UseChat => {
       setIsOpening(false)
       nextSeqRef.current = 0
       offsetRef.current = 0
-      localStorage.removeItem(LAST_SESSION_KEY)
-      localStorage.setItem(LAST_SESSION_MODE_KEY, "new")
+      storeSessionSelection()
     }
     window.addEventListener("popstate", handlePopState)
     return () => window.removeEventListener("popstate", handlePopState)

@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { CornerDownRight, Ellipsis, ListEnd, Pencil, Trash2 } from 'lucide-react';
+import { CornerDownRight, Ellipsis, FileText, ListEnd, Pencil, Trash2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import type { QueuedMessage, UseChat } from './types';
 import { tokens } from './tokens.stylex';
@@ -84,7 +84,7 @@ export function QueuedBubble({ message, index, chat, isEditing, isAnotherEditing
       <button ref={triggerRef} type="button" aria-label={`Options for ${label.toLowerCase()}`} aria-haspopup="menu" aria-expanded={isMenuOpen} aria-controls={menuId} disabled={isBusy || !!isHeldElsewhere || isEditing} {...stylex.props(styles.menuTrigger)} onClick={openMenu}><Ellipsis size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /></button>
     </div>
     <div {...stylex.props(styles.bubble, isEditing && styles.editBubble)}>
-      {message.attachments.length > 0 && <div {...stylex.props(styles.attachments)}>{message.attachments.map(attachment => <img key={attachment.id} src={attachment.url} alt={attachment.name} {...stylex.props(styles.image)} />)}</div>}
+      {message.attachments.length > 0 && <div {...stylex.props(styles.attachments)}>{message.attachments.map(attachment => attachment.mime.startsWith('image/') ? <img key={attachment.id} src={attachment.url} alt={attachment.name} {...stylex.props(styles.image)} /> : <a key={attachment.id} href={attachment.url} target="_blank" rel="noopener noreferrer" {...stylex.props(styles.file)}><FileText size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /><span>{attachment.name}</span></a>)}</div>}
       {isEditing ? <><textarea ref={inputRef} aria-label={`Edit ${label.toLowerCase()}`} rows={3} value={editText} disabled={message.status === 'sending'} {...stylex.props(styles.editInput)} onChange={event => onEditTextChange(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); void runAction('cancel'); } }} /><div {...stylex.props(styles.editActions)}><Button size="compact" disabled={isBusy} onClick={() => { void runAction('cancel'); }}>Cancel</Button><Button size="compact" variant="primary" disabled={isBusy || (!editText.trim() && !message.attachments.length)} onClick={() => { void runAction('save'); }}>{isActing ? 'Saving…' : 'Save'}</Button></div></> : message.prompt}
     </div>
     {message.status === 'error' && <p role="alert" {...stylex.props(styles.error)}>{message.error || 'Could not send. Edit or try again.'}</p>}
@@ -113,6 +113,7 @@ const styles = stylex.create({
   editActions: { display: 'flex', justifyContent: 'flex-end', gap: 4, marginTop: 8 },
   attachments: { display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   image: { width: 100, maxWidth: '100%', height: 100, objectFit: 'cover', borderRadius: 16 },
+  file: { display: 'flex', alignItems: 'center', gap: 8, minHeight: 44, maxWidth: '100%', padding: '8px 10px', borderRadius: 12, color: tokens.text, backgroundColor: tokens.surface, overflowWrap: 'anywhere' },
   error: { margin: 0, fontSize: '0.8125rem', color: tokens.danger, overflowWrap: 'anywhere' },
   menu: { position: 'fixed', inset: 'auto', margin: 0, width: 'min(268px, calc(100vw - 16px))', padding: 8, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, borderRadius: 24, backgroundColor: tokens.surface, color: tokens.text, boxShadow: '0 10px 40px rgb(0 0 0 / .24)', overflowY: 'auto', overflowX: 'hidden' },
   menuTitle: { margin: '4px 12px 8px', maxWidth: '100%', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', color: tokens.muted, fontSize: '0.8125rem' },

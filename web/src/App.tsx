@@ -63,6 +63,7 @@ export function App() {
   const [draft, setDraft] = useState(''); const [revision, setRevision] = useState(0);
   const [isKeyboardOpen, setKeyboardOpen] = useState(false);
   const [localToasts, setLocalToasts] = useState<Toast[]>([]);
+  const localToastIdRef = useRef(0);
   const listRef = useRef<VirtuosoHandle>(null);
   const [canJump, setCanJump] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -73,9 +74,9 @@ export function App() {
 
   function changeAtBottom(isAtBottom: boolean) { setCanJump(!isAtBottom); }
 
-  function notify(message: string, kind: 'success' | 'error' = 'success') {
-    const id = crypto.randomUUID(); setLocalToasts(current => [...current, { id, createdAt: Date.now(), message, tone: kind }]);
-  }
+  const notify = useCallback((message: string, kind: 'success' | 'error' = 'success') => {
+    const id = `local:${++localToastIdRef.current}`; setLocalToasts(current => [...current, { id, createdAt: Date.now(), message, tone: kind }]);
+  }, []);
   const notifications = usePushNotifications(chat, notify);
   const dismissToast = useCallback((id: string) => { chat.dismissToast(id); setLocalToasts(current => current.filter(toast => toast.id !== id)); }, [chat.dismissToast]);
   function changeTextSize(size: number) {
@@ -104,7 +105,7 @@ export function App() {
   function newChat() { chat.newChat(); setRunOptions(undefined); setDraft(''); setRevision(value => value + 1); setDrawer(false); setMenuSession(undefined); changeAtBottom(true); }
   function newIncognitoChat() { newChat(); setRunOptions({ mode: 'incognito' }); }
   function openSession(id: string) { void chat.openSession(id); setRunOptions(undefined); setDraft(''); setRevision(value => value + 1); setDrawer(false); setMenuSession(undefined); changeAtBottom(true); }
-  function openPanel(next: Panel, targetId?: string) { const sessionId = targetId ?? chat.sessionId; setBrowserTarget(next === 'browser' ? targetId : undefined); if (next === 'files') setFilesSessionId(sessionId); setPanel(next); setDrawer(false); history.pushState({ panel: next }, '', next === 'browser' ? '/tabs' : next === 'files' && sessionId ? '/files?session=' + encodeURIComponent(sessionId) : '/' + next); }
+  function openPanel(next: Panel, targetId?: string) { const sessionId = targetId ?? chat.sessionId; const path = next === 'browser' ? '/tabs' : next === 'files' && sessionId ? '/files?session=' + encodeURIComponent(sessionId) : '/' + next; setBrowserTarget(next === 'browser' ? targetId : undefined); if (next === 'files') setFilesSessionId(sessionId); setPanel(next); setDrawer(false); if (panel) history.replaceState({ panel: next }, '', path); else history.pushState({ panel: next }, '', path); }
   function closePanel() { setPanel(undefined); setBrowserTarget(undefined); history.replaceState({}, '', chat.sessionId ? '/c/' + encodeURIComponent(chat.sessionId) : '/'); }
   function composeContext({ text }: { messageId: string; text: string }) { setDraft(current => `${text.split('\n').map(line => '> ' + line).join('\n')}\n\n${current}`); requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('#draft')?.focus({ preventScroll: true })); }
   function askSidechat(context: { messageId: string; text: string }) { setSidechatPrompt(''); setSidechat(context); }
@@ -233,24 +234,50 @@ export function App() {
   useEffect(() => {
     const viewport = window.visualViewport;
     if (!viewport) return;
-    let expandedHeight = viewport.height;
-    let viewportWidth = viewport.width;
+    let expandedHeight = window.innerHeight;
+    let viewportWidth = window.innerWidth;
+    let frame = 0;
+    let settleTimers: number[] = [];
     const resize = () => {
-      if (viewport.width !== viewportWidth) { expandedHeight = viewport.height; viewportWidth = viewport.width; }
-      expandedHeight = Math.max(expandedHeight, viewport.height);
       const root = viewportRef.current;
       if (!root) return;
-      const isKeyboardVisible = document.activeElement?.id === 'draft' && matchMedia('(pointer: coarse)').matches && expandedHeight - viewport.height > 150;
+      const hasDraftFocus = document.activeElement?.id === 'draft';
+      const layoutHeight = Math.max(window.innerHeight, document.documentElement.clientHeight);
+      if (window.innerWidth !== viewportWidth) { expandedHeight = layoutHeight; viewportWidth = window.innerWidth; }
+      else expandedHeight = Math.max(expandedHeight, layoutHeight);
+      const isKeyboardVisible = hasDraftFocus && matchMedia('(pointer: coarse)').matches && expandedHeight - viewport.height > 150;
       setKeyboardOpen(isKeyboardVisible);
-      root.style.height = viewport.height + 'px';
-      root.style.top = viewport.offsetTop + 'px';
+      if (isKeyboardVisible) {
+        root.style.height = viewport.height + 'px';
+        root.style.top = viewport.offsetTop + 'px';
+      } else {
+        root.style.removeProperty('height');
+        root.style.removeProperty('top');
+      }
       root.style.setProperty('--keyboard-tools-display', isKeyboardVisible ? 'flex' : 'none');
       if (isKeyboardVisible) root.style.setProperty('--composer-bottom-padding', '6px');
       else root.style.removeProperty('--composer-bottom-padding');
     };
-    resize(); viewport.addEventListener('resize', resize); viewport.addEventListener('scroll', resize);
-    document.addEventListener('focusin', resize); document.addEventListener('focusout', resize);
-    return () => { viewport.removeEventListener('resize', resize); viewport.removeEventListener('scroll', resize); document.removeEventListener('focusin', resize); document.removeEventListener('focusout', resize); };
+    const scheduleResize = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(resize);
+      settleTimers.forEach(window.clearTimeout);
+      settleTimers = [100, 350].map(delay => window.setTimeout(resize, delay));
+    };
+    const onVisibilityChange = () => { if (document.visibilityState === 'visible') scheduleResize(); };
+    resize(); viewport.addEventListener('resize', scheduleResize); viewport.addEventListener('scroll', scheduleResize);
+    window.addEventListener('resize', scheduleResize); window.addEventListener('orientationchange', scheduleResize);
+    window.addEventListener('focus', scheduleResize); window.addEventListener('pageshow', scheduleResize);
+    document.addEventListener('focusin', scheduleResize); document.addEventListener('focusout', scheduleResize); document.addEventListener('input', scheduleResize);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      cancelAnimationFrame(frame); settleTimers.forEach(window.clearTimeout);
+      viewport.removeEventListener('resize', scheduleResize); viewport.removeEventListener('scroll', scheduleResize);
+      window.removeEventListener('resize', scheduleResize); window.removeEventListener('orientationchange', scheduleResize);
+      window.removeEventListener('focus', scheduleResize); window.removeEventListener('pageshow', scheduleResize);
+      document.removeEventListener('focusin', scheduleResize); document.removeEventListener('focusout', scheduleResize); document.removeEventListener('input', scheduleResize);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, []);
   useEffect(() => {
     let frame = 0;
@@ -285,7 +312,7 @@ export function App() {
       <Composer runOptions={runOptions} chat={chat} onBrowser={() => openPanel('browser')} draft={draft} setDraft={setDraft} revision={revision} notify={notify} textSize={textSize} uiFont={appearance.uiFont} isKeyboardOpen={isKeyboardOpen} />
     </main>
     <AnimatePresence>{isDrawer && <Drawer key="drawer" onClose={() => { setMenuSession(undefined); setDrawer(false); }}><Sidebar chat={chat} isDrawer onClose={() => { setMenuSession(undefined); setDrawer(false); }} onNew={newChat} onNewIncognito={newIncognitoChat} onOpen={openSession} onSettings={() => openPanel('settings')} onBrowser={() => openPanel('browser')} onMenu={setMenuSession} /></Drawer>}</AnimatePresence>
-    <AnimatePresence mode="wait">{panel === 'settings' ? <Dialog key="settings" title="Settings" onClose={closePanel}><Settings chat={chat} notifications={notifications} notify={notify} isDarkMode={theme === 'dark'} onThemeToggle={() => changeThemeMode(theme === 'light' ? 'dark' : 'light')} themeMode={themeMode} onThemeModeChange={changeThemeMode} appearance={appearance} onAppearanceChange={changeAppearance} textSize={textSize} onTextSizeChange={changeTextSize} onWorkspace={() => openPanel('workspace')} /></Dialog> : panel === 'browser' ? <Sheet key={`browser:${browserTarget ?? "all"}`} title="Browser" isWide onClose={closePanel}><BrowserPanel initialTargetId={browserTarget} sessionId={chat.sessionId} request={chat.request} notify={notify} onClose={closePanel} onStart={prompt => { closePanel(); if (!chat.sessionId) newChat(); setDraft(prompt); }} /></Sheet> : panel === 'workspace' ? <Suspense key="workspace" fallback={<Dialog title="Workspace & preferences" onClose={closePanel}><DialogDescription>Loading workspace…</DialogDescription></Dialog>}><Workspace chat={chat} notify={notify} onClose={closePanel} onOpenSession={id => { closePanel(); openSession(id); }} onNewProjectChat={projectId => { closePanel(); newChat(); setRunOptions({ projectId }); }} /></Suspense> : panel === 'files' && effectiveFilesSessionId ? <Suspense key={effectiveFilesSessionId} fallback={<Dialog title="Files & outputs" onClose={closePanel}><DialogDescription>Loading files…</DialogDescription></Dialog>}><Artifacts sessionId={effectiveFilesSessionId} request={chat.request} notify={notify} onZoom={setZoom} onClose={closePanel} /></Suspense> : undefined}</AnimatePresence>
+    <AnimatePresence mode="wait">{panel === 'settings' ? <Dialog key="settings" title="Settings" onClose={closePanel}><Settings chat={chat} notifications={notifications} notify={notify} isDarkMode={theme === 'dark'} onThemeToggle={() => changeThemeMode(theme === 'light' ? 'dark' : 'light')} themeMode={themeMode} onThemeModeChange={changeThemeMode} appearance={appearance} onAppearanceChange={changeAppearance} textSize={textSize} onTextSizeChange={changeTextSize} onWorkspace={() => openPanel('workspace')} /></Dialog> : panel === 'browser' ? <Sheet key={`browser:${chat.sessionId ?? "new"}:${browserTarget ?? "all"}`} title="Browser" isWide onClose={closePanel}><BrowserPanel initialTargetId={browserTarget} sessionId={chat.sessionId} request={chat.request} notify={notify} onClose={closePanel} onStart={prompt => { closePanel(); if (!chat.sessionId) newChat(); setDraft(prompt); }} /></Sheet> : panel === 'workspace' ? <Suspense key="workspace" fallback={<Dialog title="Workspace & preferences" onClose={closePanel}><DialogDescription>Loading workspace…</DialogDescription></Dialog>}><Workspace chat={chat} notify={notify} onClose={closePanel} onOpenSession={id => { closePanel(); openSession(id); }} onNewProjectChat={projectId => { closePanel(); newChat(); setRunOptions({ projectId }); }} /></Suspense> : panel === 'files' && effectiveFilesSessionId ? <Suspense key={effectiveFilesSessionId} fallback={<Dialog title="Files & outputs" onClose={closePanel}><DialogDescription>Loading files…</DialogDescription></Dialog>}><Artifacts sessionId={effectiveFilesSessionId} request={chat.request} notify={notify} onZoom={setZoom} onClose={closePanel} /></Suspense> : undefined}</AnimatePresence>
     {menuSession && !chat.authError && <SessionMenu key={menuSession.id} target={menuSession} chat={chat} onClose={() => setMenuSession(undefined)} notify={notify} onRename={setRenameTarget} onDelete={setDeleteTarget} onFiles={id => openPanel('files', id)} />}
     <AnimatePresence>{sidechat && <Dialog key="sidechat" title="Ask in side chat" onClose={() => { if (!isStartingSidechat) setSidechat(undefined); }}><blockquote {...stylex.props(styles.sidechatQuote)}>{sidechat.text}</blockquote><label {...stylex.props(styles.sidechatLabel)}>Message<textarea autoFocus rows={3} value={sidechatPrompt} disabled={isStartingSidechat} onChange={event => setSidechatPrompt(event.currentTarget.value)} {...stylex.props(ui.field)} /></label><DialogActions><Button disabled={isStartingSidechat} onClick={() => setSidechat(undefined)}>Cancel</Button><Button variant="primary" disabled={isStartingSidechat || !sidechatPrompt.trim()} onClick={() => { void startSidechat(); }}>{isStartingSidechat ? 'Starting…' : 'Send'}</Button></DialogActions></Dialog>}</AnimatePresence>
     <AnimatePresence>{renameTarget && <RenameConversation key={renameTarget.id} session={renameTarget} chat={chat} onClose={() => setRenameTarget(undefined)} />}</AnimatePresence>

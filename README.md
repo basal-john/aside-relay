@@ -196,8 +196,8 @@ Click any image to view it at full size.
 | Browse generated files | Session options → Files & outputs |
 | Switch between an HTML visual and its code | Source / Preview inside the visual card |
 | Send an email, message, invite or post the agent drafted | Send or Post on the draft card, then tap again to confirm |
-| Watch or control a browser tab | Open the PiP or Drawer → Browser; select a tab and enable Control |
-| Zoom a browser preview | Tap the preview in the browser sheet; use zoom controls, pinch or pan |
+| Watch or control a browser tab | Open the PiP or Drawer → Browser; select a tab to click, scroll, type and use keys |
+| Use a browser fullscreen | Expand browser view keeps page controls active; drag to scroll, use two fingers or zoom buttons to magnify |
 | Manage projects, routines, skills or MCP | Drawer → Settings → Workspace & preferences |
 
 Rename, confirmation, model, appearance and workspace controls use dialogs.
@@ -1219,7 +1219,6 @@ this repository and can change its internal interfaces.
 | Push keys/subscriptions | `~/.aside-relay/web-push/` | Yes; losing the key requires resubscription |
 | Conversations and titles | `~/.aside/u/0/sessions/` | Yes; use the configured account's path |
 | Image attachments | `~/.aside/u/0/uploads/` | Yes |
-| Conversation pins | `<checkout>/cache/conversation-pins.sqlite` | Yes |
 | Browser preferences, draft, PiP position | Client origin's browser storage | Device-specific; a new origin has separate state |
 | Screenshots/media caches, logs, built UI | `cache/shots`, `cache/media`, `logs`, `web/dist` | Regenerable; not required for restoring conversations |
 | Proxy/TLS/tunnel state | Caddy data, certificate files, proxy config, SSH keys, or tunnel credentials | Preserve separately for the chosen route |
@@ -1236,9 +1235,6 @@ chmod 700 "$backup_dir"
 ditto "$HOME/.aside-relay" "$backup_dir/bridge-state"
 ditto "$HOME/.aside/u/0/sessions" "$backup_dir/sessions"
 ditto "$HOME/.aside/u/0/uploads" "$backup_dir/uploads"
-if [ -f cache/conversation-pins.sqlite ]; then
-    ditto cache/conversation-pins.sqlite "$backup_dir/conversation-pins.sqlite"
-fi
 .venv/bin/python scripts/setup.py --install-service
 ```
 

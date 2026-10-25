@@ -2,8 +2,8 @@ import * as stylex from '@stylexjs/stylex';
 import { ExternalLink, Maximize2, Minus, X } from 'lucide-react';
 import { AnimatePresence, motion, useDragControls, useMotionValue, useReducedMotion } from 'motion/react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { getBrowserStreamUrl, getWebsiteUrl, isTabResponse, OPEN_IN_BROWSER_LABEL } from './browser';
-import type { BrowserTab } from './types';
+import { getWebsiteUrl, isTabResponse, OPEN_IN_BROWSER_LABEL } from './browser';
+import type { BrowserTab, UseChat } from './types';
 import { tokens } from './tokens.stylex';
 import { ICON_STROKE } from './ui';
 import { useAutoRefresh } from './useAutoRefresh';
@@ -13,15 +13,13 @@ const POSITION_STORAGE_KEY = 'asideBrowserPreviewPosition';
 
 export function BrowserLive({ sessionId, request, onOpen, isVisible, isBrowserOpen }: {
   sessionId: string;
-  request: (path: string, init?: RequestInit) => Promise<Response>;
+  request: UseChat['request'];
   onOpen: (targetId: string) => void;
   isVisible: boolean;
   isBrowserOpen: boolean;
 }) {
   const [tab, setTab] = useState<BrowserTab>();
-  const [imageUrl, setImageUrl] = useState<string>();
-  const [isStreamUnavailable, setStreamUnavailable] = useState(false);
-  const [isPreviewReady, setPreviewReady] = useState(false);
+  const [frame, setFrame] = useState<{ targetId: string; url: string }>();
   const [isMinimized, setMinimized] = useState(false);
   const [dismissedTarget, setDismissedTarget] = useState<string>();
   const boundsRef = useRef<HTMLDivElement>(null);
@@ -36,9 +34,8 @@ export function BrowserLive({ sessionId, request, onOpen, isVisible, isBrowserOp
   const imageRef = useRef<string | undefined>(undefined);
   const sessionQuery = `&session=${encodeURIComponent(sessionId)}`;
   const targetId = tab?.targetId;
+  const imageUrl = frame?.targetId === targetId ? frame?.url : undefined;
   const websiteUrl = tab && getWebsiteUrl(tab.url);
-  const streamUrl = targetId ? getBrowserStreamUrl(targetId, sessionId) : undefined;
-  const previewSource = !isStreamUnavailable ? streamUrl : imageUrl;
   const shouldShow = !!targetId && dismissedTarget !== targetId;
 
   useEffect(() => {
@@ -104,30 +101,36 @@ export function BrowserLive({ sessionId, request, onOpen, isVisible, isBrowserOp
 
   const capture = useCallback(async (signal: AbortSignal) => {
     if (!targetId) return;
+    let nextUrl: string | undefined;
     try {
       const response = await request(`/api/tabs/${encodeURIComponent(targetId)}/shot?fresh=true${sessionQuery}`, { cache: 'no-store', signal });
       const blob = await response.blob();
       if (signal.aborted) return;
       if (!blob.type.startsWith('image/')) throw new Error('Invalid preview.');
-      const nextUrl = URL.createObjectURL(blob);
+      nextUrl = URL.createObjectURL(blob);
+      const image = new Image();
+      image.src = nextUrl;
+      await image.decode();
+      if (signal.aborted) return;
       const previousUrl = imageRef.current;
       imageRef.current = nextUrl;
-      setImageUrl(nextUrl);
+      setFrame({ targetId, url: nextUrl });
+      nextUrl = undefined;
       if (previousUrl) URL.revokeObjectURL(previousUrl);
     } catch {
       return;
+    } finally {
+      if (nextUrl) URL.revokeObjectURL(nextUrl);
     }
   }, [request, sessionQuery, targetId]);
   useEffect(() => {
-    setImageUrl(undefined);
-    setStreamUnavailable(false);
-    setPreviewReady(false);
+    setFrame(undefined);
     return () => {
       if (imageRef.current) URL.revokeObjectURL(imageRef.current);
       imageRef.current = undefined;
     };
   }, [targetId]);
-  useAutoRefresh(capture, 1_000, isVisible && shouldShow && !isMinimized && isStreamUnavailable && tab?.loaded !== false);
+  useAutoRefresh(capture, 1_000, isVisible && shouldShow && !isMinimized && tab?.loaded !== false);
 
   return <div ref={boundsRef} inert={!isVisible} style={{ visibility: isVisible ? 'visible' : 'hidden' }} {...stylex.props(styles.bounds)}><AnimatePresence>{shouldShow && tab && <motion.div ref={previewRef} role="region" aria-label="Browser preview" {...stylex.props(styles.preview)} style={{ x, y }} initial={{ scale: shouldReduceMotion ? 1 : .92 }} animate={{ scale: 1 }} exit={{ scale: shouldReduceMotion ? 1 : .92 }} transition={{ duration: .18 }} drag dragControls={dragControls} dragListener={false} dragConstraints={boundsRef} dragElastic={0} dragMomentum={false} onDragStart={() => { isDraggingRef.current = true; }} onDragEnd={savePosition}>
     <div {...stylex.props(styles.top)}>
@@ -138,8 +141,8 @@ export function BrowserLive({ sessionId, request, onOpen, isVisible, isBrowserOp
     </div>
     {!isMinimized &&
       <button type="button" aria-label="Expand browser preview" aria-haspopup="dialog" {...stylex.props(styles.frame)} onPointerDown={startDrag} onClick={openPreview}>
-        {previewSource && tab.loaded !== false && <img src={previewSource} alt="" draggable={false} {...stylex.props(styles.image)} onLoad={() => setPreviewReady(true)} onError={() => { setPreviewReady(false); setStreamUnavailable(true) }} />}
-        {tab.loaded === false ? <span {...stylex.props(styles.placeholder)}>Tab asleep</span> : !isPreviewReady && <span role="status" aria-live="polite" {...stylex.props(styles.previewActivity)}><span aria-hidden="true" {...stylex.props(styles.spinner)} /><span {...stylex.props(styles.srOnly)}>Loading browser preview</span></span>}
+        {imageUrl && tab.loaded !== false && <img src={imageUrl} alt="" draggable={false} {...stylex.props(styles.image)} onError={() => setFrame(current => current?.url === imageUrl ? undefined : current)} />}
+        {tab.loaded === false ? <span {...stylex.props(styles.placeholder)}>Tab asleep</span> : !imageUrl && <span role="status" aria-live="polite" {...stylex.props(styles.previewActivity)}><span aria-hidden="true" {...stylex.props(styles.spinner)} /><span {...stylex.props(styles.srOnly)}>Loading browser preview</span></span>}
       </button>
     }
   </motion.div>}</AnimatePresence></div>;

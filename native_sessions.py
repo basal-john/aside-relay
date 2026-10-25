@@ -110,7 +110,14 @@ async def get_native_session(session_id: str, brief: bool = Query(False)):
             _call("sessions.listRuns", {"accountId": ACCOUNT_ID, "sessionId": session_id}),
             _call("sessions.messageRows", {"accountId": ACCOUNT_ID, "sessionId": session_id}),
         ))
-    results = await asyncio.gather(*tasks)
+    pending = [asyncio.create_task(task) for task in tasks]
+    try:
+        results = await asyncio.gather(*pending)
+    except BaseException:
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        raise
     children, outputs, preview_items = results[:3]
     runs, message_rows = results[3:] if not brief else ([], [])
     if isinstance(preview_items, list) and preview_items:
@@ -190,6 +197,10 @@ async def update_native_session(session_id: str, payload: dict):
     await _get_session(session_id)
     if not payload or not set(payload).issubset({"title", "pinned", "projectId"}):
         raise HTTPException(400, "Invalid conversation settings.")
+    project_id = payload.get("projectId")
+    if "projectId" in payload and (project_id is not None and (
+            not isinstance(project_id, str) or not project_id or len(project_id) > 128)):
+        raise HTTPException(400, "Invalid project.")
     update = {"accountId": ACCOUNT_ID, "sessionId": session_id}
     if "title" in payload:
         title = payload["title"]
@@ -204,10 +215,6 @@ async def update_native_session(session_id: str, payload: dict):
     if len(update) > 2:
         result = await _call("sessions.update", update, mutation=True)
     if "projectId" in payload:
-        project_id = payload["projectId"]
-        if project_id is not None and (not isinstance(project_id, str) or not project_id
-                                       or len(project_id) > 128):
-            raise HTTPException(400, "Invalid project.")
         result = await _call("sessions.moveToProject", {
             "accountId": ACCOUNT_ID,
             "sessionId": session_id,

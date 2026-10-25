@@ -2,6 +2,26 @@ import type { BrowserTab } from "./types"
 
 export const OPEN_IN_BROWSER_LABEL = "Open in your browser"
 
+const BROWSER_KEYS = ["Enter", "Tab", "Escape", "Backspace", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "Space"] as const
+const MAX_SCROLL_DELTA = 4_000
+
+export type BrowserControl =
+  | { action: "click"; x: number; y: number }
+  | { action: "scroll"; x: number; y: number; deltaX: number; deltaY: number }
+  | { action: "type"; text: string }
+  | { action: "key"; key: typeof BROWSER_KEYS[number] }
+  | { action: "navigate"; url: string }
+  | { action: "back" | "forward" | "reload" }
+
+export function getBrowserKey(value: string) {
+  const key = value === " " ? "Space" : value
+  return BROWSER_KEYS.find(candidate => candidate === key)
+}
+
+export function browserScrollDelta(value: number) {
+  return Math.max(-MAX_SCROLL_DELTA, Math.min(MAX_SCROLL_DELTA, Math.round(value)))
+}
+
 export type BrowserLibraryItem = {
   id: string
   title: string
@@ -12,7 +32,7 @@ export type BrowserLibraryItem = {
 
 export function getWebsiteUrl(value: string) {
   try {
-    const url = new URL(value)
+    const url = new URL(value.trim())
     if (url.protocol === "https:" || url.protocol === "http:") return url.href
   } catch { }
 }
@@ -35,7 +55,12 @@ export function isTabResponse(value: unknown): value is { tabs: BrowserTab[] } {
   })
 }
 
-export function getBrowserStreamUrl(targetId: string, sessionId?: string, isShowingAll = false, fps = 2) {
+export function getBrowserStreamUrl({ targetId, sessionId, isShowingAll = false, fps = 2 }: {
+  targetId: string
+  sessionId?: string
+  isShowingAll?: boolean
+  fps?: number
+}) {
   const query = new URLSearchParams({ fps: String(fps) })
   if (sessionId) query.set("session", sessionId)
   if (isShowingAll) query.set("all", "true")

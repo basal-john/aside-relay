@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Archive, Bot, Brain, CalendarClock, CircleUserRound, FolderKanban, History, KeyRound, Pause, Play, Plug, Plus, RefreshCw, Save, ShieldCheck, Sparkles, Trash2, Wrench } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { UseChat } from './types';
 import { Button } from './Button';
 import { Dialog, DialogActions, DialogDescription } from './Dialog';
-import { ICON_STROKE, styles as ui } from './ui';
+import { DEFAULT_RECENT_CHAT_LIMIT, ICON_STROKE, styles as ui } from './ui';
 import { tokens } from './tokens.stylex';
+import { isRecord } from './responses';
 
 export type WorkspaceSection = 'projects' | 'routines' | 'memories' | 'contextAwareness' | 'skills' | 'connections' | 'providers' | 'account' | 'preferences';
 
@@ -16,6 +17,19 @@ type WorkspaceData = {
   capabilities: Partial<Record<WorkspaceSection | 'projectInstructions' | 'skillCatalog' | 'skillCustomization' | 'toolPermissions', boolean>>;
   sections: Partial<Record<WorkspaceSection, unknown>>;
 };
+
+function parseWorkspaceData(value: unknown): WorkspaceData {
+  if (!isRecord(value) || typeof value.available !== 'boolean' || !isRecord(value.capabilities) || !isRecord(value.sections)) {
+    throw new Error('Invalid native workspace response.');
+  }
+  const capabilities: WorkspaceData['capabilities'] = {};
+  for (const key of [...SECTION_META.map(section => section.id), 'projectInstructions', 'skillCatalog', 'skillCustomization', 'toolPermissions'] as const) {
+    if (value.capabilities[key] === undefined) continue;
+    if (typeof value.capabilities[key] !== 'boolean') throw new Error('Invalid native workspace capabilities.');
+    capabilities[key] = value.capabilities[key];
+  }
+  return { available: value.available, capabilities, sections: value.sections };
+}
 
 type FormDialog = {
   title: string;
@@ -64,29 +78,35 @@ export function Workspace({ chat, notify, onClose, onOpenSession, onNewProjectCh
   const [isLoading, setLoading] = useState(true);
   const [isMutating, setMutating] = useState(false);
   const [error, setError] = useState('');
+  const [sectionError, setSectionError] = useState<{ section: WorkspaceSection; message: string }>();
   const [form, setForm] = useState<FormDialog>();
+  const refreshRevisionRef = useRef(0);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (signal?: AbortSignal) => {
+    const revision = ++refreshRevisionRef.current;
     setLoading(true);
     try {
-      const response = await chat.request('/api/native/workspace', { cache: 'no-store' });
-      const value = await response.json() as WorkspaceData;
+      const response = await chat.request('/api/native/workspace', { cache: 'no-store', signal });
+      const value = parseWorkspaceData(await response.json());
+      if (signal?.aborted || revision !== refreshRevisionRef.current) return undefined;
       setData(value);
       setError('');
       return value;
     } catch (reason) {
+      if (signal?.aborted || revision !== refreshRevisionRef.current) return undefined;
       setError(reason instanceof Error ? reason.message : 'Could not load the native workspace.');
       return undefined;
     } finally {
-      setLoading(false);
+      if (!signal?.aborted && revision === refreshRevisionRef.current) setLoading(false);
     }
   }, [chat.request]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => { const controller = new AbortController(); void refresh(controller.signal); return () => controller.abort(); }, [refresh]);
 
   useEffect(() => {
     if (!section) return;
     const controller = new AbortController();
+    setSectionError(undefined);
     const slug = section === 'contextAwareness' ? 'context-awareness' : section;
     const load = async () => {
       const response = await chat.request(`/api/native/workspace/${slug}`, { cache: 'no-store', signal: controller.signal });
@@ -96,7 +116,11 @@ export function Workspace({ chat, notify, onClose, onOpenSession, onNewProjectCh
       const historyResponse = await chat.request(`/api/native/workspace/context-awareness/history?from=${from}&to=${to}`, { cache: 'no-store', signal: controller.signal });
       return { ...object(value), history: await historyResponse.json() };
     };
-    void load().then(value => setSectionData(current => ({ ...current, [section]: value }))).catch(() => undefined);
+    void load().then(value => {
+      if (!controller.signal.aborted) setSectionData(current => ({ ...current, [section]: value }));
+    }).catch(reason => {
+      if (!controller.signal.aborted) setSectionError({ section, message: reason instanceof Error ? reason.message : 'Could not load this section.' });
+    });
     return () => controller.abort();
   }, [chat.request, section, sectionRefresh]);
 
@@ -107,9 +131,15 @@ export function Workspace({ chat, notify, onClose, onOpenSession, onNewProjectCh
   }, [form, isMutating, refresh]);
 
   const read = useCallback(async (path: string) => {
-    const response = await chat.request(`/api/native/workspace${path}`, { cache: 'no-store' });
-    return response.json() as Promise<unknown>;
-  }, [chat.request]);
+    try {
+      const response = await chat.request(`/api/native/workspace${path}`, { cache: 'no-store' });
+      const value: unknown = await response.json();
+      return value;
+    } catch {
+      notify('Could not load workspace details.', 'error');
+      return undefined;
+    }
+  }, [chat.request, notify]);
 
   const mutate = useCallback(async ({ path, method = 'POST', body, success }: { path: string; method?: 'POST' | 'PATCH' | 'DELETE'; body?: JsonObject; success: string }) => {
     setMutating(true);
@@ -154,12 +184,12 @@ export function Workspace({ chat, notify, onClose, onOpenSession, onNewProjectCh
   return <Dialog title={selectedMeta?.title ?? 'Workspace & preferences'} description={selectedMeta?.description ?? 'Settings stored by the connected Aside profile.'} back={selected ? { label: 'Back to workspace', onClick: () => setSection(undefined) } : undefined} onClose={onClose}>
     {isLoading && !data ? <div role="status" {...stylex.props(styles.center)}><RefreshCw aria-hidden="true" size={20} strokeWidth={ICON_STROKE} /><span>Loading native workspace…</span></div> : error && !data ? <EmptyState icon={ShieldCheck} title="Workspace unavailable" detail={error} action={<Button onClick={() => void refresh()}>Try again</Button>} /> : !data?.available ? <EmptyState icon={ShieldCheck} title="Native workspace unavailable" detail="Connect to a supported Aside profile to manage native settings." /> : <div {...stylex.props(styles.workspace)}>
     {selected ? <>
-      <SectionContent section={selected} value={sectionData[selected] ?? data.sections[selected]} capabilities={data.capabilities} preferenceReset={preferenceReset} isMutating={isMutating} mutate={mutate} read={read} openForm={setForm} onOpenSession={onOpenSession} onNewProjectChat={onNewProjectChat} />
+      {sectionError?.section === selected ? <EmptyState icon={ShieldCheck} title="Could not load this section" detail={sectionError.message} action={<Button onClick={() => setSectionRefresh(current => current + 1)}>Try again</Button>} /> : <SectionContent section={selected} value={sectionData[selected] ?? data.sections[selected]} capabilities={data.capabilities} preferenceReset={preferenceReset} isMutating={isMutating} mutate={mutate} read={read} openForm={setForm} onOpenSession={onOpenSession} onNewProjectChat={onNewProjectChat} />}
     </> : <>
       <div {...stylex.props(styles.grid)}>{availableSections.map(item => <SectionTile key={item.id} {...item} value={data.sections[item.id]} onClick={() => setSection(item.id)} />)}</div>
       {!availableSections.length ? <EmptyState icon={ShieldCheck} title="No native controls available" detail="This Aside version did not report any supported workspace capabilities." /> : undefined}
     </>}
-    {form ? <EditDialog form={form} isSaving={isMutating} onClose={() => setForm(undefined)} /> : undefined}
+    {form ? <EditDialog form={form} isSaving={isMutating} onClose={() => setForm(undefined)} onError={() => notify('The change could not be saved.', 'error')} /> : undefined}
   </div>}
   </Dialog>;
 }
@@ -193,147 +223,1280 @@ function SectionContent({ section, value, capabilities, preferenceReset, isMutat
   return <Preferences key={preferenceReset} {...props} />;
 }
 
-function Projects({ value, isMutating, mutate, read, openForm, canEditInstructions, onOpenSession, onNewProjectChat }: SectionProps & { canEditInstructions: boolean; onOpenSession?: (sessionId: string) => void; onNewProjectChat?: (projectId: string) => void }) {
+function Projects({
+  value,
+  isMutating,
+  mutate,
+  read,
+  openForm,
+  canEditInstructions,
+  onOpenSession,
+  onNewProjectChat
+}: SectionProps & {
+  canEditInstructions: boolean;
+  onOpenSession?: (sessionId: string) => void;
+  onNewProjectChat?: (projectId: string) => void;
+}) {
   const items = itemArray(value);
-  return <SectionList actionLabel="New project" onAction={() => openForm(projectForm())} empty="No projects"><div {...stylex.props(styles.list)}>{items.map(item => {
-    const id = itemId(item, 'projectId'); const isArchived = bool(item.archived) || Boolean(item.archivedAt);
-    return <ResourceCard key={id} title={label(item)} detail={text(item.workspacePath) || text(item.workingDirectory) || text(item.path) || text(item.instructions)} badge={isArchived ? 'Archived' : undefined}>
-      <CardActions><Button size="compact" onClick={() => openForm(projectForm(item, values => mutate({ path: `/projects/${encodeURIComponent(id)}`, method: 'PATCH', body: values, success: 'Project updated.' })))}>Edit</Button>{canEditInstructions ? <Button size="compact" onClick={() => void read(`/projects/${encodeURIComponent(id)}/instructions`).then(result => { const instructions = object(result); openForm({ title: `${label(item)} instructions`, description: 'Instructions saved as AGENTS.md in the project workspace.', submitLabel: 'Save instructions', fields: [{ key: 'content', label: 'Instructions', value: text(instructions.content), kind: 'textarea' }], onSubmit: values => mutate({ path: `/projects/${encodeURIComponent(id)}/instructions`, method: 'PATCH', body: { content: values.content }, success: 'Project instructions updated.' }) }); })}>Instructions</Button> : undefined}{onNewProjectChat && !isArchived ? <Button size="compact" variant="primary" onClick={() => onNewProjectChat(id)}>New chat</Button> : undefined}{text(item.sessionId) && onOpenSession ? <Button size="compact" onClick={() => onOpenSession(text(item.sessionId))}>Open chat</Button> : undefined}{!isArchived ? <Button size="compact" disabled={isMutating} onClick={() => void mutate({ path: `/projects/${encodeURIComponent(id)}/archive`, success: 'Project archived.' })}><Archive size={15} />Archive</Button> : undefined}<Button size="compact" variant="danger" disabled={isMutating} onClick={() => openForm(confirmForm('Delete project?', 'The project entry will be removed.', () => mutate({ path: `/projects/${encodeURIComponent(id)}`, method: 'DELETE', success: 'Project deleted.' })))}><Trash2 size={15} />Delete</Button></CardActions>
-    </ResourceCard>;
-  })}</div></SectionList>;
+  return (
+    <SectionList actionLabel="New project" onAction={() => openForm(projectForm())} empty="No projects">
+      <div {...stylex.props(styles.list)}>{items.map(renderProject)}</div>
+    </SectionList>
+  );
+
+  async function editInstructions(item: JsonObject) {
+    const id = itemId(item, 'projectId');
+    const result = await read(`/projects/${encodeURIComponent(id)}/instructions`);
+    if (result === undefined) return;
+    const instructions = object(result);
+    openForm({
+      title: `${label(item)} instructions`,
+      description: 'Instructions saved as AGENTS.md in the project workspace.',
+      submitLabel: 'Save instructions',
+      fields: [{ key: 'content', label: 'Instructions', value: text(instructions.content), kind: 'textarea' }],
+      onSubmit: (values) =>
+        mutate({
+          path: `/projects/${encodeURIComponent(id)}/instructions`,
+          method: 'PATCH',
+          body: { content: values.content },
+          success: 'Project instructions updated.'
+        })
+    });
+  }
 
   function projectForm(item?: JsonObject, submit?: FormDialog['onSubmit']): FormDialog {
-    return { title: item ? 'Edit project' : 'New project', description: 'Set the local working folder for this project.', submitLabel: item ? 'Save project' : 'Create project', fields: [
-      { key: 'name', label: 'Name', value: text(item?.name) || text(item?.title), required: true },
-      { key: 'workspacePath', label: 'Working directory', value: text(item?.workspacePath) || text(item?.workingDirectory) || text(item?.path), placeholder: '/Users/me/project', required: true },
-    ], onSubmit: submit ?? (values => mutate({ path: '/projects', body: values, success: 'Project created.' })) };
+    return {
+      title: item ? 'Edit project' : 'New project',
+      description: 'Set the local working folder for this project.',
+      submitLabel: item ? 'Save project' : 'Create project',
+      fields: [
+        { key: 'name', label: 'Name', value: text(item?.name) || text(item?.title), required: true },
+        {
+          key: 'workspacePath',
+          label: 'Working directory',
+          value: text(item?.workspacePath) || text(item?.workingDirectory) || text(item?.path),
+          placeholder: '/Users/me/project',
+          required: true
+        }
+      ],
+      onSubmit: submit ?? ((values) => mutate({ path: '/projects', body: values, success: 'Project created.' }))
+    };
+  }
+
+  function renderProject(item: JsonObject) {
+    const id = itemId(item, 'projectId');
+    const isArchived = bool(item.archived) || Boolean(item.archivedAt);
+    return (
+      <ResourceCard
+        key={id}
+        title={label(item)}
+        detail={text(item.workspacePath) || text(item.workingDirectory) || text(item.path) || text(item.instructions)}
+        badge={isArchived ? 'Archived' : undefined}
+      >
+        <CardActions>
+          <Button
+            size="compact"
+            onClick={() =>
+              openForm(
+                projectForm(item, (values) =>
+                  mutate({
+                    path: `/projects/${encodeURIComponent(id)}`,
+                    method: 'PATCH',
+                    body: values,
+                    success: 'Project updated.'
+                  })
+                )
+              )
+            }
+          >
+            Edit
+          </Button>
+          {canEditInstructions ? (
+            <Button size="compact" onClick={() => void editInstructions(item)}>
+              Instructions
+            </Button>
+          ) : undefined}
+          {onNewProjectChat && !isArchived ? (
+            <Button size="compact" variant="primary" onClick={() => onNewProjectChat(id)}>
+              New chat
+            </Button>
+          ) : undefined}
+          {text(item.sessionId) && onOpenSession ? (
+            <Button size="compact" onClick={() => onOpenSession(text(item.sessionId))}>
+              Open chat
+            </Button>
+          ) : undefined}
+          {!isArchived ? (
+            <Button
+              size="compact"
+              disabled={isMutating}
+              onClick={() =>
+                void mutate({ path: `/projects/${encodeURIComponent(id)}/archive`, success: 'Project archived.' })
+              }
+            >
+              <Archive size={15} />
+              Archive
+            </Button>
+          ) : undefined}
+          <Button
+            size="compact"
+            variant="danger"
+            disabled={isMutating}
+            onClick={() =>
+              openForm(
+                confirmForm('Delete project?', 'The project entry will be removed.', () =>
+                  mutate({ path: `/projects/${encodeURIComponent(id)}`, method: 'DELETE', success: 'Project deleted.' })
+                )
+              )
+            }
+          >
+            <Trash2 size={15} />
+            Delete
+          </Button>
+        </CardActions>
+      </ResourceCard>
+    );
   }
 }
 
 function Routines({ value, isMutating, mutate, read, openForm }: SectionProps) {
   const items = itemArray(value);
   const [histories, setHistories] = useState<Record<string, JsonObject[]>>({});
-  return <SectionList actionLabel="New routine" onAction={() => openForm(routineForm())} empty="No routines"><div {...stylex.props(styles.list)}>{items.map(item => {
-    const id = itemId(item, 'routineId'); const isPaused = bool(item.paused) || text(item.status) === 'paused';
-    return <ResourceCard key={id} title={label(item)} detail={[text(item.schedule), text(item.lastRunAt) ? `Last run ${dateText(item.lastRunAt)}` : ''].filter(Boolean).join(' · ')} badge={isPaused ? 'Paused' : text(item.status)}>
-      {text(item.prompt) ? <p {...stylex.props(styles.body)}>{text(item.prompt)}</p> : undefined}
-      <CardActions><Button size="compact" onClick={() => openForm(routineForm(item))}>Edit</Button><Button size="compact" disabled={isMutating} onClick={() => void mutate({ path: `/routines/${encodeURIComponent(id)}/run`, success: 'Routine started.' })}><Play size={15} />Run now</Button><Button size="compact" disabled={isMutating} onClick={() => void mutate({ path: `/routines/${encodeURIComponent(id)}/${isPaused ? 'resume' : 'pause'}`, success: isPaused ? 'Routine resumed.' : 'Routine paused.' })}>{isPaused ? <Play size={15} /> : <Pause size={15} />}{isPaused ? 'Resume' : 'Pause'}</Button><Button size="compact" onClick={() => void read(`/routines/${encodeURIComponent(id)}/history`).then(result => setHistories(current => ({ ...current, [id]: itemArray(result) })))}><History size={15} />History</Button><Button size="compact" variant="danger" onClick={() => openForm(confirmForm('Delete routine?', 'Its run history will no longer be available here.', () => mutate({ path: `/routines/${encodeURIComponent(id)}`, method: 'DELETE', success: 'Routine deleted.' })))}>Delete</Button></CardActions>
-      {histories[id] ? <div {...stylex.props(styles.history)}>{histories[id].length ? histories[id].map(run => <div key={itemId(run)} {...stylex.props(styles.historyRow)}><span>{label(run)}</span><span {...stylex.props(ui.muted)}>{dateText(run.updatedAt) || text(run.status)}</span></div>) : <span {...stylex.props(ui.muted)}>No runs yet.</span>}</div> : undefined}
-    </ResourceCard>;
-  })}</div></SectionList>;
+  return (
+    <SectionList actionLabel="New routine" onAction={() => openForm(routineForm())} empty="No routines">
+      <div {...stylex.props(styles.list)}>{items.map(renderRoutine)}</div>
+    </SectionList>
+  );
+
+  async function loadHistory(id: string) {
+    const result = await read(`/routines/${encodeURIComponent(id)}/history`);
+    if (result !== undefined) setHistories((current) => ({ ...current, [id]: itemArray(result) }));
+  }
 
   function routineForm(item?: JsonObject): FormDialog {
-    const config = object(item?.sessionConfig); const model = object(config.model);
-    return { title: item ? 'Edit routine' : 'New routine', description: 'Schedule a prompt using the connected Aside profile.', submitLabel: item ? 'Save routine' : 'Create routine', fields: [
-      { key: 'name', label: 'Name', value: text(item?.name) || text(item?.title), required: true }, { key: 'prompt', label: 'Prompt', value: text(item?.prompt), kind: 'textarea', required: true }, { key: 'rrule', label: 'Schedule rule', value: text(item?.rrule) || text(item?.schedule), placeholder: 'FREQ=DAILY;BYHOUR=9', required: true }, ...(item ? [] : [
-        { key: 'environment', label: 'Run on', value: 'device', kind: 'select' as const, options: [{ value: 'device', label: 'This device' }, { value: 'cloud', label: 'Cloud' }] },
-        { key: 'modelProvider', label: 'Model provider', value: text(model.provider) || 'openai-codex', required: true }, { key: 'modelId', label: 'Model', value: text(model.modelId) || 'gpt-6.1-sol', required: true }, { key: 'thinkingLevel', label: 'Thinking level', value: text(model.thinkingLevel) || 'high' }, { key: 'permissionMode', label: 'Permission', value: text(config.permissionMode) || 'guard' }, { key: 'notificationsEnabled', label: 'Notify when finished', value: true, kind: 'checkbox' as const },
-      ]),
-    ], onSubmit: values => item ? mutate({ path: `/routines/${encodeURIComponent(itemId(item, 'routineId'))}`, method: 'PATCH', body: { name: values.name, prompt: values.prompt, rrule: values.rrule }, success: 'Routine updated.' }) : mutate({ path: '/routines', body: { name: values.name, prompt: values.prompt, rrule: values.rrule, environment: values.environment, sessionConfig: { model: { provider: values.modelProvider, modelId: values.modelId, thinkingLevel: values.thinkingLevel, fastMode: false }, permissionMode: values.permissionMode, notificationsEnabled: values.notificationsEnabled } }, success: 'Routine created.' }) };
+    const config = object(item?.sessionConfig);
+    const model = object(config.model);
+    return {
+      title: item ? 'Edit routine' : 'New routine',
+      description: 'Schedule a prompt using the connected Aside profile.',
+      submitLabel: item ? 'Save routine' : 'Create routine',
+      fields: [
+        { key: 'name', label: 'Name', value: text(item?.name) || text(item?.title), required: true },
+        { key: 'prompt', label: 'Prompt', value: text(item?.prompt), kind: 'textarea', required: true },
+        {
+          key: 'rrule',
+          label: 'Schedule rule',
+          value: text(item?.rrule) || text(item?.schedule),
+          placeholder: 'FREQ=DAILY;BYHOUR=9',
+          required: true
+        },
+        ...(item
+          ? []
+          : [
+              {
+                key: 'environment',
+                label: 'Run on',
+                value: 'device',
+                kind: 'select' as const,
+                options: [
+                  { value: 'device', label: 'This device' },
+                  { value: 'cloud', label: 'Cloud' }
+                ]
+              },
+              {
+                key: 'modelProvider',
+                label: 'Model provider',
+                value: text(model.provider) || 'openai-codex',
+                required: true
+              },
+              { key: 'modelId', label: 'Model', value: text(model.modelId) || 'gpt-6.1-sol', required: true },
+              { key: 'thinkingLevel', label: 'Thinking level', value: text(model.thinkingLevel) || 'high' },
+              { key: 'permissionMode', label: 'Permission', value: text(config.permissionMode) || 'guard' },
+              { key: 'notificationsEnabled', label: 'Notify when finished', value: true, kind: 'checkbox' as const }
+            ])
+      ],
+      onSubmit: (values) =>
+        item
+          ? mutate({
+              path: `/routines/${encodeURIComponent(itemId(item, 'routineId'))}`,
+              method: 'PATCH',
+              body: { name: values.name, prompt: values.prompt, rrule: values.rrule },
+              success: 'Routine updated.'
+            })
+          : mutate({
+              path: '/routines',
+              body: {
+                name: values.name,
+                prompt: values.prompt,
+                rrule: values.rrule,
+                environment: values.environment,
+                sessionConfig: {
+                  model: {
+                    provider: values.modelProvider,
+                    modelId: values.modelId,
+                    thinkingLevel: values.thinkingLevel,
+                    fastMode: false
+                  },
+                  permissionMode: values.permissionMode,
+                  notificationsEnabled: values.notificationsEnabled
+                }
+              },
+              success: 'Routine created.'
+            })
+    };
+  }
+
+  function renderRoutine(item: JsonObject) {
+    const id = itemId(item, 'routineId');
+    const isPaused = bool(item.paused) || text(item.status) === 'paused';
+    return (
+      <ResourceCard
+        key={id}
+        title={label(item)}
+        detail={[text(item.schedule), text(item.lastRunAt) ? `Last run ${dateText(item.lastRunAt)}` : '']
+          .filter(Boolean)
+          .join(' · ')}
+        badge={isPaused ? 'Paused' : text(item.status)}
+      >
+        {text(item.prompt) ? <p {...stylex.props(styles.body)}>{text(item.prompt)}</p> : undefined}
+        <CardActions>
+          <Button size="compact" onClick={() => openForm(routineForm(item))}>
+            Edit
+          </Button>
+          <Button
+            size="compact"
+            disabled={isMutating}
+            onClick={() =>
+              void mutate({ path: `/routines/${encodeURIComponent(id)}/run`, success: 'Routine started.' })
+            }
+          >
+            <Play size={15} />
+            Run now
+          </Button>
+          <Button
+            size="compact"
+            disabled={isMutating}
+            onClick={() =>
+              void mutate({
+                path: `/routines/${encodeURIComponent(id)}/${isPaused ? 'resume' : 'pause'}`,
+                success: isPaused ? 'Routine resumed.' : 'Routine paused.'
+              })
+            }
+          >
+            {isPaused ? <Play size={15} /> : <Pause size={15} />}
+            {isPaused ? 'Resume' : 'Pause'}
+          </Button>
+          <Button size="compact" onClick={() => void loadHistory(id)}>
+            <History size={15} />
+            History
+          </Button>
+          <Button
+            size="compact"
+            variant="danger"
+            onClick={() =>
+              openForm(
+                confirmForm('Delete routine?', 'Its run history will no longer be available here.', () =>
+                  mutate({ path: `/routines/${encodeURIComponent(id)}`, method: 'DELETE', success: 'Routine deleted.' })
+                )
+              )
+            }
+          >
+            Delete
+          </Button>
+        </CardActions>
+        {histories[id] ? (
+          <div {...stylex.props(styles.history)}>
+            {histories[id].length ? (
+              histories[id].map((run) => (
+                <div key={itemId(run)} {...stylex.props(styles.historyRow)}>
+                  <span>{label(run)}</span>
+                  <span {...stylex.props(ui.muted)}>{dateText(run.updatedAt) || text(run.status)}</span>
+                </div>
+              ))
+            ) : (
+              <span {...stylex.props(ui.muted)}>No runs yet.</span>
+            )}
+          </div>
+        ) : undefined}
+      </ResourceCard>
+    );
   }
 }
 
 function Memories({ value, isMutating, mutate, read, openForm }: SectionProps) {
-  const root = object(value); const items = itemArray(root.items ?? root.files ?? value); const preferences = object(root.preferences);
+  const root = object(value);
+  const items = itemArray(root.items ?? root.files ?? value);
+  const preferences = object(root.preferences);
   const editMemory = async (item: JsonObject) => {
     const path = text(item.path);
     const result = await read(`/memories/file?path=${encodeURIComponent(path)}`);
+    if (result === undefined) return;
     const memory = object(result);
     openForm({
-      title: 'Edit memory', description: path, submitLabel: 'Save memory',
-      fields: [{ key: 'content', label: 'Memory', value: text(memory.content) || text(result), kind: 'textarea', required: true }],
-      onSubmit: values => mutate({ path: '/memories/file', method: 'PATCH', body: { path, content: values.content }, success: 'Memory updated.' }),
+      title: 'Edit memory',
+      description: path,
+      submitLabel: 'Save memory',
+      fields: [
+        {
+          key: 'content',
+          label: 'Memory',
+          value: text(memory.content) || text(result),
+          kind: 'textarea',
+          required: true
+        }
+      ],
+      onSubmit: (values) =>
+        mutate({
+          path: '/memories/file',
+          method: 'PATCH',
+          body: { path, content: values.content },
+          success: 'Memory updated.'
+        })
     });
   };
-  const editPreferences = () => openForm({
-    title: 'Memory preferences', description: 'Choose how long Aside keeps generated memories.', submitLabel: 'Save preferences',
-    fields: [{ key: 'enabled', label: 'Use memory', value: bool(preferences.enabled), kind: 'checkbox' }, { key: 'episodicRetentionDays', label: 'Retention days', value: text(preferences.episodicRetentionDays), kind: 'number', placeholder: '90' }, { key: 'dreamingMinHours', label: 'Minimum hours before memory generation', value: text(preferences.dreamingMinHours), kind: 'number' }, { key: 'dreamingMinSessions', label: 'Minimum sessions before memory generation', value: text(preferences.dreamingMinSessions), kind: 'number' }],
-    onSubmit: values => mutate({ path: '/memories/preferences', method: 'PATCH', body: { enabled: values.enabled, episodicRetentionDays: numeric(values.episodicRetentionDays), dreamingMinHours: numeric(values.dreamingMinHours), dreamingMinSessions: numeric(values.dreamingMinSessions) }, success: 'Memory preferences updated.' }),
-  });
-  return <SectionList actionLabel="Retention" onAction={editPreferences} empty="No saved memories"><div {...stylex.props(styles.list)}>{items.map(item => { const path = text(item.path); return <ResourceCard key={itemId(item, 'path')} title={label(item)} detail={[path, dateText(item.lastUpdatedAt)].filter(Boolean).join(' · ')}><CardActions><Button size="compact" onClick={() => void editMemory(item)}>Edit</Button></CardActions></ResourceCard>; })}</div></SectionList>;
+  const editPreferences = () =>
+    openForm({
+      title: 'Memory preferences',
+      description: 'Choose how long Aside keeps generated memories.',
+      submitLabel: 'Save preferences',
+      fields: [
+        { key: 'enabled', label: 'Use memory', value: bool(preferences.enabled), kind: 'checkbox' },
+        {
+          key: 'episodicRetentionDays',
+          label: 'Retention days',
+          value: text(preferences.episodicRetentionDays),
+          kind: 'number',
+          placeholder: '90'
+        },
+        {
+          key: 'dreamingMinHours',
+          label: 'Minimum hours before memory generation',
+          value: text(preferences.dreamingMinHours),
+          kind: 'number'
+        },
+        {
+          key: 'dreamingMinSessions',
+          label: 'Minimum sessions before memory generation',
+          value: text(preferences.dreamingMinSessions),
+          kind: 'number'
+        }
+      ],
+      onSubmit: (values) =>
+        mutate({
+          path: '/memories/preferences',
+          method: 'PATCH',
+          body: {
+            enabled: values.enabled,
+            episodicRetentionDays: numeric(values.episodicRetentionDays),
+            dreamingMinHours: numeric(values.dreamingMinHours),
+            dreamingMinSessions: numeric(values.dreamingMinSessions)
+          },
+          success: 'Memory preferences updated.'
+        })
+    });
+  return (
+    <SectionList actionLabel="Retention" onAction={editPreferences} empty="No saved memories">
+      <div {...stylex.props(styles.list)}>
+        {items.map((item) => {
+          const path = text(item.path);
+          return (
+            <ResourceCard
+              key={itemId(item, 'path')}
+              title={label(item)}
+              detail={[path, dateText(item.lastUpdatedAt)].filter(Boolean).join(' · ')}
+            >
+              <CardActions>
+                <Button size="compact" onClick={() => void editMemory(item)}>
+                  Edit
+                </Button>
+              </CardActions>
+            </ResourceCard>
+          );
+        })}
+      </div>
+    </SectionList>
+  );
 }
 
 function ContextAwareness({ value, isMutating, mutate, openForm }: SectionProps) {
-  const state = object(value); const settings = object(state.settings); const status = object(state.status); const history = itemArray(state.history);
-  const [optimistic, setOptimistic] = useState(() => ({ enabled: bool(settings.enabled), captureTypedText: bool(settings.captureTypedText), screenOcr: bool(settings.screenOcr), pausedUntil: Number(settings.pausedUntil) || 0 }));
-  useEffect(() => { setOptimistic({ enabled: bool(settings.enabled), captureTypedText: bool(settings.captureTypedText), screenOcr: bool(settings.screenOcr), pausedUntil: Number(settings.pausedUntil) || 0 }); }, [settings.enabled, settings.captureTypedText, settings.screenOcr, settings.pausedUntil]);
+  const state = object(value);
+  const settings = object(state.settings);
+  const status = object(state.status);
+  const history = itemArray(state.history);
+  const [optimistic, setOptimistic] = useState(contextDraft);
+  useEffect(() => {
+    setOptimistic(contextDraft());
+  }, [settings.enabled, settings.captureTypedText, settings.screenOcr, settings.pausedUntil]);
   const isPaused = optimistic.pausedUntil > Date.now();
   const update = async (key: keyof typeof optimistic, next: boolean | number, success: string) => {
-    const previous = optimistic[key]; setOptimistic(current => ({ ...current, [key]: next }));
-    const didSave = await mutate({ path: '/context-awareness', method: 'PATCH', body: { [key]: key === 'pausedUntil' && next === 0 ? null : next }, success });
-    if (!didSave) setOptimistic(current => ({ ...current, [key]: previous }));
+    const previous = optimistic[key];
+    setOptimistic((current) => ({ ...current, [key]: next }));
+    const didSave = await mutate({
+      path: '/context-awareness',
+      method: 'PATCH',
+      body: { [key]: key === 'pausedUntil' && next === 0 ? null : next },
+      success
+    });
+    if (!didSave) setOptimistic((current) => ({ ...current, [key]: previous }));
   };
-  return <div {...stylex.props(styles.stack)}><ResourceCard title="Capture controls" detail={text(status.state) ? `Status: ${text(status.state)}` : 'Nothing is enabled automatically. You control capture and exclusions.'}><SwitchRow label="Context awareness" detail="Allow supported native context capture" checked={optimistic.enabled} disabled={isMutating} onChange={enabled => void update('enabled', enabled, enabled ? 'Context awareness enabled.' : 'Context awareness disabled.')} /><SwitchRow label="Pause capture for 24 hours" detail="Temporarily stop new captures" checked={isPaused} disabled={isMutating || !optimistic.enabled} onChange={paused => void update('pausedUntil', paused ? Date.now() + 86_400_000 : 0, paused ? 'Capture paused.' : 'Capture resumed.')} /><SwitchRow label="Capture typed text" checked={optimistic.captureTypedText} disabled={isMutating || !optimistic.enabled} onChange={captureTypedText => void update('captureTypedText', captureTypedText, 'Typed-text capture updated.')} /><SwitchRow label="Screen text recognition" checked={optimistic.screenOcr} disabled={isMutating || !optimistic.enabled} onChange={screenOcr => void update('screenOcr', screenOcr, 'Screen text recognition updated.')} /><CardActions><Button size="compact" onClick={() => openForm({ title: 'Excluded apps and sites', description: 'Enter app:com.example.App or site:example.com on separate lines.', submitLabel: 'Save exclusions', fields: [{ key: 'rules', label: 'Exclusions', value: ruleList(settings.rules).join('\n'), kind: 'textarea' }], onSubmit: values => mutate({ path: '/context-awareness', method: 'PATCH', body: { rules: String(values.rules).split('\n').map(pattern => pattern.trim()).filter(Boolean).map(pattern => contextRule(pattern)) }, success: 'Exclusions updated.' }) })}>Edit exclusions</Button></CardActions></ResourceCard><SectionList title="Capture history" empty="No capture history"><div {...stylex.props(styles.list)}>{history.map(item => <ResourceCard key={itemId(item)} title={label(item)} detail={[text(item.application), text(item.url), dateText(item.createdAt)].filter(Boolean).join(' · ')} />)}</div>{history.length ? <CardActions><Button size="compact" variant="danger" onClick={() => openForm(confirmForm('Clear capture history?', 'Previously captured context will be removed from history.', () => mutate({ path: '/context-awareness/history', method: 'DELETE', body: { target: { kind: 'all' } }, success: 'Capture history cleared.' })))}>Clear history</Button></CardActions> : undefined}</SectionList></div>;
+  return (
+    <div {...stylex.props(styles.stack)}>
+      <ResourceCard
+        title="Capture controls"
+        detail={
+          text(status.state)
+            ? `Status: ${text(status.state)}`
+            : 'Nothing is enabled automatically. You control capture and exclusions.'
+        }
+      >
+        <SwitchRow
+          label="Context awareness"
+          detail="Allow supported native context capture"
+          checked={optimistic.enabled}
+          disabled={isMutating}
+          onChange={(enabled) =>
+            void update('enabled', enabled, enabled ? 'Context awareness enabled.' : 'Context awareness disabled.')
+          }
+        />
+        <SwitchRow
+          label="Pause capture for 24 hours"
+          detail="Temporarily stop new captures"
+          checked={isPaused}
+          disabled={isMutating || !optimistic.enabled}
+          onChange={(paused) =>
+            void update(
+              'pausedUntil',
+              paused ? Date.now() + 86_400_000 : 0,
+              paused ? 'Capture paused.' : 'Capture resumed.'
+            )
+          }
+        />
+        <SwitchRow
+          label="Capture typed text"
+          checked={optimistic.captureTypedText}
+          disabled={isMutating || !optimistic.enabled}
+          onChange={(captureTypedText) =>
+            void update('captureTypedText', captureTypedText, 'Typed-text capture updated.')
+          }
+        />
+        <SwitchRow
+          label="Screen text recognition"
+          checked={optimistic.screenOcr}
+          disabled={isMutating || !optimistic.enabled}
+          onChange={(screenOcr) => void update('screenOcr', screenOcr, 'Screen text recognition updated.')}
+        />
+        <CardActions>
+          <Button size="compact" onClick={openExclusions}>
+            Edit exclusions
+          </Button>
+        </CardActions>
+      </ResourceCard>
+      <SectionList title="Capture history" empty="No capture history">
+        <div {...stylex.props(styles.list)}>
+          {history.map((item) => (
+            <ResourceCard
+              key={itemId(item)}
+              title={label(item)}
+              detail={[text(item.application), text(item.url), dateText(item.createdAt)].filter(Boolean).join(' · ')}
+            />
+          ))}
+        </div>
+        {history.length ? (
+          <CardActions>
+            <Button size="compact" variant="danger" onClick={openClearHistory}>
+              Clear history
+            </Button>
+          </CardActions>
+        ) : undefined}
+      </SectionList>
+    </div>
+  );
+
+  function openExclusions() {
+    openForm({
+      title: 'Excluded apps and sites',
+      description: 'Enter app:com.example.App or site:example.com on separate lines.',
+      submitLabel: 'Save exclusions',
+      fields: [{ key: 'rules', label: 'Exclusions', value: ruleList(settings.rules).join('\n'), kind: 'textarea' }],
+      onSubmit: (values) =>
+        mutate({
+          path: '/context-awareness',
+          method: 'PATCH',
+          body: {
+            rules: String(values.rules)
+              .split('\n')
+              .map((pattern) => pattern.trim())
+              .filter(Boolean)
+              .map((pattern) => contextRule(pattern))
+          },
+          success: 'Exclusions updated.'
+        })
+    });
+  }
+
+  function openClearHistory() {
+    openForm(
+      confirmForm('Clear capture history?', 'Previously captured context will be removed from history.', () =>
+        mutate({
+          path: '/context-awareness/history',
+          method: 'DELETE',
+          body: { target: { kind: 'all' } },
+          success: 'Capture history cleared.'
+        })
+      )
+    );
+  }
+
+  function contextDraft() {
+    return {
+      enabled: bool(settings.enabled),
+      captureTypedText: bool(settings.captureTypedText),
+      screenOcr: bool(settings.screenOcr),
+      pausedUntil: Number(settings.pausedUntil) || 0
+    };
+  }
+
 }
 
-function Skills({ value, isMutating, mutate, read, openForm, canViewCatalog, canCustomize }: SectionProps & { canViewCatalog: boolean; canCustomize: boolean }) {
+function Skills({
+  value,
+  isMutating,
+  mutate,
+  read,
+  openForm,
+  canViewCatalog,
+  canCustomize
+}: SectionProps & { canViewCatalog: boolean; canCustomize: boolean }) {
   const items = itemArray(value);
   const [catalog, setCatalog] = useState<JsonObject>();
-  useEffect(() => { if (canViewCatalog) void read('/skills/catalog').then(result => setCatalog(object(result))).catch(() => undefined); }, [canViewCatalog, read]);
+  useEffect(() => {
+    if (canViewCatalog)
+      void read('/skills/catalog').then((result) => {
+        if (result !== undefined) setCatalog(object(result));
+      });
+  }, [canViewCatalog, read]);
   const editSkill = async (item: JsonObject) => {
-    const path = text(item.path) || text(item.skillPath) || itemId(item); const projectId = text(item.projectId);
-    const result = await read(`/skills/${encodeURIComponent(path)}${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`);
+    const path = text(item.path) || text(item.skillPath) || itemId(item);
+    const projectId = text(item.projectId);
+    const result = await read(
+      `/skills/${encodeURIComponent(path)}${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`
+    );
+    if (result === undefined) return;
     openForm(skillForm({ ...item, ...object(result) }));
   };
-  return <SectionList actionLabel="Add skill" onAction={() => openForm(skillForm())} secondaryAction={<Button size="compact" onClick={() => openForm({ title: 'Import skill', description: 'Import a skill from a local folder.', submitLabel: 'Import', fields: [{ key: 'sourcePath', label: 'Source folder', placeholder: '/Users/me/skill', required: true }, { key: 'projectId', label: 'Project ID (optional)' }], onSubmit: values => mutate({ path: '/skills/import', body: values, success: 'Skill imported.' }) })}>Import</Button>} empty="No skills"><div {...stylex.props(styles.list)}>{items.map(item => {
-    const path = text(item.path) || text(item.skillPath) || itemId(item); const isWritable = text(item.group) === 'user' || bool(item.writable);
-    return <ResourceCard key={path} title={label(item)} detail={path} badge={bool(item.enabled) ? 'Enabled' : undefined}><p {...stylex.props(styles.body)}>{text(item.description)}</p><CardActions>{isWritable ? <><Button size="compact" onClick={() => void editSkill(item)}>Edit</Button><Button size="compact" variant="danger" disabled={isMutating} onClick={() => openForm(confirmForm('Delete skill?', 'The selected skill will be removed.', () => mutate({ path: `/skills/${encodeURIComponent(path)}`, method: 'DELETE', success: 'Skill deleted.' })))}>Delete</Button></> : canCustomize ? <Button size="compact" disabled={isMutating} onClick={() => void mutate({ path: `/skills/${encodeURIComponent(path)}/copy`, body: { projectId: item.projectId ?? null }, success: 'Skill copied for customization.' })}>Customize</Button> : undefined}</CardActions></ResourceCard>;
-  })}</div>{catalog ? <div {...stylex.props(styles.catalog)}><h4 {...stylex.props(styles.listTitle)}>Local catalog</h4>{Object.entries(object(catalog.groups)).map(([group, skills]) => { const entries = itemArray(skills); return <div key={group} {...stylex.props(styles.catalogGroup)}><div {...stylex.props(styles.catalogRow)}><span>{humanize(group)}</span><span {...stylex.props(ui.muted)}>{entries.length}</span></div>{entries.length ? <div {...stylex.props(styles.chips)}>{entries.map(skill => <span key={itemId(skill)} {...stylex.props(styles.chip)}>{label(skill)}</span>)}</div> : undefined}</div>; })}</div> : undefined}</SectionList>;
+  return (
+    <SectionList
+      actionLabel="Add skill"
+      onAction={() => openForm(skillForm())}
+      secondaryAction={
+        <Button
+          size="compact"
+          onClick={() =>
+            openForm({
+              title: 'Import skill',
+              description: 'Import a skill from a local folder.',
+              submitLabel: 'Import',
+              fields: [
+                { key: 'sourcePath', label: 'Source folder', placeholder: '/Users/me/skill', required: true },
+                { key: 'projectId', label: 'Project ID (optional)' }
+              ],
+              onSubmit: (values) => mutate({ path: '/skills/import', body: values, success: 'Skill imported.' })
+            })
+          }
+        >
+          Import
+        </Button>
+      }
+      empty="No skills"
+    >
+      <div {...stylex.props(styles.list)}>
+        {items.map((item) => {
+          const path = text(item.path) || text(item.skillPath) || itemId(item);
+          const isWritable = text(item.group) === 'user' || bool(item.writable);
+          return (
+            <ResourceCard
+              key={path}
+              title={label(item)}
+              detail={path}
+              badge={bool(item.enabled) ? 'Enabled' : undefined}
+            >
+              <p {...stylex.props(styles.body)}>{text(item.description)}</p>
+              <CardActions>
+                {isWritable ? (
+                  <>
+                    <Button size="compact" onClick={() => void editSkill(item)}>
+                      Edit
+                    </Button>
+                    <Button
+                      size="compact"
+                      variant="danger"
+                      disabled={isMutating}
+                      onClick={() =>
+                        openForm(
+                          confirmForm('Delete skill?', 'The selected skill will be removed.', () =>
+                            mutate({
+                              path: `/skills/${encodeURIComponent(path)}`,
+                              method: 'DELETE',
+                              success: 'Skill deleted.'
+                            })
+                          )
+                        )
+                      }
+                    >
+                      Delete
+                    </Button>
+                  </>
+                ) : canCustomize ? (
+                  <Button
+                    size="compact"
+                    disabled={isMutating}
+                    onClick={() =>
+                      void mutate({
+                        path: `/skills/${encodeURIComponent(path)}/copy`,
+                        body: { projectId: item.projectId ?? null },
+                        success: 'Skill copied for customization.'
+                      })
+                    }
+                  >
+                    Customize
+                  </Button>
+                ) : undefined}
+              </CardActions>
+            </ResourceCard>
+          );
+        })}
+      </div>
+      {renderCatalog()}
+    </SectionList>
+  );
 
   function skillForm(item?: JsonObject): FormDialog {
     const path = item ? text(item.path) || text(item.skillPath) || itemId(item) : '';
     const autoInject = object(object(item?.metadata).autoInject);
-    return { title: item ? 'Edit skill' : 'Create skill', description: 'Skills add reusable instructions to Aside.', submitLabel: item ? 'Save skill' : 'Create skill', fields: [{ key: 'name', label: 'Name', value: text(item?.name), required: true }, { key: 'description', label: 'Description', value: text(item?.description), required: true }, { key: 'body', label: 'Instructions', value: text(item?.body) || text(item?.content), kind: 'textarea', required: true }, { key: 'keywords', label: 'Keywords', value: stringList(item?.keywords ?? autoInject.keywords).join(', '), placeholder: 'research, writing' }, { key: 'urlPatterns', label: 'URL patterns', value: stringList(item?.urlPatterns ?? autoInject.url).join('\n'), kind: 'textarea' }, { key: 'enabled', label: 'Enabled', value: item ? bool(item.enabled) : true, kind: 'checkbox' }], onSubmit: values => {
-      const body = { name: values.name, description: values.description, body: values.body, enabled: values.enabled, keywords: stringList(values.keywords), urlPatterns: stringList(values.urlPatterns) };
-      return mutate({ path: item ? `/skills/${encodeURIComponent(path)}` : '/skills', method: item ? 'PATCH' : 'POST', body, success: item ? 'Skill updated.' : 'Skill created.' });
-    } };
+    return {
+      title: item ? 'Edit skill' : 'Create skill',
+      description: 'Skills add reusable instructions to Aside.',
+      submitLabel: item ? 'Save skill' : 'Create skill',
+      fields: [
+        { key: 'name', label: 'Name', value: text(item?.name), required: true },
+        { key: 'description', label: 'Description', value: text(item?.description), required: true },
+        {
+          key: 'body',
+          label: 'Instructions',
+          value: text(item?.body) || text(item?.content),
+          kind: 'textarea',
+          required: true
+        },
+        {
+          key: 'keywords',
+          label: 'Keywords',
+          value: stringList(item?.keywords ?? autoInject.keywords).join(', '),
+          placeholder: 'research, writing'
+        },
+        {
+          key: 'urlPatterns',
+          label: 'URL patterns',
+          value: stringList(item?.urlPatterns ?? autoInject.url).join('\n'),
+          kind: 'textarea'
+        },
+        { key: 'enabled', label: 'Enabled', value: item ? bool(item.enabled) : true, kind: 'checkbox' }
+      ],
+      onSubmit: (values) => {
+        const body = {
+          name: values.name,
+          description: values.description,
+          body: values.body,
+          enabled: values.enabled,
+          keywords: stringList(values.keywords),
+          urlPatterns: stringList(values.urlPatterns)
+        };
+        return mutate({
+          path: item ? `/skills/${encodeURIComponent(path)}` : '/skills',
+          method: item ? 'PATCH' : 'POST',
+          body,
+          success: item ? 'Skill updated.' : 'Skill created.'
+        });
+      }
+    };
+  }
+
+  function renderCatalog() {
+    if (!catalog) return;
+    return (
+      <div {...stylex.props(styles.catalog)}>
+        <h4 {...stylex.props(styles.listTitle)}>Local catalog</h4>
+        {Object.entries(object(catalog.groups)).map(([group, skills]) => {
+          const entries = itemArray(skills);
+          return (
+            <div key={group} {...stylex.props(styles.catalogGroup)}>
+              <div {...stylex.props(styles.catalogRow)}>
+                <span>{humanize(group)}</span>
+                <span {...stylex.props(ui.muted)}>{entries.length}</span>
+              </div>
+              {entries.length ? (
+                <div {...stylex.props(styles.chips)}>
+                  {entries.map((skill) => (
+                    <span key={itemId(skill)} {...stylex.props(styles.chip)}>
+                      {label(skill)}
+                    </span>
+                  ))}
+                </div>
+              ) : undefined}
+            </div>
+          );
+        })}
+      </div>
+    );
   }
 }
 
-function Connections({ value, isMutating, mutate, read, openForm, canEditToolPermissions }: SectionProps & { canEditToolPermissions: boolean }) {
-  const root = object(value); const items = itemArray(root.servers ?? value); const inventories = object(root.inventories);
-  const [toolPolicies, setToolPolicies] = useState<{ tools: JsonObject[]; policies: Record<string, string> }>({ tools: [], policies: {} });
-  useEffect(() => { if (canEditToolPermissions) void read('/connections/tools/permissions').then(result => { const permission = object(result); setToolPolicies({ tools: toolArray(permission.tools), policies: permissionPolicies(permission.rules) }); }).catch(() => undefined); }, [canEditToolPermissions, read]);
+function Connections({
+  value,
+  isMutating,
+  mutate,
+  read,
+  openForm,
+  canEditToolPermissions
+}: SectionProps & { canEditToolPermissions: boolean }) {
+  const root = object(value);
+  const items = itemArray(root.servers ?? value);
+  const inventories = object(root.inventories);
+  const [toolPolicies, setToolPolicies] = useState<{ tools: JsonObject[]; policies: Record<string, string> }>({
+    tools: [],
+    policies: {}
+  });
+  useEffect(() => {
+    if (canEditToolPermissions)
+      void read('/connections/tools/permissions').then((result) => {
+        if (result === undefined) return;
+        const permission = object(result);
+        setToolPolicies({ tools: toolArray(permission.tools), policies: permissionPolicies(permission.rules) });
+      });
+  }, [canEditToolPermissions, read]);
   const updateToolPolicy = async (tool: string, policy: string) => {
-    const previous = toolPolicies.policies[tool] ?? 'inherit'; setToolPolicies(current => ({ ...current, policies: { ...current.policies, [tool]: policy } }));
-    const didSave = await mutate({ path: '/connections/tools/permissions', method: 'PATCH', body: { tool, policy }, success: 'Tool permission updated.' });
-    if (!didSave) setToolPolicies(current => ({ ...current, policies: { ...current.policies, [tool]: previous } }));
+    const previous = toolPolicies.policies[tool] ?? 'inherit';
+    setToolPolicies((current) => ({ ...current, policies: { ...current.policies, [tool]: policy } }));
+    const didSave = await mutate({
+      path: '/connections/tools/permissions',
+      method: 'PATCH',
+      body: { tool, policy },
+      success: 'Tool permission updated.'
+    });
+    if (!didSave) setToolPolicies((current) => ({ ...current, policies: { ...current.policies, [tool]: previous } }));
   };
-  return <div {...stylex.props(styles.stack)}><SectionList actionLabel="New connection" onAction={() => openForm(connectionForm())} empty="No connections"><div {...stylex.props(styles.list)}>{items.map(item => {
-    const name = text(item.name) || itemId(item); const isConnected = bool(item.connected) || text(item.status) === 'connected';
-    return <ResourceCard key={name} title={label(item)} detail={text(item.url) || text(item.command)} badge={text(item.status)}><CardActions><Button size="compact" onClick={() => openForm(connectionForm(item))}>Edit</Button><Button size="compact" disabled={isMutating} onClick={() => void mutate({ path: `/connections/${encodeURIComponent(name)}/test`, success: 'Connection test finished.' })}>Test</Button><Button size="compact" disabled={isMutating} onClick={() => void mutate({ path: `/connections/${encodeURIComponent(name)}/${isConnected ? 'cancel' : 'connect'}`, success: isConnected ? 'Connection disconnected.' : 'Connection started.' })}>{isConnected ? 'Disconnect' : 'Connect'}</Button><Button size="compact" variant="danger" onClick={() => openForm(confirmForm('Delete connection?', 'The connection configuration will be removed.', () => mutate({ path: `/connections/${encodeURIComponent(name)}`, method: 'DELETE', success: 'Connection deleted.' })))}>Delete</Button></CardActions></ResourceCard>;
-  })}</div></SectionList>{toolPolicies.tools.length ? <SectionList title="Tool permissions" empty="No tools"><div {...stylex.props(styles.list)}>{toolPolicies.tools.map(tool => { const name = text(tool.name) || text(tool.id) || itemId(tool); return <div key={name} {...stylex.props(styles.permissionRow)}><span {...stylex.props(styles.cardCopy)}><strong>{label(tool)}</strong>{text(tool.description) ? <span {...stylex.props(ui.muted)}>{text(tool.description)}</span> : undefined}</span><select aria-label={`${label(tool)} permission`} value={toolPolicies.policies[name] ?? 'inherit'} disabled={isMutating} {...stylex.props(styles.compactSelect)} onChange={event => void updateToolPolicy(name, event.target.value)}><option value="inherit">Default</option><option value="allow">Allow</option><option value="ask">Ask</option><option value="deny">Deny</option></select></div>; })}</div></SectionList> : undefined}{Object.keys(inventories).length ? <SectionList title="Available tools" empty="No tools"><div {...stylex.props(styles.list)}>{Object.entries(inventories).map(([name, inventory]) => { const tools = itemArray(object(inventory).tools); return <ResourceCard key={name} title={name} detail={`${tools.length} tool${tools.length === 1 ? '' : 's'}`}>{tools.length ? <p {...stylex.props(styles.body)}>{tools.map(tool => label(tool)).join(', ')}</p> : undefined}</ResourceCard>; })}</div></SectionList> : undefined}</div>;
+  return (
+    <div {...stylex.props(styles.stack)}>
+      <SectionList actionLabel="New connection" onAction={() => openForm(connectionForm())} empty="No connections">
+        <div {...stylex.props(styles.list)}>
+          {items.map((item) => {
+            const name = text(item.name) || itemId(item);
+            const isConnected = bool(item.connected) || text(item.status) === 'connected';
+            return (
+              <ResourceCard
+                key={name}
+                title={label(item)}
+                detail={text(item.url) || text(item.command)}
+                badge={text(item.status)}
+              >
+                <CardActions>
+                  <Button size="compact" onClick={() => openForm(connectionForm(item))}>
+                    Edit
+                  </Button>
+                  <Button
+                    size="compact"
+                    disabled={isMutating}
+                    onClick={() =>
+                      void mutate({
+                        path: `/connections/${encodeURIComponent(name)}/test`,
+                        success: 'Connection test finished.'
+                      })
+                    }
+                  >
+                    Test
+                  </Button>
+                  <Button
+                    size="compact"
+                    disabled={isMutating}
+                    onClick={() =>
+                      void mutate({
+                        path: `/connections/${encodeURIComponent(name)}/${isConnected ? 'cancel' : 'connect'}`,
+                        success: isConnected ? 'Connection disconnected.' : 'Connection started.'
+                      })
+                    }
+                  >
+                    {isConnected ? 'Disconnect' : 'Connect'}
+                  </Button>
+                  <Button
+                    size="compact"
+                    variant="danger"
+                    onClick={() =>
+                      openForm(
+                        confirmForm('Delete connection?', 'The connection configuration will be removed.', () =>
+                          mutate({
+                            path: `/connections/${encodeURIComponent(name)}`,
+                            method: 'DELETE',
+                            success: 'Connection deleted.'
+                          })
+                        )
+                      )
+                    }
+                  >
+                    Delete
+                  </Button>
+                </CardActions>
+              </ResourceCard>
+            );
+          })}
+        </div>
+      </SectionList>
+      {renderToolPermissions()}
+      {Object.keys(inventories).length ? (
+        <SectionList title="Available tools" empty="No tools">
+          <div {...stylex.props(styles.list)}>
+            {Object.entries(inventories).map(([name, inventory]) => {
+              const tools = itemArray(object(inventory).tools);
+              return (
+                <ResourceCard key={name} title={name} detail={`${tools.length} tool${tools.length === 1 ? '' : 's'}`}>
+                  {tools.length ? (
+                    <p {...stylex.props(styles.body)}>{tools.map((tool) => label(tool)).join(', ')}</p>
+                  ) : undefined}
+                </ResourceCard>
+              );
+            })}
+          </div>
+        </SectionList>
+      ) : undefined}
+    </div>
+  );
 
   function connectionForm(item?: JsonObject): FormDialog {
     const server = object(item?.server ?? item);
-    return { title: item ? 'Edit connection' : 'New connection', description: 'Connect a local command or an HTTP MCP server. Credentials are never displayed after saving.', submitLabel: item ? 'Save connection' : 'Create connection', fields: [{ key: 'name', label: 'Name', value: text(item?.name), required: true }, { key: 'transport', label: 'Transport', value: text(server.transport) || 'streamable-http', kind: 'select', options: [{ value: 'streamable-http', label: 'HTTP' }, { value: 'stdio', label: 'Local command' }] }, { key: 'url', label: 'Server URL', value: text(server.url), placeholder: 'https://…' }, { key: 'command', label: 'Local command', value: text(server.command) }, { key: 'args', label: 'Command arguments', value: stringList(server.args).join(' '), placeholder: '--flag value' }, { key: 'clientSecret', label: 'Client secret (optional)', kind: 'password' }, { key: 'enabled', label: 'Enabled', value: item ? bool(item.enabled) : true, kind: 'checkbox' }], onSubmit: values => {
-      const transport = String(values.transport); const serverValue = transport === 'stdio' ? { enabled: Boolean(values.enabled), transport, command: String(values.command), args: String(values.args).split(/\s+/).filter(Boolean), env: {} } : { enabled: Boolean(values.enabled), transport, url: String(values.url), auth: { type: values.clientSecret ? 'auto' : 'none' } };
-      return mutate({ path: item ? `/connections/${encodeURIComponent(text(item.name))}` : '/connections', method: item ? 'PATCH' : 'POST', body: { name: values.name, server: serverValue, ...(values.clientSecret ? { clientSecret: values.clientSecret } : {}) }, success: item ? 'Connection updated.' : 'Connection created.' });
-    } };
+    return {
+      title: item ? 'Edit connection' : 'New connection',
+      description: 'Connect a local command or an HTTP MCP server. Credentials are never displayed after saving.',
+      submitLabel: item ? 'Save connection' : 'Create connection',
+      fields: [
+        { key: 'name', label: 'Name', value: text(item?.name), required: true },
+        {
+          key: 'transport',
+          label: 'Transport',
+          value: text(server.transport) || 'streamable-http',
+          kind: 'select',
+          options: [
+            { value: 'streamable-http', label: 'HTTP' },
+            { value: 'stdio', label: 'Local command' }
+          ]
+        },
+        { key: 'url', label: 'Server URL', value: text(server.url), placeholder: 'https://…' },
+        { key: 'command', label: 'Local command', value: text(server.command) },
+        {
+          key: 'args',
+          label: 'Command arguments',
+          value: stringList(server.args).join(' '),
+          placeholder: '--flag value'
+        },
+        { key: 'clientSecret', label: 'Client secret (optional)', kind: 'password' },
+        { key: 'enabled', label: 'Enabled', value: item ? bool(item.enabled) : true, kind: 'checkbox' }
+      ],
+      onSubmit: (values) => {
+        const transport = String(values.transport);
+        const serverValue =
+          transport === 'stdio'
+            ? {
+                enabled: Boolean(values.enabled),
+                transport,
+                command: String(values.command),
+                args: String(values.args).split(/\s+/).filter(Boolean),
+                env: {}
+              }
+            : {
+                enabled: Boolean(values.enabled),
+                transport,
+                url: String(values.url),
+                auth: { type: values.clientSecret ? 'auto' : 'none' }
+              };
+        return mutate({
+          path: item ? `/connections/${encodeURIComponent(text(item.name))}` : '/connections',
+          method: item ? 'PATCH' : 'POST',
+          body: {
+            name: values.name,
+            server: serverValue,
+            ...(values.clientSecret ? { clientSecret: values.clientSecret } : {})
+          },
+          success: item ? 'Connection updated.' : 'Connection created.'
+        });
+      }
+    };
+  }
+
+  function renderToolPermissions() {
+    if (!toolPolicies.tools.length) return;
+    return (
+      <SectionList title="Tool permissions" empty="No tools">
+        <div {...stylex.props(styles.list)}>
+          {toolPolicies.tools.map((tool) => {
+            const name = text(tool.name) || text(tool.id) || itemId(tool);
+            return (
+              <div key={name} {...stylex.props(styles.permissionRow)}>
+                <span {...stylex.props(styles.cardCopy)}>
+                  <strong>{label(tool)}</strong>
+                  {text(tool.description) ? (
+                    <span {...stylex.props(ui.muted)}>{text(tool.description)}</span>
+                  ) : undefined}
+                </span>
+                <select
+                  aria-label={`${label(tool)} permission`}
+                  value={toolPolicies.policies[name] ?? 'inherit'}
+                  disabled={isMutating}
+                  {...stylex.props(styles.compactSelect)}
+                  onChange={(event) => void updateToolPolicy(name, event.target.value)}
+                >
+                  <option value="inherit">Default</option>
+                  <option value="allow">Allow</option>
+                  <option value="ask">Ask</option>
+                  <option value="deny">Deny</option>
+                </select>
+              </div>
+            );
+          })}
+        </div>
+      </SectionList>
+    );
   }
 }
 
 function Providers({ value, isMutating, mutate, openForm }: SectionProps) {
-  const root = object(value); const connections = itemArray(root.connectedProviders); const models = itemArray(root.availableModels); const connectionById = new Map(connections.map(item => [text(item.providerId), item])); const providerIds = [...new Set([...connections.map(item => text(item.providerId)), ...models.map(item => text(item.provider)).filter(Boolean)])];
-  return <SectionList actionLabel="Custom provider" onAction={() => openForm({ title: 'Add custom provider', description: 'Credentials are write-only and are never returned by the server.', submitLabel: 'Add provider', fields: [{ key: 'id', label: 'Provider ID', required: true }, { key: 'name', label: 'Display name', required: true }, { key: 'baseUrl', label: 'API base URL', placeholder: 'https://…', required: true }, { key: 'modelId', label: 'Model ID', required: true }, { key: 'apiKey', label: 'API key', kind: 'password', required: true }], onSubmit: values => mutate({ path: '/providers/custom', body: { providers: { [String(values.id)]: { name: values.name, api: 'openai-completions', baseUrl: values.baseUrl, apiKey: values.apiKey, authHeader: 'Authorization', models: [{ id: values.modelId, name: values.modelId }] } } }, success: 'Provider added.' }) })} empty="No providers"><div {...stylex.props(styles.list)}>{providerIds.map(id => {
-    const connection = connectionById.get(id); const providerModels = models.filter(model => text(model.provider) === id); const isCustom = text(connection?.type) === 'custom'; const canEditApiKey = text(connection?.credentialType) === 'api_key' || text(connection?.type) === 'api_key';
-    return <ResourceCard key={id} title={text(connection?.name) || id} detail={providerModels.length ? `${providerModels.length} model${providerModels.length === 1 ? '' : 's'}` : id} badge={connection ? text(connection.state) || 'Connected' : 'Available'}><CardActions>{canEditApiKey ? <Button size="compact" onClick={() => openForm({ title: `Update ${id} credential`, description: 'The credential is sent once and will not be shown again.', submitLabel: 'Save credential', fields: [{ key: 'credential', label: 'API key', kind: 'password', required: true }], onSubmit: values => mutate({ path: `/providers/${encodeURIComponent(id)}/credential`, body: { credential: { type: 'api_key', key: values.credential } }, success: 'Credential updated.' }) })}><KeyRound size={15} />Credential</Button> : undefined}{isCustom ? <Button size="compact" variant="danger" disabled={isMutating} onClick={() => openForm(confirmForm('Delete provider?', 'The custom provider configuration will be removed.', () => mutate({ path: `/providers/custom/${encodeURIComponent(id)}`, method: 'DELETE', success: 'Provider deleted.' })))}>Delete</Button> : undefined}</CardActions></ResourceCard>;
-  })}</div></SectionList>;
+  const root = object(value);
+  const connections = itemArray(root.connectedProviders);
+  const models = itemArray(root.availableModels);
+  const connectionById = new Map(connections.map((item) => [text(item.providerId), item]));
+  const providerIds = [
+    ...new Set(
+      [...connections.map((item) => text(item.providerId)), ...models.map((item) => text(item.provider))].filter(
+        Boolean
+      )
+    )
+  ];
+  return (
+    <SectionList actionLabel="Custom provider" onAction={openCustomProvider} empty="No providers">
+      <div {...stylex.props(styles.list)}>
+        {providerIds.map((id) => (
+          <ProviderCard
+            key={id}
+            id={id}
+            connection={connectionById.get(id)}
+            models={models.filter((model) => text(model.provider) === id)}
+            isMutating={isMutating}
+            mutate={mutate}
+            openForm={openForm}
+          />
+        ))}
+      </div>
+    </SectionList>
+  );
+
+  function openCustomProvider() {
+    openForm({
+      title: 'Add custom provider',
+      description: 'Credentials are write-only and are never returned by the server.',
+      submitLabel: 'Add provider',
+      fields: [
+        { key: 'id', label: 'Provider ID', required: true },
+        { key: 'name', label: 'Display name', required: true },
+        { key: 'baseUrl', label: 'API base URL', placeholder: 'https://…', required: true },
+        { key: 'modelId', label: 'Model ID', required: true },
+        { key: 'apiKey', label: 'API key', kind: 'password', required: true }
+      ],
+      onSubmit: (values) =>
+        mutate({
+          path: '/providers/custom',
+          body: {
+            providers: {
+              [String(values.id)]: {
+                name: values.name,
+                api: 'openai-completions',
+                baseUrl: values.baseUrl,
+                apiKey: values.apiKey,
+                authHeader: 'Authorization',
+                models: [{ id: values.modelId, name: values.modelId }]
+              }
+            }
+          },
+          success: 'Provider added.'
+        })
+    });
+  }
+}
+
+function ProviderCard({
+  id,
+  connection,
+  models,
+  isMutating,
+  mutate,
+  openForm
+}: {
+  id: string;
+  connection?: JsonObject;
+  models: JsonObject[];
+} & Pick<SectionProps, 'isMutating' | 'mutate' | 'openForm'>) {
+  const isCustom = text(connection?.type) === 'custom';
+  const canEditApiKey = text(connection?.credentialType) === 'api_key' || text(connection?.type) === 'api_key';
+  return (
+    <ResourceCard
+      title={text(connection?.name) || id}
+      detail={models.length ? `${models.length} model${models.length === 1 ? '' : 's'}` : id}
+      badge={connection ? text(connection.state) || 'Connected' : 'Available'}
+    >
+      <CardActions>
+        {canEditApiKey && (
+          <Button size="compact" onClick={editCredential}>
+            <KeyRound size={15} />
+            Credential
+          </Button>
+        )}
+        {isCustom && (
+          <Button
+            size="compact"
+            variant="danger"
+            disabled={isMutating}
+            onClick={() =>
+              openForm(
+                confirmForm('Delete provider?', 'The custom provider configuration will be removed.', () =>
+                  mutate({
+                    path: `/providers/custom/${encodeURIComponent(id)}`,
+                    method: 'DELETE',
+                    success: 'Provider deleted.'
+                  })
+                )
+              )
+            }
+          >
+            Delete
+          </Button>
+        )}
+      </CardActions>
+    </ResourceCard>
+  );
+
+  function editCredential() {
+    openForm({
+      title: `Update ${id} credential`,
+      description: 'The credential is sent once and will not be shown again.',
+      submitLabel: 'Save credential',
+      fields: [{ key: 'credential', label: 'API key', kind: 'password', required: true }],
+      onSubmit: (values) =>
+        mutate({
+          path: `/providers/${encodeURIComponent(id)}/credential`,
+          body: { credential: { type: 'api_key', key: values.credential } },
+          success: 'Credential updated.'
+        })
+    });
+  }
 }
 
 function Account({ value, isMutating, mutate, openForm }: SectionProps) {
-  const root = object(value); const profile = object(root.profile); const devices = itemArray(root.devices);
-  return <div {...stylex.props(styles.stack)}><ResourceCard title={text(profile.name) || text(profile.email) || 'Account'} detail={text(profile.email) || text(profile.provider)} badge={text(profile.subscriptionPlan)}><CardActions><Button size="compact" onClick={() => openForm({ title: 'Edit profile', description: 'Update the display name for the connected Aside account.', submitLabel: 'Save profile', fields: [{ key: 'name', label: 'Display name', value: text(profile.name), required: true }], onSubmit: values => mutate({ path: '/account/profile', method: 'PATCH', body: values, success: 'Profile updated.' }) })}>Edit profile</Button></CardActions></ResourceCard><SectionList title="Active devices" empty="No devices"><div {...stylex.props(styles.list)}>{devices.map(item => {
+  const root = object(value);
+  const profile = object(root.profile);
+  const devices = itemArray(root.devices);
+  return (
+    <div {...stylex.props(styles.stack)}>
+      <ResourceCard
+        title={text(profile.name) || text(profile.email) || 'Account'}
+        detail={text(profile.email) || text(profile.provider)}
+        badge={text(profile.subscriptionPlan)}
+      >
+        <CardActions>
+          <Button size="compact" onClick={openProfileEditor}>
+            Edit profile
+          </Button>
+        </CardActions>
+      </ResourceCard>
+      <SectionList title="Active devices" empty="No devices">
+        <div {...stylex.props(styles.list)}>{devices.map(renderDevice)}</div>
+      </SectionList>
+    </div>
+  );
+
+  function openProfileEditor() {
+    openForm({
+      title: 'Edit profile',
+      description: 'Update the display name for the connected Aside account.',
+      submitLabel: 'Save profile',
+      fields: [{ key: 'name', label: 'Display name', value: text(profile.name), required: true }],
+      onSubmit: (values) =>
+        mutate({ path: '/account/profile', method: 'PATCH', body: values, success: 'Profile updated.' })
+    });
+  }
+
+  function renderDevice(item: JsonObject) {
     const id = text(item.deviceId) || itemId(item);
-    return <ResourceCard key={id} title={text(item.deviceName) || label(item)} detail={[text(item.platform), text(item.appVersion), dateText(item.lastSeenAt)].filter(Boolean).join(' · ')} badge={bool(item.isCurrent) ? 'This device' : undefined}>{!bool(item.isCurrent) ? <CardActions><Button size="compact" variant="danger" disabled={isMutating} onClick={() => void mutate({ path: `/account/devices/${encodeURIComponent(id)}/sign-out`, success: 'Device signed out.' })}>Sign out</Button></CardActions> : undefined}</ResourceCard>;
-  })}</div></SectionList></div>;
+    return (
+      <ResourceCard
+        key={id}
+        title={text(item.deviceName) || label(item)}
+        detail={[text(item.platform), text(item.appVersion), dateText(item.lastSeenAt)].filter(Boolean).join(' · ')}
+        badge={bool(item.isCurrent) ? 'This device' : undefined}
+      >
+        {!bool(item.isCurrent) ? (
+          <CardActions>
+            <Button
+              size="compact"
+              variant="danger"
+              disabled={isMutating}
+              onClick={() =>
+                void mutate({
+                  path: `/account/devices/${encodeURIComponent(id)}/sign-out`,
+                  success: 'Device signed out.'
+                })
+              }
+            >
+              Sign out
+            </Button>
+          </CardActions>
+        ) : undefined}
+      </ResourceCard>
+    );
+  }
 }
 
 function Preferences({ value, isMutating, mutate }: Omit<SectionProps, 'openForm'>) {
   const state = object(value);
-  const tabs = object(state.agentTabs); const taskNotifications = object(state.agentTaskNotifications); const sound = object(state.completionSound);
-  const [draft, setDraft] = useState(() => ({ defaultPermissionMode: text(state.defaultPermissionMode) || 'default', followUpBehavior: text(state.followUpBehavior) || 'queue', tabCleanupMinutes: text(tabs.closeAfterIdleMinutes) || 'never', sidebarRecentChatLimit: text(state.sidebarRecentChatLimit) || '3', needsAttention: bool(taskNotifications.needsAttention), taskCompletions: bool(taskNotifications.taskCompletions), routineCompletions: bool(taskNotifications.routineCompletions), completionSound: bool(sound.enabled), sidepanelSessionOnTabChange: text(state.sidepanelSessionOnTabChange) || 'new-session', timezone: text(state.timezone) }));
-  return <form {...stylex.props(styles.formCard)} onSubmit={event => { event.preventDefault(); void mutate({ path: '/preferences', method: 'PATCH', body: { defaultPermissionMode: draft.defaultPermissionMode, followUpBehavior: draft.followUpBehavior, agentTabs: { closeAfterIdleMinutes: draft.tabCleanupMinutes === 'never' ? null : Number(draft.tabCleanupMinutes) }, agentTaskNotifications: { needsAttention: draft.needsAttention, taskCompletions: draft.taskCompletions, routineCompletions: draft.routineCompletions }, completionSound: { enabled: draft.completionSound }, sidebarRecentChatLimit: Number(draft.sidebarRecentChatLimit), sidepanelSessionOnTabChange: draft.sidepanelSessionOnTabChange, timezone: draft.timezone }, success: 'Native preferences updated.' }); }}><Field label="Default permission"><select value={draft.defaultPermissionMode} {...stylex.props(ui.field)} onChange={event => setDraft(current => ({ ...current, defaultPermissionMode: event.target.value }))}><option value="default">Ask when needed</option><option value="full-access">Full access</option><option value="read-only">Read only</option></select></Field><Field label="Follow-up behavior"><select value={draft.followUpBehavior} {...stylex.props(ui.field)} onChange={event => setDraft(current => ({ ...current, followUpBehavior: event.target.value }))}><option value="queue">Queue</option><option value="steer">Steer</option></select></Field><Field label="Clean up agent tabs"><select value={draft.tabCleanupMinutes} {...stylex.props(ui.field)} onChange={event => setDraft(current => ({ ...current, tabCleanupMinutes: event.target.value }))}><option value="never">Never</option><option value="5">After 5 minutes</option><option value="10">After 10 minutes</option><option value="30">After 30 minutes</option><option value="60">After 1 hour</option></select></Field><Field label="Recent chats in sidebar"><input type="number" min="1" max="50" value={draft.sidebarRecentChatLimit} {...stylex.props(ui.field)} onChange={event => setDraft(current => ({ ...current, sidebarRecentChatLimit: event.target.value }))} /></Field><Field label="Sidebar when browser tab changes"><select value={draft.sidepanelSessionOnTabChange} {...stylex.props(ui.field)} onChange={event => setDraft(current => ({ ...current, sidepanelSessionOnTabChange: event.target.value }))}><option value="new-session">Start a new session</option><option value="keep-session">Keep current session</option></select></Field><Field label="Timezone"><input value={draft.timezone} placeholder="Asia/Seoul" {...stylex.props(ui.field)} onChange={event => setDraft(current => ({ ...current, timezone: event.target.value }))} /></Field><SwitchRow label="Needs-attention notifications" checked={draft.needsAttention} onChange={needsAttention => setDraft(current => ({ ...current, needsAttention }))} /><SwitchRow label="Task completion notifications" checked={draft.taskCompletions} onChange={taskCompletions => setDraft(current => ({ ...current, taskCompletions }))} /><SwitchRow label="Routine completion notifications" checked={draft.routineCompletions} onChange={routineCompletions => setDraft(current => ({ ...current, routineCompletions }))} /><SwitchRow label="Completion sound" checked={draft.completionSound} onChange={completionSound => setDraft(current => ({ ...current, completionSound }))} /><Button type="submit" variant="primary" disabled={isMutating}><Save size={16} />{isMutating ? 'Saving…' : 'Save preferences'}</Button></form>;
+  const tabs = object(state.agentTabs);
+  const taskNotifications = object(state.agentTaskNotifications);
+  const sound = object(state.completionSound);
+  const [draft, setDraft] = useState(() => ({
+    defaultPermissionMode: text(state.defaultPermissionMode) || 'default',
+    followUpBehavior: text(state.followUpBehavior) || 'queue',
+    tabCleanupMinutes: text(tabs.closeAfterIdleMinutes) || 'never',
+    sidebarRecentChatLimit: text(state.sidebarRecentChatLimit) || String(DEFAULT_RECENT_CHAT_LIMIT),
+    needsAttention: bool(taskNotifications.needsAttention),
+    taskCompletions: bool(taskNotifications.taskCompletions),
+    routineCompletions: bool(taskNotifications.routineCompletions),
+    completionSound: bool(sound.enabled),
+    sidepanelSessionOnTabChange: text(state.sidepanelSessionOnTabChange) || 'new-session',
+    timezone: text(state.timezone)
+  }));
+  return (
+    <form
+      {...stylex.props(styles.formCard)}
+      onSubmit={(event) => {
+        event.preventDefault();
+        void savePreferences();
+      }}
+    >
+      <Field label="Default permission">
+        <select
+          value={draft.defaultPermissionMode}
+          {...stylex.props(ui.field)}
+          onChange={(event) => setDraft((current) => ({ ...current, defaultPermissionMode: event.target.value }))}
+        >
+          <option value="default">Ask when needed</option>
+          <option value="full-access">Full access</option>
+          <option value="read-only">Read only</option>
+        </select>
+      </Field>
+      <Field label="Follow-up behavior">
+        <select
+          value={draft.followUpBehavior}
+          {...stylex.props(ui.field)}
+          onChange={(event) => setDraft((current) => ({ ...current, followUpBehavior: event.target.value }))}
+        >
+          <option value="queue">Queue</option>
+          <option value="steer">Steer</option>
+        </select>
+      </Field>
+      <Field label="Clean up agent tabs">
+        <select
+          value={draft.tabCleanupMinutes}
+          {...stylex.props(ui.field)}
+          onChange={(event) => setDraft((current) => ({ ...current, tabCleanupMinutes: event.target.value }))}
+        >
+          <option value="never">Never</option>
+          <option value="5">After 5 minutes</option>
+          <option value="10">After 10 minutes</option>
+          <option value="30">After 30 minutes</option>
+          <option value="60">After 1 hour</option>
+        </select>
+      </Field>
+      <Field label="Recent chats in sidebar">
+        <input
+          type="number"
+          min="1"
+          max="50"
+          value={draft.sidebarRecentChatLimit}
+          {...stylex.props(ui.field)}
+          onChange={(event) => setDraft((current) => ({ ...current, sidebarRecentChatLimit: event.target.value }))}
+        />
+      </Field>
+      <Field label="Sidebar when browser tab changes">
+        <select
+          value={draft.sidepanelSessionOnTabChange}
+          {...stylex.props(ui.field)}
+          onChange={(event) => setDraft((current) => ({ ...current, sidepanelSessionOnTabChange: event.target.value }))}
+        >
+          <option value="new-session">Start a new session</option>
+          <option value="keep-session">Keep current session</option>
+        </select>
+      </Field>
+      <Field label="Timezone">
+        <input
+          value={draft.timezone}
+          placeholder="Asia/Seoul"
+          {...stylex.props(ui.field)}
+          onChange={(event) => setDraft((current) => ({ ...current, timezone: event.target.value }))}
+        />
+      </Field>
+      <SwitchRow
+        label="Needs-attention notifications"
+        checked={draft.needsAttention}
+        onChange={(needsAttention) => setDraft((current) => ({ ...current, needsAttention }))}
+      />
+      <SwitchRow
+        label="Task completion notifications"
+        checked={draft.taskCompletions}
+        onChange={(taskCompletions) => setDraft((current) => ({ ...current, taskCompletions }))}
+      />
+      <SwitchRow
+        label="Routine completion notifications"
+        checked={draft.routineCompletions}
+        onChange={(routineCompletions) => setDraft((current) => ({ ...current, routineCompletions }))}
+      />
+      <SwitchRow
+        label="Completion sound"
+        checked={draft.completionSound}
+        onChange={(completionSound) => setDraft((current) => ({ ...current, completionSound }))}
+      />
+      <Button type="submit" variant="primary" disabled={isMutating}>
+        <Save size={16} />
+        {isMutating ? 'Saving…' : 'Save preferences'}
+      </Button>
+    </form>
+  );
+
+  function savePreferences() {
+    return mutate({
+      path: '/preferences',
+      method: 'PATCH',
+      body: {
+        defaultPermissionMode: draft.defaultPermissionMode,
+        followUpBehavior: draft.followUpBehavior,
+        agentTabs: {
+          closeAfterIdleMinutes: draft.tabCleanupMinutes === 'never' ? null : Number(draft.tabCleanupMinutes)
+        },
+        agentTaskNotifications: {
+          needsAttention: draft.needsAttention,
+          taskCompletions: draft.taskCompletions,
+          routineCompletions: draft.routineCompletions
+        },
+        completionSound: { enabled: draft.completionSound },
+        sidebarRecentChatLimit: draft.sidebarRecentChatLimit,
+        sidepanelSessionOnTabChange: draft.sidepanelSessionOnTabChange,
+        timezone: draft.timezone
+      },
+      success: 'Native preferences updated.'
+    });
+  }
 }
 
 type SectionProps = {
@@ -361,20 +1524,49 @@ function SwitchRow({ label, detail, checked, disabled, onChange }: { label: stri
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label {...stylex.props(styles.field)}><span>{label}</span>{children}</label>; }
 
-function EditDialog({ form, isSaving, onClose }: { form: FormDialog; isSaving: boolean; onClose: () => void }) {
+function EditDialog({ form, isSaving, onClose, onError }: { form: FormDialog; isSaving: boolean; onClose: () => void; onError: () => void }) {
   const [values, setValues] = useState<Record<string, string | boolean>>(() => Object.fromEntries(form.fields.map(field => [field.key, field.value ?? (field.kind === 'checkbox' ? false : '')])));
-  return <Dialog title={form.title} onClose={onClose}><DialogDescription>{form.description}</DialogDescription><form onSubmit={event => { event.preventDefault(); void form.onSubmit(values).catch(() => undefined); }}><div {...stylex.props(styles.dialogFields)}>{form.fields.map(field => field.kind === 'checkbox' ? <SwitchRow key={field.key} label={field.label} checked={Boolean(values[field.key])} onChange={checked => setValues(current => ({ ...current, [field.key]: checked }))} /> : <Field key={field.key} label={field.label}>{field.kind === 'textarea' ? <textarea required={field.required} rows={5} value={String(values[field.key] ?? '')} placeholder={field.placeholder} {...stylex.props(ui.field, styles.textarea)} onChange={event => setValues(current => ({ ...current, [field.key]: event.target.value }))} /> : field.kind === 'select' ? <select required={field.required} value={String(values[field.key] ?? '')} {...stylex.props(ui.field)} onChange={event => setValues(current => ({ ...current, [field.key]: event.target.value }))}>{field.options?.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : <input required={field.required} type={field.kind === 'password' ? 'password' : field.kind === 'number' ? 'number' : 'text'} value={String(values[field.key] ?? '')} placeholder={field.placeholder} autoComplete={field.kind === 'password' ? 'new-password' : 'off'} {...stylex.props(ui.field)} onChange={event => setValues(current => ({ ...current, [field.key]: event.target.value }))} />}</Field>)}</div><DialogActions><Button onClick={onClose}>Cancel</Button><Button type="submit" variant={form.danger ? 'danger' : 'primary'} disabled={isSaving}>{isSaving ? 'Saving…' : form.submitLabel}</Button></DialogActions></form></Dialog>;
+  return <Dialog title={form.title} onClose={onClose}>
+    <DialogDescription>{form.description}</DialogDescription>
+    <form onSubmit={async event => {
+      event.preventDefault();
+      try { await form.onSubmit(values); }
+      catch { onError(); }
+    }}>
+      <div {...stylex.props(styles.dialogFields)}>{form.fields.map(field => <FormControl
+        key={field.key} field={field} value={values[field.key]}
+        onChange={value => setValues(current => ({ ...current, [field.key]: value }))}
+      />)}</div>
+      <DialogActions><Button onClick={onClose}>Cancel</Button><Button type="submit" variant={form.danger ? 'danger' : 'primary'} disabled={isSaving}>{isSaving ? 'Saving…' : form.submitLabel}</Button></DialogActions>
+    </form>
+  </Dialog>;
+}
+
+function FormControl({ field, value, onChange }: { field: FormField; value: string | boolean; onChange: (value: string | boolean) => void }) {
+  if (field.kind === 'checkbox') return <SwitchRow label={field.label} checked={Boolean(value)} onChange={onChange} />;
+  if (field.kind === 'textarea') return <Field label={field.label}><textarea
+    required={field.required} rows={5} value={String(value ?? '')} placeholder={field.placeholder}
+    {...stylex.props(ui.field, styles.textarea)} onChange={event => onChange(event.target.value)}
+  /></Field>;
+  if (field.kind === 'select') return <Field label={field.label}><select
+    required={field.required} value={String(value ?? '')} {...stylex.props(ui.field)} onChange={event => onChange(event.target.value)}
+  >{field.options?.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>;
+  return <Field label={field.label}><input
+    required={field.required} type={field.kind === 'password' ? 'password' : field.kind === 'number' ? 'number' : 'text'}
+    value={String(value ?? '')} placeholder={field.placeholder} autoComplete={field.kind === 'password' ? 'new-password' : 'off'}
+    {...stylex.props(ui.field)} onChange={event => onChange(event.target.value)}
+  /></Field>;
 }
 
 function EmptyState({ icon: Icon, title, detail, action }: { icon: LucideIcon; title: string; detail: string; action?: React.ReactNode }) { return <div {...stylex.props(styles.emptyState)}><Icon size={28} strokeWidth={ICON_STROKE} aria-hidden="true" /><strong>{title}</strong><p {...stylex.props(ui.muted)}>{detail}</p>{action}</div>; }
 
 function confirmForm(title: string, description: string, onSubmit: () => Promise<unknown>): FormDialog { return { title, description, submitLabel: 'Delete', danger: true, fields: [], onSubmit }; }
-function object(value: unknown): JsonObject { return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonObject : {}; }
-function itemArray(value: unknown): JsonObject[] { const source = Array.isArray(value) ? value : object(value).items; return Array.isArray(source) ? source.filter(item => item && typeof item === 'object').map(item => item as JsonObject) : []; }
+function object(value: unknown): JsonObject { return isRecord(value) ? value : {}; }
+function itemArray(value: unknown): JsonObject[] { const source = Array.isArray(value) ? value : object(value).items; return Array.isArray(source) ? source.filter(isRecord) : []; }
 function toolArray(value: unknown): JsonObject[] { return Array.isArray(value) ? value.map(item => typeof item === 'string' ? { name: item } : object(item)).filter(item => Object.keys(item).length) : []; }
 function text(value: unknown) { return typeof value === 'string' || typeof value === 'number' ? String(value) : ''; }
 function bool(value: unknown) { return value === true; }
-function stringList(value: unknown) { return Array.isArray(value) ? value.filter(item => typeof item === 'string') as string[] : typeof value === 'string' ? value.split(/[,\n]/).map(item => item.trim()).filter(Boolean) : []; }
+function stringList(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : typeof value === 'string' ? value.split(/[,\n]/).map(item => item.trim()).filter(Boolean) : []; }
 function ruleList(value: unknown) { return Array.isArray(value) ? value.map(item => { const rule = object(item); return typeof item === 'string' ? item : text(rule.bundleId) ? `app:${text(rule.bundleId)}` : text(rule.urlDomain) ? `site:${text(rule.urlDomain)}` : ''; }).filter(Boolean) : []; }
 function contextRule(pattern: string): JsonObject { if (pattern.startsWith('app:')) return { scope: 'app', bundleId: pattern.slice(4), behavior: 'do_not_observe' }; const domain = pattern.replace(/^site:/, '').replace(/^https?:\/\//, '').split('/')[0]; return { scope: 'url', urlDomain: domain, behavior: 'do_not_observe' }; }
 function itemId(item: JsonObject, preferred = 'id') { return text(item[preferred]) || text(item.id) || text(item.path) || text(item.name) || JSON.stringify(item); }

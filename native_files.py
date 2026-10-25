@@ -4,7 +4,6 @@ from __future__ import annotations
 import mimetypes
 import os
 from pathlib import Path
-from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -106,7 +105,6 @@ async def artifacts(session_id: str):
                 "mtime": int(stat.st_mtime * 1000),
                 "mime": mime,
                 "kind": _kind(path, mime),
-                "previewUrl": f"/api/native/files/sessions/{quote(session_id)}/artifacts/{quote(relative, safe='/')}",
             })
     return {"items": items}
 
@@ -180,6 +178,8 @@ async def _root(name: str, session_id: str | None) -> Path:
         if workspace:
             return workspace
     if name == "uploads":
+        if config.UPLOAD_DIR.is_symlink():
+            raise HTTPException(404, "File root not found.")
         return config.UPLOAD_DIR.resolve()
     if name == "session" and session_id:
         return _session_root(session_id)

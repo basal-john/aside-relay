@@ -8,7 +8,7 @@ export function visualTheme() {
   const success = isDark ? '#a7d6a7' : '#36713b';
   return {
     scheme: isDark ? 'dark' : 'light',
-    fontStylesheets: JSON.parse(root.dataset.fontStylesheets ?? '["/api/font/css/wanted-sans"]') as string[],
+    fontStylesheets: fontStylesheets(root.dataset.fontStylesheets),
     variables: {
       '--background': color('--canvas'), '--foreground': color('--text'),
       '--muted-foreground': color('--muted'), '--border': color('--border'),
@@ -21,6 +21,19 @@ export function visualTheme() {
       '--font-sans': color('--font-content') || '"Wanted Sans Variable", "Wanted Sans", sans-serif', '--radius': '12px',
     },
   };
+}
+
+function fontStylesheets(value?: string) {
+  const fallback = ['/api/font/css/wanted-sans'];
+  if (!value) return fallback;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((path): path is string => typeof path === 'string' && /^\/api\/font\/css\/[a-z-]+$/.test(path))
+      : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export function visualDocument(source: string, id: string) {

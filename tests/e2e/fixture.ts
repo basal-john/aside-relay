@@ -184,7 +184,7 @@ export class MockAside {
     const sessionDetails = url.pathname.match(/^\/api\/sessions\/([^/]+)\/details$/);
     if (sessionDetails && method === 'GET') {
       const item = this.sessions.find(entry => entry.id === decodeURIComponent(sessionDetails[1]));
-      return json(route, item ? { title: item.title, status: item.status, isPinned: item.isPinned } : {}, item ? 200 : 404);
+      return json(route, item ? { id: item.id, title: item.title, status: item.status, isPinned: item.isPinned } : {}, item ? 200 : 404);
     }
     const legacySession = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
     if (legacySession && method === 'PATCH') {
@@ -217,7 +217,7 @@ export class MockAside {
     if (/^\/api\/tabs\/[^/]+\/focus$/.test(url.pathname)) return json(route, { ok: true });
     if (method === 'DELETE' && /^\/api\/tabs\/[^/]+$/.test(url.pathname)) { this.tabs = []; return json(route, { closed: true }); }
     const artifacts = url.pathname.match(/^\/api\/native\/files\/sessions\/([^/]+)\/artifacts$/);
-    if (artifacts && method === 'GET') return json(route, { items: [{ name: 'result.txt', path: 'result.txt', absolutePath: '/tmp/result.txt', bytes: 12, mtime: Date.now(), mime: 'text/plain', kind: 'text', previewUrl: '/preview/result.txt' }] });
+    if (artifacts && method === 'GET') return json(route, { items: [{ name: 'result.txt', path: 'result.txt', absolutePath: '/tmp/result.txt', bytes: 12, mtime: Date.now(), mime: 'text/plain', kind: 'text' }] });
     if (/\/artifact-preview$/.test(url.pathname)) return json(route, { content: 'E2E file content' });
     if (/\/artifacts\/result.txt$/.test(url.pathname)) return route.fulfill({ status: 200, contentType: 'text/plain', body: 'E2E file content' });
     if (method === 'GET' && url.pathname === '/api/native/files/roots') return json(route, { items: [] });

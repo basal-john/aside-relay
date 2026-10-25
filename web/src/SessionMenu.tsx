@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Archive, ArchiveRestore, Check, Copy, Files, FolderInput, Link, Mail, MailOpen, Pencil, Pin, PinOff, Share2, Trash2 } from 'lucide-react';
 import type { UseChat } from './types';
-import { parseSessionDetails } from './responses';
+import { parseProjects, parseSessionDetails } from './responses';
 import { PopoverMenu } from './PopoverMenu';
 import { tokens } from './tokens.stylex';
 import { ICON_STROKE, RENAME_CONVERSATION_TITLE, SESSION_CHANGE_EVENT, styles as ui } from './ui';
@@ -52,7 +52,6 @@ export function SessionMenu({ target, chat, onClose, onRename, onDelete, onFiles
     setBusy(true); onClose();
     try {
       const response = await chat.request('/api/native/sessions/' + encodeURIComponent(target.id) + '/share', { method: 'POST' });
-      if (!response.ok) throw new Error();
       const result = await response.json() as unknown;
       const snapshotUrl = readSnapshotUrl(result);
       if (!snapshotUrl) throw new Error();
@@ -95,9 +94,8 @@ function MoveConversationDialog({ sessionId, currentProjectId, chat, notify, onC
   useEffect(() => {
     const controller = new AbortController();
     void chat.request('/api/native/projects', { cache: 'no-store', signal: controller.signal }).then(async response => {
-      if (!response.ok) throw new Error();
       const result = await response.json() as unknown;
-      if (!controller.signal.aborted) setProjects(readProjects(result));
+      if (!controller.signal.aborted) setProjects(parseProjects(result));
     }).catch(() => { if (!controller.signal.aborted) notify('Could not load projects.', 'error'); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [chat.request, notify]);
@@ -112,24 +110,12 @@ function MoveConversationDialog({ sessionId, currentProjectId, chat, notify, onC
     <DialogActions><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={isLoading || isSaving} onClick={async () => {
       setSaving(true);
       try {
-        const response = await chat.request('/api/native/sessions/' + encodeURIComponent(sessionId), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: selectedId || null }) });
-        if (!response.ok) throw new Error();
+        await chat.request('/api/native/sessions/' + encodeURIComponent(sessionId), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: selectedId || null }) });
         window.dispatchEvent(new Event(SESSION_CHANGE_EVENT));
         onClose(); await chat.refreshSessions(); notify('Conversation moved.', 'success');
       } catch { setSaving(false); notify('Could not move the conversation.', 'error'); }
     }}>Move</Button></DialogActions>
   </Dialog>;
-}
-
-function readProjects(value: unknown) {
-  if (typeof value !== 'object' || value === null) return [];
-  const list = Reflect.get(value, 'items') ?? Reflect.get(value, 'projects') ?? value;
-  if (!Array.isArray(list)) return [];
-  return list.flatMap((item): Project[] => {
-    if (typeof item !== 'object' || item === null) return [];
-    const id = Reflect.get(item, 'id'); const name = Reflect.get(item, 'name') ?? Reflect.get(item, 'title');
-    return typeof id === 'string' && typeof name === 'string' ? [{ id, name }] : [];
-  });
 }
 
 function readSnapshotUrl(value: unknown) {

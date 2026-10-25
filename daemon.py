@@ -93,15 +93,17 @@ class DaemonClient:
         await self._authorize()
         async with httpx.AsyncClient(timeout=45) as client:
             for attempt in range(2):
+                request_token = self._token
                 response = await client.request(
                     "POST" if mutation else "GET", config.DAEMON_URL + path,
-                    headers={"Authorization": "AsideDaemonSessionToken " + self._token},
+                    headers={"Authorization": "AsideDaemonSessionToken " + request_token},
                     **({"json": value} if mutation else {"params": {"input": json.dumps(value)}}),
                 )
                 if response.status_code != 401 or attempt:
                     response.raise_for_status()
                     return response.json()
-                self._token = ""
+                if self._token == request_token:
+                    self._token = ""
                 await self._authorize()
 
     async def call(self, procedure: str, value: dict, *, mutation: bool = False):

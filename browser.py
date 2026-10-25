@@ -18,8 +18,10 @@ import hashlib
 import json
 import logging
 import math
+import tempfile
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 import config
 from daemon import ACCOUNT_ID, daemon, repair_browser_binding
@@ -42,6 +44,7 @@ _shot_waiting = 0
 _tabs_cache: tuple[float, tuple[str | None, bool], list[dict]] | None = None
 _page_titles: dict[str, tuple[str, str]] = {}
 _tabs_lock = asyncio.Lock()
+_close_locks: dict[str, asyncio.Lock] = {}
 _shot_locks: dict[str, asyncio.Lock] = {}
 
 
@@ -63,6 +66,16 @@ class TabNotFound(RuntimeError):
 
 def _jsq(value) -> str:
     return json.dumps(str(value))
+
+
+def is_web_url(value: object) -> bool:
+    if not isinstance(value, str) or len(value) > 8_192:
+        return False
+    try:
+        parsed = urlparse(value)
+        return parsed.scheme in {"http", "https"} and bool(parsed.hostname)
+    except ValueError:
+        return False
 
 
 # JS 조각: targetId 로 안전하게 attach (타임아웃 레이스)
@@ -164,8 +177,8 @@ async def _require_awake(target_id: str, session_id: str | None = None, *, show_
 
 
 # --------------------------------------------------------------------- 캡처
-def _shot_path(target_id: str, full: bool) -> Path:
-    key = hashlib.sha1(f"{target_id}:{int(full)}".encode()).hexdigest()[:20]
+def _shot_path(target_id: str, full: bool, quality: int) -> Path:
+    key = hashlib.sha1(f"{target_id}:{int(full)}:{quality}".encode()).hexdigest()[:20]
     return config.SHOT_DIR / f"{key}.jpg"
 
 
@@ -178,7 +191,8 @@ async def screenshot(target_id: str, *, full: bool = False, quality: int = 62,
     """
     global _shot_waiting
     max_age = config.SHOT_CACHE_TTL if max_age is None else max_age
-    dest = _shot_path(target_id, full)
+    tab = await _require_awake(target_id, session_id, show_all=show_all)
+    dest = _shot_path(target_id, full, quality)
 
     # 캐시 히트는 큐를 타지 않는다.
     if dest.exists() and time.time() - dest.stat().st_mtime < max_age:
@@ -190,15 +204,15 @@ async def screenshot(target_id: str, *, full: bool = False, quality: int = 62,
     _shot_waiting += 1
     try:
         async with _shot_sem, lock:
+            tab = await _require_awake(target_id, session_id, show_all=show_all)
             if dest.exists() and time.time() - dest.stat().st_mtime < max_age:
                 return dest, {"cached": True}
-            return await _capture(target_id, dest, full, quality, session_id, show_all)
+            return await _capture(target_id, dest, full, quality, tab)
     finally:
         _shot_waiting -= 1
 
 
-async def _capture(target_id: str, dest: Path, full: bool, quality: int, session_id: str | None, show_all: bool) -> tuple[Path, dict]:
-    tab = await _require_awake(target_id, session_id, show_all=show_all)
+async def _capture(target_id: str, dest: Path, full: bool, quality: int, tab: dict) -> tuple[Path, dict]:
     code = _ATTACH + f"""
   const dir = pwd + '/artifacts';
   await fs.mkdir(dir, {{ recursive: true }});
@@ -211,15 +225,35 @@ async def _capture(target_id: str, dest: Path, full: bool, quality: int, session
   console.log(JSON.stringify({{ path: fp, bytes: buf.length, url: pg.url(), title, heading }}));
 """
     info = await mcp.repl_json(code, title="Capturing tab", timeout=40)
-    if not info["title"] or _title_key(info["title"]) == _title_key(info["url"]):
-        info["title"] = info["heading"]
-    _page_titles[target_id] = (info["url"], info["title"])
     src = Path(info["path"])
-    dest.write_bytes(src.read_bytes())
     try:
-        src.unlink()
-    except OSError:
-        pass
+        if not info["title"] or _title_key(info["title"]) == _title_key(info["url"]):
+            info["title"] = info["heading"]
+        _page_titles[target_id] = (info["url"], info["title"])
+        data = src.read_bytes()
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=dest.parent,
+                prefix=f".{dest.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as output:
+                temporary = Path(output.name)
+                output.write(data)
+            temporary.replace(dest)
+            temporary = None
+        finally:
+            if temporary is not None:
+                try:
+                    temporary.unlink()
+                except OSError:
+                    pass
+    finally:
+        try:
+            src.unlink()
+        except OSError:
+            pass
     return dest, {
         "cached": False,
         "bytes": info.get("bytes"),
@@ -272,21 +306,24 @@ async def open_tab(url: str, session_id: str | None = None) -> dict:
 
 
 async def close_tab(target_id: str, session_id: str | None = None, *, show_all: bool = False) -> dict:
-    tab = await find_tab(target_id, session_id=session_id, show_all=show_all)
     binding_session = session_id or (await mcp.repl_json(CURRENT_SESSION_CODE))["id"]
-    session = await daemon.call("sessions.get", {"accountId": ACCOUNT_ID, "sessionId": binding_session})
-    binding = {**session["browserBinding"], "windowId": tab["windowId"]}
-    await daemon.extension("Aside.controlTab", {"action": "close", "targetId": target_id, "url": tab["url"]}, binding)
-    tabs = await list_tabs(force=True, session_id=session_id, show_all=show_all)
-    if any(tab["targetId"] == target_id for tab in tabs):
-        raise ConnectionError("The browser tab is still open.")
-    if session_id:
-        _targets, active_target = await asyncio.to_thread(daemondb.browser_targets, session_id)
-        if active_target == target_id:
-            latest = max(tabs, key=lambda tab: tab.get("lastAccessed") or 0, default={})
-            await daemon.call("sessions.update", {"accountId": ACCOUNT_ID, "sessionId": session_id,
-                                                  "activeTabTargetId": latest.get("targetId")}, mutation=True)
-    return {"ok": True}
+    lock = _close_locks.setdefault(binding_session, asyncio.Lock())
+    async with lock:
+        tab = await find_tab(target_id, session_id=session_id, show_all=show_all)
+        session = await daemon.call("sessions.get", {"accountId": ACCOUNT_ID, "sessionId": binding_session})
+        binding = {**session["browserBinding"], "windowId": tab["windowId"]}
+        await daemon.extension("Aside.controlTab", {"action": "close", "targetId": target_id, "url": tab["url"]}, binding)
+        tabs = await list_tabs(force=True, session_id=session_id, show_all=show_all)
+        if any(tab["targetId"] == target_id for tab in tabs):
+            raise ConnectionError("The browser tab is still open.")
+        if session_id:
+            _targets, active_target = await asyncio.to_thread(daemondb.browser_targets, session_id)
+            if active_target == target_id:
+                session_tabs = tabs if not show_all else await list_tabs(force=True, session_id=session_id)
+                latest = max(session_tabs, key=lambda tab: tab.get("lastAccessed") or 0, default={})
+                await daemon.call("sessions.update", {"accountId": ACCOUNT_ID, "sessionId": session_id,
+                                                      "activeTabTargetId": latest.get("targetId")}, mutation=True)
+        return {"ok": True}
 
 
 async def focus_tab(target_id: str, session_id: str | None = None, *, show_all: bool = False) -> dict:
@@ -313,19 +350,31 @@ async def control_tab(target_id: str, action: str, *, session_id: str | None = N
     remains accurate when its rendered size differs from the desktop tab.
     """
     await _require_awake(target_id, session_id, show_all=show_all)
-    action_code = {
-        "click": f"""
+    if action == "click":
+        action_code = f"""
           const viewport = await pg.evaluate(() => ({{ width: innerWidth, height: innerHeight }}));
           await pg.mouse.click(viewport.width * {json.dumps(x)}, viewport.height * {json.dumps(y)});
-        """,
-        "scroll": f"await pg.mouse.wheel({int(delta_x)}, {int(delta_y)});",
-        "type": f"await pg.keyboard.insertText({_jsq(text)});",
-        "key": f"await pg.keyboard.press({_jsq(key)});",
-        "back": "await pg.goBack({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null);",
-        "forward": "await pg.goForward({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null);",
-        "reload": "await pg.reload({ waitUntil: 'domcontentloaded', timeout: 15000 });",
-        "navigate": f"await pg.goto({_jsq(url)}, {{ waitUntil: 'domcontentloaded', timeout: 20000 }});",
-    }[action]
+        """
+    elif action == "scroll":
+        action_code = f"""
+          const viewport = await pg.evaluate(() => ({{ width: innerWidth, height: innerHeight }}));
+          await pg.mouse.move(viewport.width * {json.dumps(x)}, viewport.height * {json.dumps(y)});
+          await pg.mouse.wheel({int(delta_x)}, {int(delta_y)});
+        """
+    elif action == "type":
+        action_code = f"await pg.keyboard.insertText({_jsq(text)});"
+    elif action == "key":
+        action_code = f"await pg.keyboard.press({_jsq(key)});"
+    elif action == "back":
+        action_code = "await pg.goBack({ waitUntil: 'domcontentloaded', timeout: 15000 });"
+    elif action == "forward":
+        action_code = "await pg.goForward({ waitUntil: 'domcontentloaded', timeout: 15000 });"
+    elif action == "reload":
+        action_code = "await pg.reload({ waitUntil: 'domcontentloaded', timeout: 15000 });"
+    elif action == "navigate":
+        action_code = f"await pg.goto({_jsq(url)}, {{ waitUntil: 'domcontentloaded', timeout: 20000 }});"
+    else:
+        raise ValueError("Unsupported browser action.")
     code = _ATTACH + f"""
   const pg = await __attach({_jsq(target_id)});
   {action_code}

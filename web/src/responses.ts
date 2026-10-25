@@ -4,7 +4,18 @@ const INVALID_RESPONSE = 'Invalid server response.';
 const MESSAGE_ROLES: ChatMessage['role'][] = ['user', 'assistant', 'toolResult', 'system'];
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function parseProjects(value: unknown) {
+  const items = Array.isArray(value) ? value : isRecord(value) ? value.items ?? value.projects : undefined;
+  if (!Array.isArray(items)) return [];
+  return items.flatMap(item => {
+    if (!isRecord(item) || typeof item.id !== 'string') return [];
+    const name = item.name ?? item.title;
+    if (typeof name !== 'string') return [];
+    return [{ id: item.id, name, archivedAt: item.archivedAt }];
+  });
 }
 
 function record(value: unknown) {

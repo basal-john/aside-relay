@@ -14,6 +14,8 @@ const MOVEMENT_LIMIT = 8;
 const INTERACTIVE = 'a, button, input, textarea, select, iframe, pre, code, summary';
 type SelectedMessage = { id: string; nativeId?: string; seq?: number; role: 'user' | 'assistant'; text: string; article: HTMLElement; turn?: number };
 export type MessageMenuOptions = {
+  textForMessage: (id: string) => string;
+  notify: (text: string, kind?: 'success' | 'error') => void;
   sessionId?: string;
   request?: UseChat['request'];
   onOpenSession?: (sessionId: string) => void;
@@ -23,7 +25,7 @@ export type MessageMenuOptions = {
   onNavigateTurns?: () => void;
 };
 
-export function useMessageMenu(textForMessage: (id: string) => string, notify: (text: string, kind?: 'success' | 'error') => void, options: MessageMenuOptions = {}) {
+export function useMessageMenu({ textForMessage, notify, ...options }: MessageMenuOptions) {
   const menuRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<SelectedMessage | undefined>(undefined);
   const pressRef = useRef<{ x: number; y: number; timer: ReturnType<typeof setTimeout> } | undefined>(undefined);

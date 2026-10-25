@@ -23,10 +23,10 @@ test('website links only expose HTTP and HTTPS destinations', () => {
 
 test('browser stream URLs encode tab and session identifiers without changing query meaning', () => {
   assert.equal(
-    getBrowserStreamUrl('tab/a?b', 'session & one', true, 5),
+    getBrowserStreamUrl({ targetId: 'tab/a?b', sessionId: 'session & one', isShowingAll: true, fps: 5 }),
     '/api/native/browser/tabs/tab%2Fa%3Fb/stream.mjpeg?fps=5&session=session+%26+one&all=true',
   )
-  assert.equal(getBrowserStreamUrl('tab'), '/api/native/browser/tabs/tab/stream.mjpeg?fps=2')
+  assert.equal(getBrowserStreamUrl({ targetId: 'tab' }), '/api/native/browser/tabs/tab/stream.mjpeg?fps=2')
 })
 
 test('tab responses preserve explicit asleep metadata and reject malformed timestamps', () => {

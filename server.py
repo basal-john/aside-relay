@@ -17,9 +17,11 @@ import contextlib
 import json
 import logging
 import re
+import secrets
 import subprocess
 import time
 import uuid
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -28,7 +30,6 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 import browser
 import cfaccess
 import config
-import conversation_pins
 import daemondb
 import fonts
 import followups
@@ -84,10 +85,14 @@ def _token_of(request: Request) -> str:
     return request.cookies.get(COOKIE, "")
 
 
+def _is_valid_token(token: str) -> bool:
+    return secrets.compare_digest(token.encode(), config.BEARER.encode())
+
+
 async def require_auth(request: Request) -> None:
     if not config.BEARER:          # 토큰 미설정 = 로컬 개발 모드
         return
-    if _token_of(request) != config.BEARER:
+    if not _is_valid_token(_token_of(request)):
         raise HTTPException(status_code=401, detail="unauthorized")
 
 
@@ -109,15 +114,19 @@ async def api_session_details(session_id: str):
     if sessions.session_dir(session_id) is None:
         raise HTTPException(404, "unknown session")
     try:
-        session = await daemon.call("sessions.get", {"accountId": ACCOUNT_ID, "sessionId": session_id})
-        previews = await daemon.call("sessions.listPreviewItems", {"accountId": ACCOUNT_ID,
-            "sessionIds": [session_id], "limit": 1, "archived": "include"})
-        preview = previews[0] if previews else {}
-        return {"id": session_id, "title": session.get("title") or "Conversation",
-                "status": session["status"], "isPinned": bool(preview.get("pinned"))}
+        return await _session_details(session_id)
     except Exception:
         log.exception("conversation details failed session=%s", session_id)
         raise HTTPException(502, "Could not load conversation options.")
+
+
+async def _session_details(session_id: str) -> dict:
+    session = await daemon.call("sessions.get", {"accountId": ACCOUNT_ID, "sessionId": session_id})
+    previews = await daemon.call("sessions.listPreviewItems", {"accountId": ACCOUNT_ID,
+        "sessionIds": [session_id], "limit": 1, "archived": "include"})
+    preview = previews[0] if previews else {}
+    return {"id": session_id, "title": session.get("title") or "Conversation",
+            "status": session["status"], "isPinned": bool(preview.get("pinned"))}
 
 
 @app.patch("/api/sessions/{session_id}", dependencies=[Auth])
@@ -139,9 +148,7 @@ async def api_update_session(session_id: str, payload: dict):
             if "isPinned" in payload:
                 await daemon.call("sessions.update", {"accountId": ACCOUNT_ID, "sessionId": session_id,
                     "pinned": payload["isPinned"]}, mutation=True)
-            return await api_session_details(session_id)
-        except HTTPException:
-            raise
+            return await _session_details(session_id)
         except Exception:
             log.exception("conversation update failed session=%s", session_id)
             raise HTTPException(502, "Could not update the conversation.")
@@ -355,10 +362,14 @@ async def web_token(request: Request):
     assertion = request.headers.get("cf-access-jwt-assertion")
     if not assertion:
         raise HTTPException(401, "no Access assertion")
-    email = await cfaccess.verify(
-        _http, assertion, aud=config.ACCESS_AUD,
-        allowed_emails=config.ACCESS_EMAILS, allowed_cns=config.ACCESS_SERVICE_CNS,
-    )
+    try:
+        email = await cfaccess.verify(
+            _http, assertion, aud=config.ACCESS_AUD,
+            allowed_emails=config.ACCESS_EMAILS, allowed_cns=config.ACCESS_SERVICE_CNS,
+        )
+    except (httpx.HTTPError, OSError, ValueError) as error:
+        log.warning("Access verification unavailable: %s", error)
+        raise HTTPException(503, "Access verification unavailable") from error
     if not email:
         raise HTTPException(403, "Access assertion rejected")
     log.info("web-token issued to %s", email)
@@ -375,7 +386,7 @@ def _token_response(request: Request, via: str, email: str | None) -> JSONRespon
     body = {"token": config.BEARER, "via": via}
     if email:
         body["email"] = email
-    r = JSONResponse(body)
+    r = JSONResponse(body, headers={"Cache-Control": "no-store"})
     r.set_cookie(
         COOKIE, config.BEARER,
         max_age=60 * 60 * 24 * 30, httponly=True, samesite="lax",
@@ -516,7 +527,6 @@ async def api_delete_session(session_id: str):
             raise HTTPException(502, "Aside could not delete the conversation. Refresh the list and try again.")
     await hub.forget_session(session_id)
     await followup_queue.clear(session_id)
-    await asyncio.to_thread(conversation_pins.set_pinned, session_id, False)
     return {"deleted": True, "sessionId": session_id}
 
 
@@ -836,7 +846,12 @@ async def api_tabs(refresh: bool = False, session: str | None = None, all: bool 
     if session and sessions.session_dir(session) is None:
         raise HTTPException(404, "Conversation not found.")
     tabs = await browser.list_tabs(force=refresh, session_id=session, show_all=all)
-    return {"count": len(tabs), "tabs": tabs}
+    return {"count": len(tabs), "tabs": _public_tabs(tabs)}
+
+
+def _public_tabs(tabs: list[dict]) -> list[dict]:
+    fields = ("targetId", "title", "url", "favicon", "active", "loaded", "lastAccessed")
+    return [{key: tab[key] for key in fields if key in tab} for tab in tabs]
 
 
 @app.get("/api/tabs/{target_id}/shot", dependencies=[Auth])
@@ -846,8 +861,9 @@ async def api_tab_shot(target_id: str, full: bool = False, q: int = Query(62, ge
         await browser.find_tab(target_id, session_id=session, show_all=all)
     path, _meta = await browser.screenshot(target_id, full=full, quality=q,
                                            max_age=0 if fresh else None, session_id=session, show_all=all)
-    return FileResponse(path, media_type="image/jpeg",
-                        headers={"Cache-Control": "no-cache"})
+    frame = await asyncio.to_thread(path.read_bytes)
+    return Response(content=frame, media_type="image/jpeg",
+                    headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/tabs/{target_id}/text", dependencies=[Auth])
@@ -858,8 +874,8 @@ async def api_tab_text(target_id: str, interactive: bool = False, session: str |
 @app.post("/api/tabs", dependencies=[Auth])
 async def api_open_tab(payload: dict, session: str | None = None):
     url = payload.get("url")
-    if not isinstance(url, str) or not url.strip():
-        raise HTTPException(400, "url required")
+    if not browser.is_web_url(url):
+        raise HTTPException(400, "Use a full http:// or https:// address.")
     return await browser.open_tab(url.strip(), session_id=session)
 
 
@@ -895,14 +911,35 @@ class Hub:
         self.clients: set[WebSocket] = set()
         self._subs: dict[str, set[WebSocket]] = {}
         self._tasks: dict[str, asyncio.Task] = {}
+        self._subscription_locks: dict[str, asyncio.Lock] = {}
         self._stream_tasks: dict[str, asyncio.Task] = {}
         self._committed_assistants: dict[str, list[tuple[object, object]]] = {}
 
     async def subscribe(self, ws: WebSocket, session_id: str, from_seq: int, from_offset: int) -> None:
-        self._subs.setdefault(session_id, set()).add(ws)
-        if session_id not in self._tasks or self._tasks[session_id].done():
-            self._tasks[session_id] = asyncio.create_task(
-                self._pump(session_id, from_offset, from_seq))
+        is_dead = False
+        lock = self._subscription_locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            self._subs.setdefault(session_id, set()).add(ws)
+            task = self._tasks.get(session_id)
+            if task and not task.done():
+                messages, offset = await asyncio.to_thread(sessions.read_messages, session_id)
+                try:
+                    for message in messages:
+                        if message["seq"] >= from_seq:
+                            await asyncio.wait_for(ws.send_text(json.dumps({
+                                "op": "msg", "sessionId": session_id, "message": message,
+                            }, ensure_ascii=False)), timeout=5)
+                except Exception:
+                    is_dead = True
+                if task.done():
+                    next_seq = messages[-1]["seq"] + 1 if messages else 0
+                    self._tasks[session_id] = asyncio.create_task(
+                        self._pump(session_id, offset, next_seq))
+            else:
+                self._tasks[session_id] = asyncio.create_task(
+                    self._pump(session_id, from_offset, from_seq))
+        if is_dead:
+            self.unsubscribe(ws, session_id)
 
     def unsubscribe(self, ws: WebSocket, session_id: str | None = None) -> None:
         targets = [session_id] if session_id else list(self._subs)
@@ -919,11 +956,13 @@ class Hub:
 
     async def broadcast(self, session_id: str, payload: dict) -> None:
         dead = []
-        for ws in list(self._subs.get(session_id, ())):
-            try:
-                await ws.send_text(json.dumps(payload, ensure_ascii=False))
-            except Exception:
-                dead.append(ws)
+        lock = self._subscription_locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            for ws in list(self._subs.get(session_id, ())):
+                try:
+                    await asyncio.wait_for(ws.send_text(json.dumps(payload, ensure_ascii=False)), timeout=5)
+                except Exception:
+                    dead.append(ws)
         for ws in dead:
             self.unsubscribe(ws)
 
@@ -1017,12 +1056,11 @@ class Hub:
         }
         if run.error or run.exit_code:
             payload["message"] = runner.safe_run_error(run.error or run.output)
-        await self.broadcast(sid, payload)
-        log.info("run.done broadcast session=%s", sid)
         notifications = [push_ntfy(sid, run)]
         if not run.is_aborted:
             notifications.append(self._push_answer(sid, run))
-        await asyncio.gather(*notifications)
+        await asyncio.gather(self.broadcast(sid, payload), *notifications)
+        log.info("run.done broadcast session=%s", sid)
 
     async def _push_answer(self, session_id: str, run: "runner.Run") -> None:
         try:
@@ -1291,9 +1329,17 @@ async def api_run_request(request_id: str):
 async def ws_endpoint(ws: WebSocket):
     if config.BEARER:
         header = ws.headers.get("authorization", "")
-        supplied = (header[7:].strip() if header.lower().startswith("bearer ")
-                    else ws.cookies.get(COOKIE, ""))
-        if supplied != config.BEARER:
+        has_bearer = header.lower().startswith("bearer ")
+        supplied = header[7:].strip() if has_bearer else ws.cookies.get(COOKIE, "")
+        origin = ws.headers.get("origin")
+        host = ws.headers.get("host", "")
+        is_origin_allowed = True
+        if not has_bearer and origin:
+            try:
+                is_origin_allowed = urlsplit(origin).netloc.lower() == host.lower()
+            except ValueError:
+                is_origin_allowed = False
+        if not _is_valid_token(supplied) or not is_origin_allowed:
             await ws.close(code=4401)
             return
     await ws.accept()
@@ -1476,7 +1522,7 @@ async def _handle_ws(ws: WebSocket, msg: dict) -> None:
             await _send(ws, {"op": "error", "requestId": rid,
                              "message": runner.safe_run_error(exc)})
             return
-        await _send(ws, {"op": "tabs", "requestId": rid, "count": len(tabs), "tabs": tabs})
+        await _send(ws, {"op": "tabs", "requestId": rid, "count": len(tabs), "tabs": _public_tabs(tabs)})
         return
 
     await _send(ws, {"op": "error", "requestId": rid, "message": f"unknown op: {op}"})

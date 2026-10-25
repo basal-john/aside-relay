@@ -1,3 +1,6 @@
+import { isRecord } from './responses';
+import { formatBytes } from './format';
+import type { UseChat } from './types';
 import { useEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Copy, Download, File, FileCode2, FileImage, FileText, Pencil, Trash2 } from 'lucide-react';
@@ -7,18 +10,21 @@ import { Dialog, DialogActions, DialogDescription } from './Dialog';
 import { Sheet, ICON_STROKE } from './ui';
 import { tokens } from './tokens.stylex';
 
-type Artifact = { name: string; path: string; absolutePath: string; bytes: number; mtime: number; mime: string; kind: 'image' | 'pdf' | 'html' | 'text' | 'csv' | 'binary'; previewUrl: string };
+const ARTIFACT_KINDS = ['image', 'pdf', 'html', 'text', 'csv', 'binary'] as const;
+type Artifact = { name: string; path: string; absolutePath: string; bytes: number; mtime: number; kind: typeof ARTIFACT_KINDS[number] };
 
 export function Artifacts({ sessionId, request, notify, onClose, onZoom }: {
   sessionId: string;
-  request: (path: string, init?: RequestInit) => Promise<Response>;
+  request: UseChat['request'];
   notify: (text: string, kind?: 'error' | 'success') => void;
   onClose: () => void;
   onZoom?: (src: string) => void;
 }) {
   const [items, setItems] = useState<Artifact[]>([]);
   const [selected, setSelected] = useState<Artifact>();
-  const [textPreview, setTextPreview] = useState('');
+  const [textPreview, setTextPreview] = useState<string>();
+  const [previewError, setPreviewError] = useState('');
+  const [previewRevision, setPreviewRevision] = useState(0);
   const [isLoading, setLoading] = useState(true);
   const [isRenaming, setRenaming] = useState(false);
   const [isDeleting, setDeleting] = useState(false);
@@ -29,8 +35,8 @@ export function Artifacts({ sessionId, request, notify, onClose, onZoom }: {
     setLoading(true);
     try {
       const response = await request(`/api/native/files/sessions/${encodeURIComponent(sessionId)}/artifacts`, { signal });
-      if (!response.ok) throw new Error(await response.text());
       const next = parseArtifacts(await response.json());
+      if (signal?.aborted) return;
       setItems(next);
       setSelected(current => current && next.find(item => item.path === current.path));
     } catch (error) {
@@ -42,17 +48,24 @@ export function Artifacts({ sessionId, request, notify, onClose, onZoom }: {
 
   useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort(); }, [sessionId]);
   useEffect(() => {
-    if (!selected || !['text', 'csv'].includes(selected.kind)) { setTextPreview(''); return; }
+    if (!selected || !['text', 'csv'].includes(selected.kind)) { setTextPreview(undefined); setPreviewError(''); return; }
     const controller = new AbortController();
     const params = new URLSearchParams({ path: selected.path });
+    setTextPreview(undefined);
+    setPreviewError('');
     request(`/api/native/files/sessions/${encodeURIComponent(sessionId)}/artifact-preview?${params}`, { signal: controller.signal }).then(async response => {
-      if (!response.ok) throw new Error(await response.text());
       const payload: unknown = await response.json();
       if (!isRecord(payload) || typeof payload.content !== 'string') throw new Error('Invalid file preview.');
+      if (controller.signal.aborted) return;
       setTextPreview(payload.content);
-    }).catch(error => { if (!controller.signal.aborted) notify(error instanceof Error ? error.message : 'Could not preview this file.', 'error'); });
+    }).catch(error => {
+      if (!controller.signal.aborted) {
+        const message = error instanceof Error ? error.message : 'Could not preview this file.';
+        setPreviewError(message); notify(message, 'error');
+      }
+    });
     return () => controller.abort();
-  }, [request, selected, sessionId]);
+  }, [previewRevision, request, selected, sessionId]);
 
   const selectedUrl = selected && `/api/native/files/sessions/${encodeURIComponent(sessionId)}/artifacts/${selected.path.split('/').map(encodeURIComponent).join('/')}`;
 
@@ -60,8 +73,7 @@ export function Artifacts({ sessionId, request, notify, onClose, onZoom }: {
     if (!selected || !name.trim()) return;
     setSaving(true);
     try {
-      const response = await request(selectedUrl!, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
-      if (!response.ok) throw new Error(await response.text());
+      await request(selectedUrl!, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
       setRenaming(false); await load(); notify('File renamed.', 'success');
     } catch (error) { notify(error instanceof Error ? error.message : 'Could not rename this file.', 'error'); }
     finally { setSaving(false); }
@@ -71,8 +83,7 @@ export function Artifacts({ sessionId, request, notify, onClose, onZoom }: {
     if (!selected) return;
     setSaving(true);
     try {
-      const response = await request(selectedUrl!, { method: 'DELETE' });
-      if (!response.ok) throw new Error(await response.text());
+      await request(selectedUrl!, { method: 'DELETE' });
       setDeleting(false); setSelected(undefined); await load(); notify('File deleted.', 'success');
     } catch (error) { notify(error instanceof Error ? error.message : 'Could not delete this file.', 'error'); }
     finally { setSaving(false); }
@@ -87,8 +98,8 @@ export function Artifacts({ sessionId, request, notify, onClose, onZoom }: {
         {selected.kind === 'image' && (onZoom ? <button type="button" aria-label={`Open ${selected.name}`} {...stylex.props(styles.mediaButton)} onClick={() => onZoom(selectedUrl!)}><img src={selectedUrl} alt={selected.name} {...stylex.props(styles.media)} /></button> : <img src={selectedUrl} alt={selected.name} {...stylex.props(styles.media)} />)}
         {selected.kind === 'pdf' && <iframe src={selectedUrl} title={selected.name} {...stylex.props(styles.frame)} />}
         {selected.kind === 'html' && <iframe src={selectedUrl} title={selected.name} sandbox="" {...stylex.props(styles.frame)} />}
-        {selected.kind === 'text' && <pre {...stylex.props(styles.code)}>{textPreview || 'Loading preview…'}</pre>}
-        {selected.kind === 'csv' && <CsvPreview content={textPreview} />}
+        {selected.kind === 'text' && (previewError ? <PreviewError message={previewError} onRetry={() => setPreviewRevision(value => value + 1)} /> : <pre {...stylex.props(styles.code)}>{textPreview ?? 'Loading preview…'}</pre>)}
+        {selected.kind === 'csv' && (previewError ? <PreviewError message={previewError} onRetry={() => setPreviewRevision(value => value + 1)} /> : <CsvPreview content={textPreview} />)}
         {selected.kind === 'binary' && <div {...stylex.props(styles.emptyPreview)}><File size={36} /><p {...stylex.props(styles.emptyText)}>This file cannot be previewed here.</p><a href={`${selectedUrl}?download=true`} download={selected.name} {...stylex.props(styles.emptyLink)}>Download file</a></div>}
       </> : <div {...stylex.props(styles.emptyPreview)}><FileText size={36} /><p {...stylex.props(styles.emptyText)}>Select a file to preview it.</p></div>}</div>
     </div>
@@ -105,15 +116,23 @@ function fileIcon(item: Artifact) {
 function parseArtifacts(value: unknown) {
   if (!isRecord(value) || !Array.isArray(value.items)) return [];
   return value.items.flatMap((item): Artifact[] => {
-    if (!isRecord(item) || typeof item.name !== 'string' || typeof item.path !== 'string' || typeof item.absolutePath !== 'string' || typeof item.bytes !== 'number' || typeof item.mtime !== 'number' || typeof item.mime !== 'string' || typeof item.previewUrl !== 'string' || !['image', 'pdf', 'html', 'text', 'csv', 'binary'].includes(String(item.kind))) return [];
-    return [{ name: item.name, path: item.path, absolutePath: item.absolutePath, bytes: item.bytes, mtime: item.mtime, mime: item.mime, previewUrl: item.previewUrl, kind: item.kind as Artifact['kind'] }];
+    if (!isRecord(item) || typeof item.name !== 'string' || typeof item.path !== 'string' || typeof item.absolutePath !== 'string' || typeof item.bytes !== 'number' || typeof item.mtime !== 'number' || !isArtifactKind(item.kind)) return [];
+    return [{ name: item.name, path: item.path, absolutePath: item.absolutePath, bytes: item.bytes, mtime: item.mtime, kind: item.kind }];
   });
 }
 
-function CsvPreview({ content }: { content: string }) {
-  if (!content) return <p role="status" {...stylex.props(styles.empty)}>Loading preview…</p>;
+function isArtifactKind(value: unknown): value is Artifact['kind'] {
+  return ARTIFACT_KINDS.some(kind => kind === value);
+}
+
+function CsvPreview({ content }: { content?: string }) {
+  if (content === undefined) return <p role="status" {...stylex.props(styles.empty)}>Loading preview…</p>;
   const rows = parseCsv(content).slice(0, 200);
   return <div {...stylex.props(styles.tableWrap)}><table {...stylex.props(styles.table)}><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.slice(0, 50).map((cell, cellIndex) => rowIndex === 0 ? <th key={cellIndex} {...stylex.props(styles.cell, styles.headingCell)}>{cell}</th> : <td key={cellIndex} {...stylex.props(styles.cell)}>{cell}</td>)}</tr>)}</tbody></table></div>;
+}
+
+function PreviewError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return <div role="alert" {...stylex.props(styles.emptyPreview)}><FileText size={36} /><p {...stylex.props(styles.emptyText)}>{message}</p><Button size="compact" onClick={onRetry}>Try again</Button></div>;
 }
 
 function parseCsv(content: string) {
@@ -129,8 +148,6 @@ function parseCsv(content: string) {
   return rows;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null; }
-function formatBytes(bytes: number) { return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
 
 const styles = stylex.create({
   header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 },

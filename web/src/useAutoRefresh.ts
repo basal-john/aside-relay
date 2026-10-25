@@ -13,7 +13,12 @@ export function useAutoRefresh(refresh: (signal: AbortSignal) => Promise<void>, 
 
     function wake() {
       window.clearTimeout(timer)
-      if (isDisposed || document.visibilityState === "hidden" || navigator.onLine === false) return
+      if (isDisposed) return
+      if (document.visibilityState === "hidden") {
+        controller?.abort()
+        return
+      }
+      if (navigator.onLine === false) return
       if (isPending) {
         shouldRefreshAgain = true
         return
@@ -36,12 +41,16 @@ export function useAutoRefresh(refresh: (signal: AbortSignal) => Promise<void>, 
     wake()
     document.addEventListener("visibilitychange", wake)
     window.addEventListener("online", wake)
+    window.addEventListener("pageshow", wake)
+    window.addEventListener("focus", wake)
     return () => {
       isDisposed = true
       controller?.abort()
       window.clearTimeout(timer)
       document.removeEventListener("visibilitychange", wake)
       window.removeEventListener("online", wake)
+      window.removeEventListener("pageshow", wake)
+      window.removeEventListener("focus", wake)
     }
   }, [refresh, interval, isEnabled])
 }

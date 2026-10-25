@@ -145,6 +145,9 @@ class WebPushStore:
                    for key, value in self._presence.items())
 
     async def complete(self, session_id: str, run_id: str, *, text: str, title: str, has_error: bool) -> None:
+        if not self.subscriptions:
+            log.info("Notification skipped (reason=no subscriptions).")
+            return
         body = re.sub(r"</?citation\b[^>]*>", "", text, flags=re.IGNORECASE).strip()
         if has_error:
             body = "Your response could not finish. Tap to open the conversation."
@@ -153,7 +156,10 @@ class WebPushStore:
 
         async def send(subscription_id: str, record: dict) -> None:
             async with self._send_slots:
-                if self.is_focused(subscription_id) or subscription_id not in self.subscriptions:
+                if subscription_id not in self.subscriptions:
+                    return
+                if self.is_focused(subscription_id):
+                    log.info("Notification skipped (reason=focused).")
                     return
                 origin = record["origin"]
                 notification = {
@@ -181,12 +187,13 @@ class WebPushStore:
                     notification["body"] = body[:low] + "…"
                     data = payload()
                 try:
-                    await asyncio.to_thread(
+                    response = await asyncio.to_thread(
                         webpush, subscription_info=record["subscription"], data=data,
                         vapid_private_key=str(self.key_path),
                         vapid_claims={"sub": origin if origin.startswith("https:") else "https://github.com/mym0404/aside-relay"},
                         ttl=PUSH_TTL_SEC, timeout=PUSH_TIMEOUT_SEC, headers={"Urgency": "high"},
                     )
+                    log.info("Notification accepted by push service (status=%s).", response.status_code)
                 except WebPushException as error:
                     status = error.response.status_code if error.response is not None else None
                     if status in (404, 410) and self.subscriptions.get(subscription_id) == record:
