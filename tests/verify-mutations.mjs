@@ -13,6 +13,8 @@ const mutations = [
     before: '!Number.isSafeInteger(result) || result < 0', after: '!Number.isSafeInteger(result)' },
   { name: 'private error log exposure', file: 'web/src/errors.ts', test: 'browser-errors',
     before: 'return GENERIC_ERROR_MESSAGE;', after: 'return message ?? GENERIC_ERROR_MESSAGE;' },
+  { name: 'draft action on a preview card', file: 'web/src/drafts.ts', test: 'drafts',
+    before: "action: language.endsWith('-draft') ? 'Post' : undefined", after: "action: 'Post'" },
 ];
 
 function run(test) {
