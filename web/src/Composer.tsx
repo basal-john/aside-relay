@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { ArrowUp, FileText, Mic, Plus, Square, X } from 'lucide-react';
+import { ArrowUp, FileText, Folder, Globe2, Mic, Plus, Sparkles, Square, X, type LucideIcon } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { tokens } from './tokens.stylex';
 import { ICON_STROKE, OPEN_DIALOG_SELECTOR, BrowserIcon, IconButton, styles as ui } from './ui';
@@ -18,6 +18,7 @@ import {
 } from './slashCommands';
 
 type Attachment = { key: string; preview?: string; name: string; mime: string; upload?: UploadAttachment; hasError?: boolean };
+type ContextChip = ContextReference & { key: string };
 type SpeechRecognitionResult = { 0?: { transcript?: string } };
 type SpeechRecognitionEvent = { resultIndex: number; results: ArrayLike<SpeechRecognitionResult> };
 type SpeechRecognitionLike = { continuous: boolean; interimResults: boolean; lang: string; onresult?: (event: SpeechRecognitionEvent) => void; onend?: () => void; onerror?: () => void; start: () => void; stop: () => void };
@@ -38,7 +39,9 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
   const folderInput = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | undefined>(undefined);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [contextChips, setContextChips] = useState<ContextChip[]>([]);
   const [hasFocus, setFocus] = useState(false);
+  const contextChipsRef = useRef<ContextChip[]>([]);
   const [followUpBehavior, setFollowUpBehavior] = useState<'queue' | 'steer'>('queue');
   useEffect(() => {
     if (!chat.isReady || chat.authError) return;
@@ -90,6 +93,7 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
   const revisionRef = useRef(revision);
   useEffect(() => { draftRef.current = draft; }, [draft]);
   useEffect(() => { attachmentRef.current = attachments; }, [attachments]);
+  useEffect(() => { contextChipsRef.current = contextChips; }, [contextChips]);
   useEffect(() => {
     if (!chat.recoveredAttachments.length) return;
     const restored = chat.recoveredAttachments.map(upload => ({ key: crypto.randomUUID(), preview: upload.mime.startsWith('image/') ? upload.url : undefined, name: upload.name, mime: upload.mime, upload }));
@@ -99,6 +103,7 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
     revisionRef.current = revision;
     pendingPreviewRevokesRef.current.push(...attachmentRef.current.flatMap(attachment => attachment.preview ? [attachment.preview] : []));
     attachmentRef.current = []; setAttachments([]);
+    contextChipsRef.current = []; setContextChips([]);
     if (!document.querySelector(OPEN_DIALOG_SELECTOR)) input.current?.focus({ preventScroll: true });
   }, [revision]);
   useEffect(() => () => {
@@ -126,8 +131,8 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
     return () => { observer.disconnect(); document.fonts.removeEventListener('loadingdone', resizeInput); };
   }, [isExpanded]);
   const hasUploadPending = attachments.some(attachment => !attachment.upload && !attachment.hasError);
-  const hasInput = draft.length > 0 || attachments.length > 0;
-  const hasDraftContent = draft.trim().length > 0 || attachments.some(attachment => attachment.upload);
+  const hasInput = draft.length > 0 || attachments.length > 0 || contextChips.length > 0;
+  const hasDraftContent = draft.trim().length > 0 || attachments.some(attachment => attachment.upload) || contextChips.length > 0;
   const hasSlashSubmit = !!parseSubmittedSlash(draft);
   const canSubmit = chat.isReady && !chat.authError && !chat.isOpening && !modelSelection.isUpdating && !hasUploadPending && (hasSlashSubmit || ((!!chat.sessionId || !!modelSelection.current) && hasDraftContent));
   const shouldQueue = chat.isRunning || chat.queuedMessages.length > 0;
@@ -182,18 +187,18 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
     }
   }
 
+  function addContextChip(reference: ContextReference) {
+    setContextChips(current => {
+      if (current.some(item => item.value === reference.value)) return current;
+      const next = [...current, { ...reference, key: crypto.randomUUID() }];
+      contextChipsRef.current = next;
+      return next;
+    });
+    requestAnimationFrame(() => input.current?.focus({ preventScroll: true }));
+  }
+
   function addContext(reference: ContextReference) {
-    const area = input.current;
-    const start = area?.selectionStart ?? draftRef.current.length;
-    const end = area?.selectionEnd ?? start;
-    const before = draftRef.current.slice(0, start);
-    const after = draftRef.current.slice(end);
-    const prefix = before && !/\s$/.test(before) ? ' ' : '';
-    const suffix = after && !/^\s/.test(after) ? ' ' : '';
-    const next = `${before}${prefix}${reference.value}${suffix}${after}`;
-    const nextCursor = before.length + prefix.length + reference.value.length + suffix.length;
-    draftRef.current = next; setDraft(next); setCursor(nextCursor);
-    requestAnimationFrame(() => { area?.focus({ preventScroll: true }); area?.setSelectionRange(nextCursor, nextCursor); });
+    addContextChip(reference);
   }
 
   function replaceSlashToken(replacement: string) {
@@ -231,7 +236,8 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
 
   function chooseSlashItem(item: SlashItem) {
     if (item.kind === 'skill') {
-      replaceSlashToken(skillReference(item.skill));
+      replaceSlashToken('');
+      addContextChip({ kind: 'skill', label: item.skill.name, value: skillReference(item.skill) });
       return;
     }
     if (item.command.argsPlaceholder) {
@@ -240,6 +246,13 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
     }
     replaceSlashToken('');
     void runSlashCommand(item.command.id);
+  }
+
+  function composePrompt(text: string, chips: ContextChip[]) {
+    const refs = chips.map(chip => chip.value).join('\n');
+    if (!refs) return text;
+    if (!text.trim()) return refs;
+    return `${refs}\n\n${text}`;
   }
 
   function toggleDictation() {
@@ -261,27 +274,32 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
 
   async function submit() {
     const slashSubmit = parseSubmittedSlash(draftRef.current);
-    if (slashSubmit && !attachments.some(attachment => attachment.upload)) {
+    if (slashSubmit && !attachments.some(attachment => attachment.upload) && contextChipsRef.current.length === 0) {
       draftRef.current = ''; setDraft(''); setCursor(0);
       input.current?.blur();
       await runSlashCommand(slashSubmit.command.id, slashSubmit.args);
       return;
     }
     if (!canSubmit) return;
-    const sentDraft = draftRef.current; const sentRevision = revisionRef.current;
+    const sentChips = contextChipsRef.current;
+    const sentText = draftRef.current;
+    const sentDraft = composePrompt(sentText, sentChips);
+    const sentRevision = revisionRef.current;
     const sentAttachments = attachmentRef.current;
     const uploads = sentAttachments.flatMap(attachment => attachment.upload ? [attachment.upload] : []);
     sentAttachments.forEach(attachment => { if (attachment.preview) submittedPreviewRevokesRef.current.set(attachment.preview, { canRevoke: false, hasUnmounted: false }); });
     draftRef.current = ''; setDraft(''); setCursor(0);
     attachmentRef.current = []; setAttachments([]);
+    contextChipsRef.current = []; setContextChips([]);
     input.current?.blur();
     const accepted = shouldQueue ? await chat.queue(sentDraft, uploads, chat.isRunning && followUpBehavior === 'steer') : await chat.send(sentDraft, uploads, modelSelection.current, runOptions);
     const shouldRestore = !accepted && sentRevision === revisionRef.current;
     if (shouldRestore) {
       sentAttachments.forEach(attachment => { if (attachment.preview) submittedPreviewRevokesRef.current.delete(attachment.preview); });
       attachmentRef.current = [...sentAttachments, ...attachmentRef.current].slice(0, MAX_ATTACHMENTS); setAttachments(attachmentRef.current);
-      if (sentDraft) {
-        const restoredDraft = draftRef.current ? sentDraft + '\n\n' + draftRef.current : sentDraft;
+      contextChipsRef.current = [...sentChips, ...contextChipsRef.current]; setContextChips(contextChipsRef.current);
+      if (sentText) {
+        const restoredDraft = draftRef.current ? sentText + '\n\n' + draftRef.current : sentText;
         draftRef.current = restoredDraft; setDraft(restoredDraft);
       }
       return;
@@ -300,6 +318,14 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
     </div>
     <form {...stylex.props(styles.composer, ui.glass, isExpanded && styles.expandedComposer)} onSubmit={event => { event.preventDefault(); void submit(); }} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addFiles([...event.dataTransfer.files]); }}>
       {slashOpen && <SlashMenu items={slashItems} activeIndex={slashIndex} onActiveIndexChange={setSlashIndex} onSelect={chooseSlashItem} onClose={() => setSlashDismissed(true)} />}
+      <AnimatePresence initial={false}>
+        {contextChips.length > 0 && <motion.div key="context-chips" {...stylex.props(styles.contextChips)} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: .18 }}>
+          {contextChips.map(chip => <ContextChipItem key={chip.key} chip={chip} onRemove={() => {
+            const next = contextChipsRef.current.filter(item => item.key !== chip.key);
+            contextChipsRef.current = next; setContextChips(next);
+          }} />)}
+        </motion.div>}
+      </AnimatePresence>
       <AnimatePresence initial={false} onExitComplete={flushPreviewRevokes}>
         {attachments.length > 0 && <motion.div key="attachments" {...stylex.props(styles.attachments)} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 82 }} exit={{ opacity: 0, height: 0 }} transition={{ duration: .18 }}>
           <AnimatePresence initial={false} onExitComplete={flushPreviewRevokes}>{attachments.map(attachment => <AttachmentItem key={attachment.key} attachment={attachment} onPreviewUnmount={markSubmittedPreviewUnmounted} onRemove={() => { if (attachment.preview) pendingPreviewRevokesRef.current.push(attachment.preview); attachmentRef.current = attachmentRef.current.filter(item => item.key !== attachment.key); setAttachments(attachmentRef.current); }} />)}</AnimatePresence>
@@ -324,6 +350,22 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
     </form>
     <AnimatePresence>{isAddingContext && <ContextPicker request={chat.request} sessionId={chat.sessionId} onSelect={addContext} onChooseFiles={() => fileInput.current?.click()} onChooseFolder={() => folderInput.current?.click()} onClose={() => setAddingContext(false)} />}</AnimatePresence>
   </footer>;
+}
+
+const CONTEXT_CHIP_ICONS: Record<ContextReference['kind'], LucideIcon> = {
+  skill: Sparkles,
+  tab: Globe2,
+  folder: Folder,
+  file: FileText,
+};
+
+function ContextChipItem({ chip, onRemove }: { chip: ContextChip; onRemove: () => void }) {
+  const Icon = CONTEXT_CHIP_ICONS[chip.kind];
+  return <span {...stylex.props(styles.contextChip)}>
+    <Icon size={15} strokeWidth={ICON_STROKE} aria-hidden="true" />
+    <span {...stylex.props(styles.contextChipLabel)}>{chip.label}</span>
+    <button type="button" aria-label={'Remove ' + chip.label} {...stylex.props(styles.contextChipRemove)} onClick={onRemove}><X size={14} strokeWidth={2} /></button>
+  </span>;
 }
 
 function AttachmentItem({ attachment, onPreviewUnmount, onRemove }: { attachment: Attachment; onPreviewUnmount: (preview: string) => void; onRemove: () => void }) {
@@ -362,6 +404,10 @@ const styles = stylex.create({
   submitActions: { display: 'flex', gridColumn: 3, alignItems: 'center', gap: 4, minWidth: 0 },
   stop: { width: 38, height: 38, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderStyle: 'solid', borderColor: tokens.primary, backgroundColor: tokens.primary, color: tokens.primaryForeground, flexShrink: 0 },
   send: { width: 38, height: 38, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderWidth: 0, backgroundColor: tokens.primary, color: tokens.primaryForeground, flexShrink: 0 },
+  contextChips: { order: -3, gridColumn: '1 / -1', display: 'flex', flexWrap: 'wrap', gap: 8, padding: '4px 10px 8px', maxWidth: '100%', minWidth: 0 },
+  contextChip: { display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: '100%', minHeight: 32, padding: '4px 6px 4px 10px', borderRadius: 999, backgroundColor: tokens.canvas, color: tokens.text, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border },
+  contextChipLabel: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '.8125rem', fontWeight: 550 },
+  contextChipRemove: { display: 'grid', placeItems: 'center', width: 24, height: 24, flexShrink: 0, borderWidth: 0, borderRadius: '50%', color: tokens.muted, backgroundColor: 'transparent' },
   attachments: { order: -2, gridColumn: '1 / -1', display: 'flex', gap: 10, overflowX: 'auto', padding: '0 10px 10px', maxWidth: '100%', minWidth: 0 },
   attachment: { position: 'relative', width: 72, height: 72, flexShrink: 0 },
   thumbnail: { width: '100%', height: '100%', objectFit: 'cover', borderRadius: 14 },

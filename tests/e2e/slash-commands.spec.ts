@@ -24,7 +24,7 @@ test('typing / opens slash commands and selecting New starts a chat', async ({ p
   await expect(menu).toHaveCount(0);
 });
 
-test('selecting a slash skill inserts the skill reference', async ({ page, mockAside }) => {
+test('selecting a slash skill shows a removable chip, not raw markdown', async ({ page, mockAside }) => {
   mockAside.skills = [
     { name: 'demo-skill', path: 'user/demo-skill', description: 'Demo skill for slash menu', enabled: true },
   ];
@@ -36,6 +36,11 @@ test('selecting a slash skill inserts the skill reference', async ({ page, mockA
   await expect(menu.getByRole('option', { name: /demo-skill/ })).toBeVisible();
   await menu.getByRole('option', { name: /demo-skill/ }).click();
 
-  await expect(composer).toHaveValue('[@skill "demo-skill"](user/demo-skill)');
+  await expect(composer).toHaveValue('');
+  await expect(page.getByRole('button', { name: 'Remove demo-skill' })).toBeVisible();
+  await expect(page.locator('#composer')).not.toContainText('[@skill');
   await expect(menu).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Remove demo-skill' }).click();
+  await expect(page.getByRole('button', { name: 'Remove demo-skill' })).toHaveCount(0);
 });
