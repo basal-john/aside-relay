@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { ArrowUp, FileText, Mic, Plus, Square, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
@@ -6,7 +6,16 @@ import { tokens } from './tokens.stylex';
 import { ICON_STROKE, OPEN_DIALOG_SELECTOR, BrowserIcon, IconButton, styles as ui } from './ui';
 import type { RunOptions, UploadAttachment, UseChat } from './types';
 import { ModelPicker, useModelSelection } from './ModelPicker';
-import { ContextPicker, type ContextReference } from './ContextPicker';
+import { ContextPicker, parseSkills, type ContextReference, type ContextSkill } from './ContextPicker';
+import { SlashMenu } from './SlashMenu';
+import {
+  filterSlashItems,
+  parseSubmittedSlash,
+  skillReference,
+  slashQueryAt,
+  type SlashCommandId,
+  type SlashItem,
+} from './slashCommands';
 
 type Attachment = { key: string; preview?: string; name: string; mime: string; upload?: UploadAttachment; hasError?: boolean };
 type SpeechRecognitionResult = { 0?: { transcript?: string } };
@@ -18,8 +27,8 @@ const MAX_ATTACHMENTS = 12;
 const COMPACT_DRAFT_HEIGHT = 28;
 const MAX_DRAFT_HEIGHT = 160;
 
-export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, textSize, uiFont, isKeyboardOpen, runOptions }: {
-  chat: UseChat; onBrowser: () => void; draft: string; setDraft: (value: string) => void; revision: number; notify: (text: string, kind?: 'error' | 'success') => void; textSize: number; uiFont: string; isKeyboardOpen: boolean; runOptions?: RunOptions;
+export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, textSize, uiFont, isKeyboardOpen, runOptions, onNewChat, onConfirmClear }: {
+  chat: UseChat; onBrowser: () => void; draft: string; setDraft: (value: string) => void; revision: number; notify: (text: string, kind?: 'error' | 'success') => void; textSize: number; uiFont: string; isKeyboardOpen: boolean; runOptions?: RunOptions; onNewChat: () => void; onConfirmClear: () => void;
 }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const footerRef = useRef<HTMLElement>(null);
@@ -47,6 +56,10 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
   }, [chat.request, chat.isReady, chat.authError]);
   const [isAddingContext, setAddingContext] = useState(false);
   const [isDictating, setDictating] = useState(false);
+  const [skills, setSkills] = useState<ContextSkill[]>([]);
+  const [cursor, setCursor] = useState(0);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [slashDismissed, setSlashDismissed] = useState(false);
   const [speechRecognition] = useState<SpeechRecognitionConstructor | undefined>(() => {
     const browser = window as typeof window & { SpeechRecognition?: SpeechRecognitionConstructor; webkitSpeechRecognition?: SpeechRecognitionConstructor };
     return browser.SpeechRecognition ?? browser.webkitSpeechRecognition;
@@ -54,7 +67,23 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
   const isExpanded = isKeyboardOpen || hasFocus && matchMedia('(pointer: fine)').matches;
   const attachmentRef = useRef<Attachment[]>([]);
   const draftRef = useRef(draft);
-  // A touch submits before iOS can blur the input; its later click must not send again or activate the replacement Stop button.
+  const slashQuery = useMemo(() => slashQueryAt(draft, cursor), [draft, cursor]);
+  const slashItems = useMemo(
+    () => slashQuery ? filterSlashItems(slashQuery.query, skills, slashQuery.char === '/') : [],
+    [slashQuery, skills],
+  );
+  const slashOpen = !!slashQuery && !chat.authError && !slashDismissed;
+  useEffect(() => { setSlashIndex(0); setSlashDismissed(false); }, [slashQuery?.char, slashQuery?.query, slashQuery?.start]);
+  useEffect(() => {
+    if (!slashOpen || !chat.isReady || chat.authError) return;
+    const controller = new AbortController();
+    void chat.request('/api/native/workspace/skills', { signal: controller.signal })
+      .then(response => response.json())
+      .then(value => { if (!controller.signal.aborted) setSkills(parseSkills(value)); })
+      .catch(() => { if (!controller.signal.aborted) setSkills([]); });
+    return () => controller.abort();
+  }, [slashOpen, chat.request, chat.isReady, chat.authError]);
+  // A touch submits before iOS can blur the input. Its later click must not send again or activate the replacement Stop button.
   const isTouchSubmissionRef = useRef(false);
   const pendingPreviewRevokesRef = useRef<string[]>([]);
   const submittedPreviewRevokesRef = useRef(new Map<string, { canRevoke: boolean; hasUnmounted: boolean }>());
@@ -99,7 +128,8 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
   const hasUploadPending = attachments.some(attachment => !attachment.upload && !attachment.hasError);
   const hasInput = draft.length > 0 || attachments.length > 0;
   const hasDraftContent = draft.trim().length > 0 || attachments.some(attachment => attachment.upload);
-  const canSubmit = chat.isReady && !chat.authError && !chat.isOpening && !modelSelection.isUpdating && (!!chat.sessionId || !!modelSelection.current) && !hasUploadPending && hasDraftContent;
+  const hasSlashSubmit = !!parseSubmittedSlash(draft);
+  const canSubmit = chat.isReady && !chat.authError && !chat.isOpening && !modelSelection.isUpdating && !hasUploadPending && (hasSlashSubmit || ((!!chat.sessionId || !!modelSelection.current) && hasDraftContent));
   const shouldQueue = chat.isRunning || chat.queuedMessages.length > 0;
   const submitLabel = shouldQueue ? chat.isRunning && followUpBehavior === 'steer' ? 'Steer message' : 'Queue message' : chat.isSending ? 'Starting response' : 'Send message';
   function flushPreviewRevokes() { pendingPreviewRevokesRef.current.splice(0).forEach(preview => URL.revokeObjectURL(preview)); }
@@ -161,9 +191,55 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
     const prefix = before && !/\s$/.test(before) ? ' ' : '';
     const suffix = after && !/^\s/.test(after) ? ' ' : '';
     const next = `${before}${prefix}${reference.value}${suffix}${after}`;
-    const cursor = before.length + prefix.length + reference.value.length + suffix.length;
-    draftRef.current = next; setDraft(next);
-    requestAnimationFrame(() => { area?.focus({ preventScroll: true }); area?.setSelectionRange(cursor, cursor); });
+    const nextCursor = before.length + prefix.length + reference.value.length + suffix.length;
+    draftRef.current = next; setDraft(next); setCursor(nextCursor);
+    requestAnimationFrame(() => { area?.focus({ preventScroll: true }); area?.setSelectionRange(nextCursor, nextCursor); });
+  }
+
+  function replaceSlashToken(replacement: string) {
+    const area = input.current;
+    const active = slashQueryAt(draftRef.current, area?.selectionStart ?? draftRef.current.length);
+    if (!active) return;
+    const next = `${draftRef.current.slice(0, active.start)}${replacement}${draftRef.current.slice(active.end)}`;
+    const nextCursor = active.start + replacement.length;
+    draftRef.current = next; setDraft(next); setCursor(nextCursor);
+    requestAnimationFrame(() => { area?.focus({ preventScroll: true }); area?.setSelectionRange(nextCursor, nextCursor); });
+  }
+
+  async function runSlashCommand(id: SlashCommandId, args?: string) {
+    if (id === 'new') { onNewChat(); return; }
+    if (id === 'feedback') {
+      notify('Send feedback from the Aside desktop app for now.', 'error');
+      return;
+    }
+    if (!chat.sessionId) {
+      notify('Open a conversation first.', 'error');
+      return;
+    }
+    if (id === 'clear') { onConfirmClear(); return; }
+    try {
+      await chat.request(`/api/native/sessions/${encodeURIComponent(chat.sessionId)}/command`, {
+        method: 'POST',
+        body: JSON.stringify(args ? { command: 'compact', instructions: args } : { command: 'compact' }),
+      });
+      await chat.refreshMessages();
+      notify('Context compacted.', 'success');
+    } catch {
+      notify('Could not compact this conversation.', 'error');
+    }
+  }
+
+  function chooseSlashItem(item: SlashItem) {
+    if (item.kind === 'skill') {
+      replaceSlashToken(skillReference(item.skill));
+      return;
+    }
+    if (item.command.argsPlaceholder) {
+      replaceSlashToken(`${item.command.text} `);
+      return;
+    }
+    replaceSlashToken('');
+    void runSlashCommand(item.command.id);
   }
 
   function toggleDictation() {
@@ -184,12 +260,19 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
   }
 
   async function submit() {
+    const slashSubmit = parseSubmittedSlash(draftRef.current);
+    if (slashSubmit && !attachments.some(attachment => attachment.upload)) {
+      draftRef.current = ''; setDraft(''); setCursor(0);
+      input.current?.blur();
+      await runSlashCommand(slashSubmit.command.id, slashSubmit.args);
+      return;
+    }
     if (!canSubmit) return;
     const sentDraft = draftRef.current; const sentRevision = revisionRef.current;
     const sentAttachments = attachmentRef.current;
     const uploads = sentAttachments.flatMap(attachment => attachment.upload ? [attachment.upload] : []);
     sentAttachments.forEach(attachment => { if (attachment.preview) submittedPreviewRevokesRef.current.set(attachment.preview, { canRevoke: false, hasUnmounted: false }); });
-    draftRef.current = ''; setDraft('');
+    draftRef.current = ''; setDraft(''); setCursor(0);
     attachmentRef.current = []; setAttachments([]);
     input.current?.blur();
     const accepted = shouldQueue ? await chat.queue(sentDraft, uploads, chat.isRunning && followUpBehavior === 'steer') : await chat.send(sentDraft, uploads, modelSelection.current, runOptions);
@@ -216,13 +299,23 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
       <ModelPicker selection={modelSelection} disabled={!chat.isReady || chat.isOpening || chat.isSending || !!chat.authError} isRunning={chat.isRunning} />
     </div>
     <form {...stylex.props(styles.composer, ui.glass, isExpanded && styles.expandedComposer)} onSubmit={event => { event.preventDefault(); void submit(); }} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addFiles([...event.dataTransfer.files]); }}>
+      {slashOpen && <SlashMenu items={slashItems} activeIndex={slashIndex} onActiveIndexChange={setSlashIndex} onSelect={chooseSlashItem} onClose={() => setSlashDismissed(true)} />}
       <AnimatePresence initial={false} onExitComplete={flushPreviewRevokes}>
         {attachments.length > 0 && <motion.div key="attachments" {...stylex.props(styles.attachments)} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 82 }} exit={{ opacity: 0, height: 0 }} transition={{ duration: .18 }}>
           <AnimatePresence initial={false} onExitComplete={flushPreviewRevokes}>{attachments.map(attachment => <AttachmentItem key={attachment.key} attachment={attachment} onPreviewUnmount={markSubmittedPreviewUnmounted} onRemove={() => { if (attachment.preview) pendingPreviewRevokesRef.current.push(attachment.preview); attachmentRef.current = attachmentRef.current.filter(item => item.key !== attachment.key); setAttachments(attachmentRef.current); }} />)}</AnimatePresence>
         </motion.div>}
       </AnimatePresence>
       <div {...stylex.props(styles.inputActions)}><IconButton label="Add to message" aria-haspopup="dialog" style={{ width: 36, height: 36 }} disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={() => setAddingContext(true)}><Plus size={24} strokeWidth={ICON_STROKE} /></IconButton>{speechRecognition && <IconButton label={isDictating ? 'Stop dictation' : 'Dictate'} aria-pressed={isDictating} style={{ width: 36, height: 36 }} disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={toggleDictation}><Mic size={21} strokeWidth={ICON_STROKE} /></IconButton>}</div>
-      <textarea ref={input} id="draft" aria-label="Message" placeholder={chat.authError ? 'Connect in Settings' : chat.isRunning ? 'Follow up' : 'Message'} rows={1} value={draft} disabled={!chat.isReady || chat.isOpening || !!chat.authError} {...stylex.props(styles.input, isExpanded && styles.expandedInput)} onChange={event => { draftRef.current = event.target.value; setDraft(event.target.value); }} onPaste={event => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); void addFiles(files); } }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && matchMedia('(pointer: fine)').matches) { event.preventDefault(); void submit(); } }} />
+      <textarea ref={input} id="draft" aria-label="Message" placeholder={chat.authError ? 'Connect in Settings' : chat.isRunning ? 'Follow up' : 'Message'} rows={1} value={draft} disabled={!chat.isReady || chat.isOpening || !!chat.authError} {...stylex.props(styles.input, isExpanded && styles.expandedInput)} onChange={event => { draftRef.current = event.target.value; setDraft(event.target.value); setCursor(event.target.selectionStart); }} onSelect={event => setCursor(event.currentTarget.selectionStart)} onClick={event => setCursor(event.currentTarget.selectionStart)} onKeyUp={event => setCursor(event.currentTarget.selectionStart)} onPaste={event => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); void addFiles(files); } }} onKeyDown={event => {
+        if (slashOpen && slashItems.length) {
+          if (event.key === 'ArrowDown') { event.preventDefault(); setSlashIndex(index => (index + 1) % slashItems.length); return; }
+          if (event.key === 'ArrowUp') { event.preventDefault(); setSlashIndex(index => (index - 1 + slashItems.length) % slashItems.length); return; }
+          if (event.key === 'Escape') { event.preventDefault(); replaceSlashToken(''); return; }
+          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); chooseSlashItem(slashItems[Math.min(slashIndex, slashItems.length - 1)]!); return; }
+          if (event.key === 'Tab' && !event.shiftKey) { event.preventDefault(); chooseSlashItem(slashItems[Math.min(slashIndex, slashItems.length - 1)]!); return; }
+        }
+        if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && matchMedia('(pointer: fine)').matches) { event.preventDefault(); void submit(); }
+      }} />
       <div {...stylex.props(styles.submitActions)}>{chat.isRunning && !hasInput
         ? <motion.button key="stop" type="button" aria-label={chat.isStopping ? 'Stopping response' : 'Stop response'} title="Stop response" disabled={chat.isStopping} aria-busy={chat.isStopping} whileTap={shouldReduceMotion ? undefined : { scale: .88 }} {...stylex.props(styles.stop)} onPointerDown={event => { isTouchSubmissionRef.current = false; if (event.pointerType === 'touch') event.preventDefault(); }} onClick={event => { if (event.detail === 0 || !isTouchSubmissionRef.current) void chat.abort(); }}><Square size={13} fill="currentColor" /></motion.button>
         : <motion.button key="send" type="submit" id="send" aria-label={submitLabel} title={submitLabel} disabled={!canSubmit} whileTap={shouldReduceMotion ? undefined : { scale: .88 }} {...stylex.props(styles.send)} onPointerDown={event => { isTouchSubmissionRef.current = event.pointerType === 'touch'; if (isTouchSubmissionRef.current) { event.preventDefault(); void submit(); } }} onClick={event => { if (isTouchSubmissionRef.current && event.detail > 0) event.preventDefault(); }}><ArrowUp size={22} strokeWidth={2.2} /></motion.button>}</div>
@@ -260,7 +353,7 @@ const styles = stylex.create({
   footer: { position: 'absolute', bottom: 0, left: 0, width: '100%', zIndex: 3, pointerEvents: 'none', padding: '6px max(32px, env(safe-area-inset-right)) var(--composer-bottom-padding, max(18px, env(safe-area-inset-bottom))) max(32px, env(safe-area-inset-left))', '@media (max-width: 375px)': { paddingLeft: 20, paddingRight: 20 } },
   expandedFooter: { paddingLeft: 'max(16px, env(safe-area-inset-left))', paddingRight: 'max(16px, env(safe-area-inset-right))' },
   tools: { display: 'var(--composer-tools-display, none)', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 10, minWidth: 0 },
-  composer: { display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr) auto', alignItems: 'center', width: '100%', maxWidth: 736, margin: '0 auto', borderRadius: 30, padding: '2px 4px', minWidth: 0, pointerEvents: 'auto' },
+  composer: { position: 'relative', display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr) auto', alignItems: 'center', width: '100%', maxWidth: 736, margin: '0 auto', borderRadius: 30, padding: '2px 4px', minWidth: 0, pointerEvents: 'auto' },
   expandedComposer: { borderRadius: 28, padding: 8 },
   input: { display: 'block', width: '100%', resize: 'none', borderWidth: 0, backgroundColor: 'transparent', color: tokens.text, fontSize: '1rem', lineHeight: 1.5, minHeight: COMPACT_DRAFT_HEIGHT, maxHeight: MAX_DRAFT_HEIGHT, overflowY: 'auto', overflowWrap: 'anywhere', padding: '2px 4px', '::placeholder': { color: tokens.muted } },
   expandedInput: { order: -1, gridColumn: '1 / -1', minHeight: 44, padding: '8px 10px 12px' },
