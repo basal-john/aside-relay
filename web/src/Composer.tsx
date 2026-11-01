@@ -167,13 +167,17 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
     if (files.length > remaining) notify(`You can attach up to ${MAX_ATTACHMENTS} files.`, 'error');
     const generation = revisionRef.current;
     for (const file of files.slice(0, remaining)) {
-      const key = crypto.randomUUID(); const isPreviewableImage = /^image\/(jpeg|png|gif|webp)$/.test(file.type);
+      const key = crypto.randomUUID(); const isPreviewableImage = /^image\/(jpeg|png|gif|webp)$/.test(file.type) || isHeif(file);
       const preview = isPreviewableImage ? URL.createObjectURL(file) : undefined;
       const slot = { key, preview, name: file.webkitRelativePath || file.name, mime: file.type || 'application/octet-stream' };
       attachmentRef.current = [...attachmentRef.current, slot]; setAttachments(attachmentRef.current);
       try {
-        const prepared = isPreviewableImage ? await resizeImage(file) : file;
-        const uploadFile = slot.name === prepared.name ? prepared : new File([prepared], slot.name, { type: prepared.type, lastModified: prepared.lastModified });
+        let readable: File;
+        try { readable = new File([await file.arrayBuffer()], file.name, { type: file.type, lastModified: file.lastModified }); }
+        catch (error) { notify(`Couldn't read ${file.name} on this phone. If it is in iCloud, open it in Photos first, then try again.`, 'error'); throw error; }
+        const prepared = isPreviewableImage ? await resizeImage(readable).catch(() => readable) : readable;
+        const uploadName = prepared.type === 'image/jpeg' && isHeif(file) ? slot.name.replace(/\.[^./]+$/, '') + '.jpg' : slot.name;
+        const uploadFile = uploadName === prepared.name ? prepared : new File([prepared], uploadName, { type: prepared.type, lastModified: prepared.lastModified });
         const upload = await chat.upload(uploadFile);
         if (generation !== revisionRef.current) { if (preview) URL.revokeObjectURL(preview); continue; }
         attachmentRef.current = attachmentRef.current.map(attachment => attachment.key === key ? { ...attachment, upload, mime: upload.mime } : attachment);
@@ -377,15 +381,21 @@ function AttachmentItem({ attachment, onPreviewUnmount, onRemove }: { attachment
   </motion.div>;
 }
 
+/** HEIC/HEIF photos from the iPhone, matched by type or by extension when Safari leaves the type empty. */
+function isHeif(file: File) {
+  return /^image\/hei[cf](-sequence)?$/.test(file.type) || (!file.type && /\.hei[cf]$/i.test(file.name));
+}
+
 async function resizeImage(file: File) {
   const image = new Image(); const url = URL.createObjectURL(file);
   try {
     image.src = url; await image.decode();
     const scale = Math.min(1, 1600 / Math.max(image.width, image.height));
-    if (scale === 1 || file.type === 'image/gif') return file;
+    const heif = isHeif(file);
+    if ((scale === 1 && !heif) || file.type === 'image/gif') return file;
     const canvas = document.createElement('canvas'); canvas.width = Math.round(image.width * scale); canvas.height = Math.round(image.height * scale);
     const context = canvas.getContext('2d'); if (!context) throw new Error('Image processing unavailable'); context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    const mime = file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png';
+    const mime = file.type === 'image/jpeg' || heif ? 'image/jpeg' : 'image/png';
     const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(result => result ? resolve(result) : reject(new Error('Image processing failed')), mime, 0.85));
     return new File([blob], file.name.replace(/\.[^.]+$/, '') + (mime === 'image/jpeg' ? '.jpg' : '.png'), { type: blob.type });
   } finally { URL.revokeObjectURL(url); }
