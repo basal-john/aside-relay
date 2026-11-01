@@ -15,6 +15,8 @@ import hashlib
 import io
 import logging
 import os
+import subprocess
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -92,6 +94,10 @@ def save(raw: bytes, name: str | None = None) -> dict:
     if not raw or len(raw) > config.UPLOAD_MAX_BYTES:
         raise ValueError("File is empty or exceeds the upload size limit")
     kind = sniff(raw, name)
+    if not kind and _is_heif(raw):
+        raw = _heif_to_jpeg(raw)
+        name = Path(name or "photo").stem + ".jpg"
+        kind = sniff(raw, name)
     if not kind:
         raise ValueError("Choose an image, PDF, video, Office document, or UTF-8 text/code file")
     mime, ext = kind
@@ -126,6 +132,30 @@ def save(raw: bytes, name: str | None = None) -> dict:
         "bytes": len(raw),
         "url": f"/api/upload/{fid}",
     }
+
+
+_HEIF_BRANDS = (b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"hevm", b"hevs", b"mif1", b"msf1")
+
+
+def _is_heif(raw: bytes) -> bool:
+    """Return True for HEIC/HEIF stills, which iOS sends from Files, paste and drag."""
+    return len(raw) >= 12 and raw[4:8] == b"ftyp" and raw[8:12] in _HEIF_BRANDS
+
+
+def _heif_to_jpeg(raw: bytes) -> bytes:
+    """Convert a HEIC/HEIF image to a JPEG capped at 1600 px with macOS sips."""
+    with tempfile.TemporaryDirectory() as tmp:
+        source, target = Path(tmp) / "in.heic", Path(tmp) / "out.jpg"
+        source.write_bytes(raw)
+        result = subprocess.run(
+            ["/usr/bin/sips", "-s", "format", "jpeg", "-s", "formatOptions", "85", "-Z", "1600",
+             str(source), "--out", str(target)],
+            capture_output=True, timeout=60,
+        )
+        if result.returncode != 0 or not target.is_file():
+            log.warning("HEIC conversion failed: %s", result.stderr.decode(errors="replace")[:200])
+            raise ValueError("Could not convert this HEIC photo")
+        return target.read_bytes()
 
 
 def path_of(fid: str) -> Path | None:

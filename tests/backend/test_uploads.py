@@ -116,6 +116,24 @@ class UploadsTest(support.IsolatedBackendTest):
         self.assertEqual(oversized.status_code, 413)
         self.assertEqual(unsupported.status_code, 415)
 
+    async def test_upload_api_converts_heic_photos_to_jpeg(self):
+        import subprocess
+        source = next(Path("/System/Library/Desktop Pictures").glob("*.heic"), None)
+        if source is None:
+            self.skipTest("no HEIC sample on this host")
+        heic = self.root / "photo.heic"
+        subprocess.run(["/usr/bin/sips", "-Z", "400", str(source), "--out", str(heic)], check=True, capture_output=True)
+
+        response = self.client.post(
+            "/api/upload", headers={**self.auth, "X-Filename": "IMG_0001.HEIC"}, content=heic.read_bytes()
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["mime"], "image/jpeg")
+        self.assertEqual(body["name"], "IMG_0001.jpg")
+        self.assertTrue((self.uploads_root / body["id"]).read_bytes().startswith(b"\xff\xd8\xff"))
+
 
 if __name__ == "__main__":
     import unittest
