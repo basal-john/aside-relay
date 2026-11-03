@@ -237,7 +237,7 @@ function readSessionId(value: unknown) {
 }
 
 const styles = stylex.create({
-  menu: { position: 'fixed', inset: 'auto', margin: 0, width: 'min(240px, calc(100vw - 16px))', padding: 6, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, borderRadius: 22, backgroundColor: tokens.surface, color: tokens.text, boxShadow: '0 8px 32px rgb(0 0 0 / .22)', overflowY: 'auto' },
+  menu: { position: 'fixed', inset: 'auto', margin: 0, width: 'min(240px, calc(100vw - 16px))', padding: 6, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.glassBorder, borderRadius: 16, backgroundColor: 'color-mix(in srgb, var(--surface) 86%, transparent)', backdropFilter: 'blur(24px) saturate(180%)', WebkitBackdropFilter: 'blur(24px) saturate(180%)', color: tokens.text, boxShadow: '0 8px 32px rgb(0 0 0 / .22)', overflowY: 'auto' },
   item: { display: 'flex', alignItems: 'center', gap: 14, width: '100%', minHeight: 48, padding: '0 14px', borderWidth: 0, borderRadius: 16, fontFamily: tokens.font, fontSize: '1rem', color: tokens.text, backgroundColor: { default: 'transparent', ':hover': tokens.hover }, textAlign: 'left' },
   editor: { width: '100%', minHeight: 132, resize: 'vertical', lineHeight: 1.5 },
 });

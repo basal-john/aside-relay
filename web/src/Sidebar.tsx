@@ -1,10 +1,10 @@
 import { parseProjects } from './responses';
 import { APP_NAME } from './brand';
-import { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { motion, useReducedMotion } from 'motion/react';
 import { Virtuoso } from 'react-virtuoso';
-import { ArrowDownUp, ChevronLeft, ChevronRight, Ellipsis, EyeOff, Grid2X2, List, Pin, Plus, Search, Settings2, SquarePen, X } from 'lucide-react';
+import { Archive, ArrowDownUp, ChevronLeft, ChevronRight, Ellipsis, EyeOff, Grid2X2, List, Pin, PinOff, Plus, Search, Settings2, SquarePen, Trash2, X } from 'lucide-react';
 import type { ChatSession, SessionSettings, UseChat } from './types';
 import type { SessionMenuTarget } from './SessionMenu';
 import { tokens } from './tokens.stylex';
@@ -18,15 +18,17 @@ const NATIVE_REFRESH_INTERVAL_MS = 5_000;
 type Project = { id: string; name: string };
 type StatusFilter = '' | 'running' | 'suspended' | 'idle' | 'interrupted' | 'errored';
 type SidebarSession = ChatSession & { archived?: boolean; projectId?: string; statusLabel?: string; suspensionKind?: string };
-type SidebarRow = { kind: 'heading'; group: string } | { kind: 'session'; session: SidebarSession } | { kind: 'more' };
+type SidebarRow = { kind: 'heading'; group: string } | { kind: 'session'; session: SidebarSession } | { kind: 'pins'; sessions: SidebarSession[] } | { kind: 'more' };
+const SWIPE_ACTION_WIDTH = 74;
 
-export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen, onSettings, onBrowser, onMenu }: {
-  chat: UseChat; isDrawer?: boolean; onClose?: () => void; onNew: () => void; onNewIncognito?: () => void; onOpen: (id: string) => void; onSettings: () => void; onBrowser: () => void; onMenu: (target: SessionMenuTarget) => void;
+export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen, onSettings, onBrowser, onMenu, onDelete }: {
+  chat: UseChat; isDrawer?: boolean; onClose?: () => void; onNew: () => void; onNewIncognito?: () => void; onOpen: (id: string) => void; onSettings: () => void; onBrowser: () => void; onMenu: (target: SessionMenuTarget) => void; onDelete?: (session: { id: string; title: string }) => void;
 }) {
   const shouldReduceMotion = useReducedMotion();
   const tabs = useContext(TabContext);
   const isPhone = useIsPhone();
   const isPage = !!isDrawer && !!tabs && isPhone;
+  const [swipedId, setSwipedId] = useState<string>();
   const [isShowingAll, setShowingAll] = useState(false);
   const [recentLimit, setRecentLimit] = useState(DEFAULT_RECENT_CHAT_LIMIT);
   useEffect(() => {
@@ -164,10 +166,20 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen
     return anchor && session ? { id: session.id, title: session.title, anchor, archived: session.archived, projectId: session.projectId, unread: session.unread, status: session.status } : undefined;
   }
   let lastGroup = '';
-  const rows: SidebarRow[] = visibleSessions.flatMap(session => {
+  const showsPinCards = isPage && view === 'active' && !chat.searchQuery.trim() && layout === 'list';
+  const pinCards = showsPinCards ? visibleSessions.filter(session => session.isPinned) : [];
+  const rows: SidebarRow[] = [...(pinCards.length ? [{ kind: 'pins' as const, sessions: pinCards }] : []), ...visibleSessions.filter(session => !pinCards.includes(session)).flatMap(session => {
     const group = view === 'active' && session.isPinned ? 'Pinned' : dateGroup(session.mtime); const hasHeading = group !== lastGroup; lastGroup = group;
     return [...(hasHeading ? [{ kind: 'heading' as const, group }] : []), { kind: 'session' as const, session }];
-  });
+  })];
+  async function setPinned(session: SidebarSession) {
+    setSwipedId(undefined);
+    if (await chat.updateSession(session.id, { isPinned: !session.isPinned }, { isPinned: !!session.isPinned })) window.dispatchEvent(new Event(SESSION_CHANGE_EVENT));
+  }
+  async function archive(session: SidebarSession) {
+    setSwipedId(undefined);
+    if (await chat.updateSession(session.id, { archived: true }, { archived: false, unread: !!session.unread })) window.dispatchEvent(new Event(SESSION_CHANGE_EVENT));
+  }
   if (isExpanded && (nextCursor != null || isLoadingMoreNative)) rows.push({ kind: 'more' });
   return <aside {...stylex.props(styles.sidebar, isPage && styles.page)} aria-label="Conversations" onPointerDown={event => {
     cancelPress(); hasLongPressed.current = false;
@@ -199,16 +211,24 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen
       <IconButton label={layout === 'list' ? 'Card view' : 'List view'} onClick={() => setLayout(current => current === 'list' ? 'card' : 'list')}>{layout === 'list' ? <Grid2X2 size={17} strokeWidth={ICON_STROKE} /> : <List size={17} strokeWidth={ICON_STROKE} />}</IconButton>
     </div>}
     <div {...stylex.props(styles.list, isPage && styles.pageList)}>
-      {rows.length > 0 && <Virtuoso data={rows} initialItemCount={12} defaultItemHeight={layout === 'card' ? 76 : 50} increaseViewportBy={150} style={{ height: '100%' }} computeItemKey={(_, row) => row.kind === 'heading' ? row.group : row.kind === 'more' ? 'load-more' : row.session.id} components={recentSessionListComponents} itemContent={(_, row) => {
+      {rows.length > 0 && <Virtuoso data={rows} initialItemCount={12} defaultItemHeight={layout === 'card' ? 76 : 50} increaseViewportBy={150} style={{ height: '100%' }} computeItemKey={(_, row) => row.kind === 'heading' ? row.group : row.kind === 'more' ? 'load-more' : row.kind === 'pins' ? 'pinned-cards' : row.session.id} components={recentSessionListComponents} itemContent={(_, row) => {
         if (row.kind === 'heading') return <h2 {...stylex.props(styles.group)}>{row.group}</h2>;
+        if (row.kind === 'pins') return <div {...stylex.props(styles.pins)}>{row.sessions.map(session => <div key={session.id} {...stylex.props(styles.pinWrap)}><button type="button" data-session-id={session.id} aria-current={session.id === chat.sessionId ? 'page' : undefined} {...stylex.props(styles.pinCard)} onClick={() => onOpen(session.id)}><span {...stylex.props(styles.pinTitle)}>{session.title || 'Untitled conversation'}</span><span {...stylex.props(styles.pinMeta)}><Pin size={12} strokeWidth={ICON_STROKE} aria-label="Pinned" />Pinned</span></button><button type="button" {...stylex.props(styles.pinOptions)} aria-label={'Options for ' + (session.title || 'conversation')} aria-haspopup="menu" onClick={event => onMenu({ id: session.id, title: session.title, anchor: event.currentTarget, archived: session.archived, projectId: session.projectId, unread: session.unread, status: session.status })}><Ellipsis size={17} strokeWidth={ICON_STROKE} aria-hidden="true" /></button></div>)}</div>;
         if (row.kind === 'more') return <Button {...stylex.props(styles.more)} disabled={isLoadingMoreNative} onClick={() => { void loadMoreNative(); }}>{isLoadingMoreNative ? 'Loading…' : 'Show more'}<ChevronRight size={16} /></Button>;
         const session = row.session;
         const isRunning = session.status === 'running' || session.id === chat.sessionId && chat.isRunning;
         const needsAttention = !!session.suspensionKind || session.status === 'suspended' || session.status === 'waiting';
-        return <div {...stylex.props(styles.session, isPage && styles.pageSession, layout === 'card' && styles.card, session.id === chat.sessionId && styles.selected)}>
+        const isRunningNow = isRunning;
+        const rowContent = <div {...stylex.props(styles.session, isPage && styles.pageSession, layout === 'card' && styles.card, session.id === chat.sessionId && styles.selected)}>
           <button data-session-id={session.id} {...stylex.props(styles.sessionButton, isPage && styles.pageSessionButton, layout === 'card' && styles.cardButton)} title={session.statusLabel ? `${session.title || 'Untitled conversation'} · ${session.statusLabel}` : session.title || 'Untitled conversation'} aria-current={session.id === chat.sessionId ? 'page' : undefined} onClick={() => onOpen(session.id)}><span {...stylex.props(styles.sessionCopy)}><span {...stylex.props(styles.sessionTitle)}>{session.title || 'Untitled conversation'}</span>{layout === 'card' && session.statusLabel && <span {...stylex.props(styles.statusLabel)}>{session.statusLabel}</span>}</span>{session.isPinned && <Pin {...stylex.props(styles.pin)} size={13} strokeWidth={ICON_STROKE} aria-label="Pinned" />}{isRunning ? <span {...stylex.props(styles.status)} role="img" aria-label="Running"><motion.span {...stylex.props(styles.spinner)} aria-hidden="true" animate={shouldReduceMotion ? undefined : { rotate: 360 }} transition={{ duration: .8, repeat: Infinity, ease: 'linear' }} /></span> : needsAttention ? <span {...stylex.props(styles.status)} role="img" aria-label={session.statusLabel || 'Needs attention'}><span {...stylex.props(styles.attention)} /></span> : session.status === 'errored' ? <span {...stylex.props(styles.status)} role="img" aria-label={session.statusLabel || 'Task failed'}><span {...stylex.props(styles.failed)} /></span> : session.unread && session.id !== chat.sessionId ? <span {...stylex.props(styles.status)} role="img" aria-label="Unread"><span {...stylex.props(styles.indicator)} /></span> : undefined}</button>
           <button type="button" {...stylex.props(styles.options)} aria-label={'Options for ' + (session.title || 'conversation')} aria-haspopup="menu" onClick={event => onMenu({ id: session.id, title: session.title, anchor: event.currentTarget, archived: session.archived, projectId: session.projectId, unread: session.unread, status: session.status })}><Ellipsis size={17} strokeWidth={ICON_STROKE} aria-hidden="true" /></button>
         </div>;
+        if (!isPage) return rowContent;
+        return <SwipeRow isOpen={swipedId === session.id} onOpenChange={isOpen => setSwipedId(isOpen ? session.id : undefined)} actions={[
+          { label: session.isPinned ? 'Unpin' : 'Pin', color: '#f29d38', icon: session.isPinned ? <PinOff size={18} strokeWidth={ICON_STROKE} /> : <Pin size={18} strokeWidth={ICON_STROKE} />, onSelect: () => { void setPinned(session); } },
+          { label: 'Archive', color: '#6b6b70', icon: <Archive size={18} strokeWidth={ICON_STROKE} />, onSelect: () => { void archive(session); } },
+          ...(onDelete && !isRunningNow ? [{ label: 'Delete', color: 'var(--danger)', icon: <Trash2 size={18} strokeWidth={ICON_STROKE} />, onSelect: () => { setSwipedId(undefined); onDelete({ id: session.id, title: session.title || 'Untitled conversation' }); } }] : []),
+        ]}>{rowContent}</SwipeRow>;
       }} />}
       {!rows.length && <p role="status" {...stylex.props(styles.empty)}>{isLoadingNative ? 'Loading conversations…' : nativeError ? 'Could not load conversations.' : chat.isLoadingSessions ? 'Loading conversations…' : chat.authError ? 'Connect in Settings to see your conversations.' : chat.searchQuery ? 'No matching conversations' : view === 'archived' ? 'No archived conversations.' : 'Your conversations will appear here.'}</p>}
     </div>
@@ -218,6 +238,42 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen
 }
 
 const recentSessionListComponents = {};
+
+/** A list row that slides left under a finger to reveal its actions, like iOS Mail. Only one row stays open at a time. */
+function SwipeRow({ children, actions, isOpen, onOpenChange }: { children: ReactNode; actions: { label: string; color: string; icon: ReactNode; onSelect: () => void }[]; isOpen: boolean; onOpenChange: (isOpen: boolean) => void }) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const gesture = useRef<{ x: number; y: number; base: number; offset: number; isDragging: boolean } | undefined>(undefined);
+  const width = actions.length * SWIPE_ACTION_WIDTH;
+  const resting = isOpen ? -width : 0;
+  function move(x: number, y: number) {
+    const current = gesture.current; const content = contentRef.current;
+    if (!current || !content) return;
+    const dx = x - current.x; const dy = y - current.y;
+    if (!current.isDragging) {
+      if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) { gesture.current = undefined; return; }
+      if (Math.abs(dx) < 10) return;
+      current.isDragging = true;
+    }
+    current.offset = Math.min(0, Math.max(-width, current.base + dx));
+    content.style.transition = 'none';
+    content.style.transform = `translateX(${current.offset}px)`;
+  }
+  function finish() {
+    const current = gesture.current; const content = contentRef.current;
+    gesture.current = undefined;
+    if (!current?.isDragging || !content) return;
+    content.style.removeProperty('transition');
+    content.style.removeProperty('transform');
+    onOpenChange(current.offset < -width / 2);
+  }
+  return <div data-swipe-row="" {...stylex.props(styles.swipeRow)}
+    onTouchStart={event => { const touch = event.touches[0]; if (event.touches.length === 1 && touch) gesture.current = { x: touch.clientX, y: touch.clientY, base: resting, offset: resting, isDragging: false }; }}
+    onTouchMove={event => { const touch = event.touches[0]; if (touch) move(touch.clientX, touch.clientY); }}
+    onTouchEnd={finish} onTouchCancel={finish}>
+    <div {...stylex.props(styles.swipeActions)} style={{ width }} aria-hidden={!isOpen}>{actions.map(action => <button key={action.label} type="button" tabIndex={isOpen ? 0 : -1} {...stylex.props(styles.swipeAction)} style={{ backgroundColor: action.color }} onClick={action.onSelect}>{action.icon}<span>{action.label}</span></button>)}</div>
+    <div ref={contentRef} {...stylex.props(styles.swipeContent)} style={{ transform: `translateX(${resting}px)` }} onClickCapture={event => { if (isOpen) { event.preventDefault(); event.stopPropagation(); onOpenChange(false); } }}>{children}</div>
+  </div>;
+}
 
 function dateGroup(seconds: number) {
   const date = new Date(seconds * 1000); const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -267,13 +323,23 @@ function dateSeconds(value: unknown) {
 
 const styles = stylex.create({
   sidebar: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, width: '100%', backgroundColor: tokens.surface, paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', minWidth: 0 },
+  pins: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10, padding: '4px 8px 14px' },
+  pinWrap: { position: 'relative', minWidth: 0 },
+  pinOptions: { position: 'absolute', top: 0, right: 0, width: 44, height: 44, display: 'grid', placeItems: 'center', borderWidth: 0, backgroundColor: 'transparent', color: tokens.muted },
+  pinCard: { width: '100%', paddingRight: 40, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 8, minHeight: 76, padding: '12px 14px', borderWidth: 0, borderRadius: 18, backgroundColor: { default: tokens.surface, ':hover': tokens.hover }, color: tokens.text, textAlign: 'left', fontFamily: tokens.font },
+  pinTitle: { fontSize: '.9375rem', fontWeight: 650, lineHeight: 1.3, display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden' },
+  pinMeta: { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '.75rem', color: tokens.muted },
+  swipeRow: { position: 'relative', overflow: 'hidden', borderRadius: 14, marginBottom: 2 },
+  swipeActions: { position: 'absolute', top: 1, right: 1, bottom: 1, display: 'flex', borderRadius: 13, overflow: 'hidden' },
+  swipeAction: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, borderWidth: 0, color: '#ffffff', fontFamily: tokens.font, fontSize: '.75rem', fontWeight: 600 },
+  swipeContent: { position: 'relative', backgroundColor: tokens.canvas, transitionProperty: 'transform', transitionDuration: '.22s', transitionTimingFunction: 'cubic-bezier(.22,1,.36,1)' },
   page: { backgroundColor: tokens.canvas, paddingBottom: 'calc(88px + env(safe-area-inset-bottom))' },
   pageBar: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 52, padding: '4px max(6px, env(safe-area-inset-right)) 0 max(6px, env(safe-area-inset-left))', flexShrink: 0 },
   pageActions: { display: 'flex', alignItems: 'center' },
   largeTitle: { margin: 0, padding: '0 20px 10px', fontSize: '2.125rem', fontWeight: 700, letterSpacing: '-.6px', lineHeight: 1.15, flexShrink: 0 },
   pageSearch: { margin: '0 16px 10px', padding: '0 12px', borderRadius: 12, backgroundColor: tokens.bubble },
   pageList: { padding: '0 8px 0' },
-  pageSession: { borderRadius: 14 },
+  pageSession: { borderRadius: 14, marginBottom: 0 },
   pageSessionButton: { minHeight: 52, fontSize: '1rem', padding: '12px 4px 12px 12px' },
   top: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 68, padding: '8px 16px 8px 24px', flexShrink: 0 },
   brand: { display: 'flex', alignItems: 'center', gap: 8, fontSize: '1.3125rem', fontWeight: 650, letterSpacing: '-.5px' },

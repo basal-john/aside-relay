@@ -9,7 +9,7 @@ test('appearance responds immediately, persists fonts and colors and syncs the H
   if (await drawer.isVisible()) await drawer.click();
   await page.getByRole('button', { name: /Settings/ }).click();
   const settings = page.getByRole('dialog', { name: 'Settings' });
-  await settings.getByLabel('Theme mode', { exact: true }).selectOption('dark');
+  await settings.getByRole('radiogroup', { name: 'Theme mode' }).getByRole('radio', { name: 'Dark' }).click();
   await settings.getByLabel('Dark theme', { exact: true }).selectOption('dracula-dark');
   await settings.getByRole('button', { name: 'Primary color #f0b429', exact: true }).click();
   await settings.getByLabel('UI font', { exact: true }).selectOption('inter');
@@ -26,7 +26,7 @@ test('appearance responds immediately, persists fonts and colors and syncs the H
   await settings.getByRole('button', { name: 'Theme default', exact: true }).click();
   await expect(settings.getByLabel('Primary color', { exact: true })).toHaveValue('#ff79c6');
   await settings.getByLabel('Dark theme', { exact: true }).selectOption('relay');
-  await settings.getByLabel('Theme mode', { exact: true }).selectOption('system');
+  await settings.getByRole('radiogroup', { name: 'Theme mode' }).getByRole('radio', { name: 'System' }).click();
   await page.emulateMedia({ colorScheme: 'light' });
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await page.emulateMedia({ colorScheme: 'dark' });

@@ -32,7 +32,7 @@ test.describe('smoke', () => {
     await rememberLastChat(page);
     await page.goto('/');
     await expectBlankChat(page);
-    await expect(page.getByRole('group', { name: 'Starter prompts' }).getByRole('button')).toHaveCount(4);
+    await expect(page.getByRole('group', { name: 'Starter prompts' }).getByRole('button')).toHaveCount(6);
   });
 
   test('a chat link still opens that chat', async ({ page }) => {
@@ -41,11 +41,24 @@ test.describe('smoke', () => {
     await expect(page.getByRole('heading', { name: 'What can I help with?' })).toHaveCount(0);
   });
 
-  test('a starter prompt fills the composer without sending', async ({ page, mockAside }) => {
+  test('a starter fills the composer, keeps the cursor at the end and sends nothing', async ({ page, mockAside }) => {
     await page.goto('/');
-    await page.getByRole('button', { name: /Summarise a page/ }).click();
-    await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('Summarise the page in my current tab.');
+    await expect(page.getByRole('group', { name: 'Starter prompts' }).getByRole('button')).toHaveCount(6);
+    await page.getByRole('button', { name: /Handle a message/ }).click();
+    const composer = page.getByRole('textbox', { name: 'Message' });
+    await expect(composer).toHaveValue('Handle the Slack message from ');
+    await expect(composer).toBeFocused();
+    await page.keyboard.type('Ashok');
+    await expect(composer).toHaveValue('Handle the Slack message from Ashok');
     expect(mockAside.socketMessages.filter(message => message.op === 'run')).toHaveLength(0);
+  });
+
+  test('the 1:1 starter attaches the one-on-one-prep skill as a chip', async ({ page, mockAside }) => {
+    mockAside.skills = [{ name: 'one-on-one-prep', path: 'user/one-on-one-prep', description: '1:1 prep' }];
+    await page.goto('/');
+    await page.getByRole('button', { name: /1:1 prep/ }).click();
+    await expect(page.locator('#composer').getByText('one-on-one-prep')).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('');
   });
 
   test('the header title is the model and opens the model picker', async ({ page }, testInfo) => {
@@ -86,6 +99,82 @@ test.describe('smoke', () => {
 });
 
 test.describe('edge cases', () => {
+  test('the 1:1 starter falls back to text when the skill is missing', async ({ page, mockAside }) => {
+    mockAside.skills = [];
+    await page.goto('/');
+    await page.getByRole('button', { name: /1:1 prep/ }).click();
+    await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('Use my one-on-one-prep skill. ');
+  });
+
+  test('tapping the same starter twice does not stack text', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Reschedule a meeting/ }).click();
+    await page.getByRole('button', { name: /Reschedule a meeting/ }).click();
+    await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('Reschedule my meeting with ');
+  });
+
+  test('a brief socket drop shows no banner, a lasting one does', async ({ page, mockAside }) => {
+    await page.goto(`/c/${SESSION_A}`);
+    await expect(page.getByRole('article', { name: 'Response' })).toContainText('Hello from the assistant.');
+    const socket = Reflect.get(mockAside, 'socket') as { close: (options?: { code?: number }) => Promise<void> };
+    await socket.close({ code: 1006 });
+    await expect(page.getByText('Mac disconnected. Reconnecting…')).toHaveCount(0);
+    await page.waitForTimeout(2_600);
+    await expect(page.getByText('Mac disconnected. Reconnecting…')).toHaveCount(0);
+    await page.routeWebSocket('**/ws', ws => { void ws.close({ code: 1006 }); });
+    const next = Reflect.get(mockAside, 'socket') as { close: (options?: { code?: number }) => Promise<void> };
+    await next.close({ code: 1006 });
+    await expect(page.getByText('Mac disconnected. Reconnecting…')).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('swiping a chat left reveals Pin, Archive and Delete, and Archive archives it', async ({ page, mockAside }, testInfo) => {
+    test.skip(!isPhone(testInfo.project.name), 'Swipe actions are phone-only.');
+    await page.goto('/');
+    await openChats(page);
+    const row = page.locator('[data-swipe-row]').filter({ hasText: 'Charlie conversation' });
+    await expect(row).toBeVisible();
+    await expect(row.locator('[aria-hidden="true"]').first()).toBeAttached();
+    await expect(row.locator('div[aria-hidden="false"]')).toHaveCount(0);
+    await row.evaluate(element => {
+      const box = element.getBoundingClientRect();
+      const point = (x: number) => ({ identifier: 1, target: element, clientX: x, clientY: box.top + box.height / 2 });
+      const fire = (type: string, x: number) => {
+        const event = new Event(type, { bubbles: true, cancelable: true });
+        Object.defineProperty(event, 'touches', { value: type === 'touchend' ? [] : [point(x)] });
+        Object.defineProperty(event, 'changedTouches', { value: [point(x)] });
+        element.dispatchEvent(event);
+      };
+      fire('touchstart', box.right - 20);
+      for (let step = 1; step <= 10; step += 1) fire('touchmove', box.right - 20 - step * 25);
+      fire('touchend', box.right - 270);
+    });
+    await expect(row.locator('div[aria-hidden="false"]')).toHaveCount(1);
+    await expect(row.getByRole('button', { name: 'Pin' })).toBeVisible();
+    await expect(row.getByRole('button', { name: 'Delete' })).toBeVisible();
+    await row.getByRole('button', { name: 'Archive' }).click();
+    await expect.poll(() => mockAside.calls.some(call => call.method === 'POST' && /sessioncharlie03\/archive$/.test(call.path))).toBe(true);
+    await expect(page.getByRole('heading', { name: 'Chats', level: 1 })).toBeVisible();
+  });
+
+  test('pinned chats show as cards on the phone Chats page', async ({ page }, testInfo) => {
+    test.skip(!isPhone(testInfo.project.name), 'Pinned cards are phone-only.');
+    await page.goto('/');
+    await openChats(page);
+    const card = page.getByRole('dialog', { name: 'Conversation menu' }).locator('button[data-session-id="sessionalpha01"]');
+    await expect(card).toContainText('Pinned');
+    await card.click();
+    await expect(page.getByRole('article', { name: 'Response' })).toContainText('Hello from the assistant.');
+  });
+
+  test('theme mode is one Light, Dark, System control and preview cards pick a theme', async ({ page }) => {
+    await page.goto('/settings');
+    const settings = page.getByRole('dialog', { name: 'Settings' });
+    await settings.getByRole('radiogroup', { name: 'Theme mode' }).getByRole('radio', { name: 'Dark' }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await settings.getByRole('group', { name: 'Dark theme previews' }).getByRole('button', { name: /^Dracula dark theme$/ }).click();
+    await expect(settings.getByLabel('Dark theme', { exact: true })).toHaveValue('dracula-dark');
+  });
+
   test('returning after 30 minutes away starts a blank chat', async ({ page }) => {
     await page.clock.install();
     await page.goto(`/c/${SESSION_A}`);
@@ -188,6 +277,9 @@ test.describe('visual capture', () => {
       await expect(page.locator('[data-app-dialog][data-dialog-variant="page"]').getByRole('heading', { name: 'Settings' })).toBeVisible();
       await page.waitForTimeout(400);
       await shot('05-settings');
+      await page.locator('[data-app-dialog][data-dialog-variant="page"]').getByRole('heading', { name: 'Appearance' }).scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+      await shot('06-appearance');
       await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: 'Browser' }).click();
       await expect(page.getByRole('dialog', { name: 'Browser' })).toBeVisible();
       await page.waitForTimeout(600);

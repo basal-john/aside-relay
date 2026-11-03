@@ -24,12 +24,15 @@ type SpeechRecognitionEvent = { resultIndex: number; results: ArrayLike<SpeechRe
 type SpeechRecognitionLike = { continuous: boolean; interimResults: boolean; lang: string; onresult?: (event: SpeechRecognitionEvent) => void; onend?: () => void; onerror?: () => void; start: () => void; stop: () => void };
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
+/** A home-screen starter: text placed in the composer, plus an optional Aside skill attached as a chip. `id` makes repeated taps re-apply. */
+export type Starter = { id: number; text: string; skill?: string };
+
 const MAX_ATTACHMENTS = 12;
 const COMPACT_DRAFT_HEIGHT = 28;
 const MAX_DRAFT_HEIGHT = 160;
 
-export function Composer({ chat, modelSelection, onBrowser, draft, setDraft, revision, notify, textSize, uiFont, isKeyboardOpen, runOptions, onNewChat, onConfirmClear }: {
-  chat: UseChat; modelSelection: ReturnType<typeof useModelSelection>; onBrowser: () => void; draft: string; setDraft: (value: string) => void; revision: number; notify: (text: string, kind?: 'error' | 'success') => void; textSize: number; uiFont: string; isKeyboardOpen: boolean; runOptions?: RunOptions; onNewChat: () => void; onConfirmClear: () => void;
+export function Composer({ chat, modelSelection, starter, onBrowser, draft, setDraft, revision, notify, textSize, uiFont, isKeyboardOpen, runOptions, onNewChat, onConfirmClear }: {
+  chat: UseChat; modelSelection: ReturnType<typeof useModelSelection>; starter?: Starter; onBrowser: () => void; draft: string; setDraft: (value: string) => void; revision: number; notify: (text: string, kind?: 'error' | 'success') => void; textSize: number; uiFont: string; isKeyboardOpen: boolean; runOptions?: RunOptions; onNewChat: () => void; onConfirmClear: () => void;
 }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const footerRef = useRef<HTMLElement>(null);
@@ -190,6 +193,24 @@ export function Composer({ chat, modelSelection, onBrowser, draft, setDraft, rev
     }
   }
 
+  useEffect(() => {
+    if (!starter) return;
+    const controller = new AbortController();
+    const focusEnd = (text: string) => requestAnimationFrame(() => { const area = input.current; area?.focus({ preventScroll: true }); area?.setSelectionRange(text.length, text.length); });
+    draftRef.current = starter.text; setDraft(starter.text); focusEnd(starter.text);
+    const skillName = starter.skill;
+    if (skillName) void chat.request('/api/native/workspace/skills', { signal: controller.signal })
+      .then(response => response.json())
+      .then(value => {
+        if (controller.signal.aborted) return;
+        const skill = parseSkills(value).find(item => item.name === skillName);
+        if (skill) { addContextChip({ kind: 'skill', label: skill.name, value: skillReference(skill) }); return; }
+        const fallback = `Use my ${skillName} skill. ${starter.text}`;
+        draftRef.current = fallback; setDraft(fallback); focusEnd(fallback);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [starter]);
   function addContextChip(reference: ContextReference) {
     setContextChips(current => {
       if (current.some(item => item.value === reference.value)) return current;

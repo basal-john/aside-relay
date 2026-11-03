@@ -115,7 +115,7 @@ const styles = stylex.create({
   image: { width: 100, maxWidth: '100%', height: 100, objectFit: 'cover', borderRadius: 16 },
   file: { display: 'flex', alignItems: 'center', gap: 8, minHeight: 44, maxWidth: '100%', padding: '8px 10px', borderRadius: 12, color: tokens.text, backgroundColor: tokens.surface, overflowWrap: 'anywhere' },
   error: { margin: 0, fontSize: '0.8125rem', color: tokens.danger, overflowWrap: 'anywhere' },
-  menu: { position: 'fixed', inset: 'auto', margin: 0, width: 'min(268px, calc(100vw - 16px))', padding: 8, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, borderRadius: 24, backgroundColor: tokens.surface, color: tokens.text, boxShadow: '0 10px 40px rgb(0 0 0 / .24)', overflowY: 'auto', overflowX: 'hidden' },
+  menu: { position: 'fixed', inset: 'auto', margin: 0, width: 'min(268px, calc(100vw - 16px))', padding: 8, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.glassBorder, borderRadius: 16, backgroundColor: 'color-mix(in srgb, var(--surface) 86%, transparent)', backdropFilter: 'blur(24px) saturate(180%)', WebkitBackdropFilter: 'blur(24px) saturate(180%)', color: tokens.text, boxShadow: '0 10px 40px rgb(0 0 0 / .24)', overflowY: 'auto', overflowX: 'hidden' },
   menuTitle: { margin: '4px 12px 8px', maxWidth: '100%', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', color: tokens.muted, fontSize: '0.8125rem' },
   menuItem: { display: 'flex', alignItems: 'center', gap: 14, width: '100%', minHeight: 48, padding: '0 12px', borderWidth: 0, borderRadius: 16, fontFamily: tokens.font, fontSize: '1rem', color: tokens.text, backgroundColor: { default: 'transparent', ':hover': tokens.hover }, textAlign: 'left' },
   danger: { color: tokens.danger },

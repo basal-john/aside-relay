@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useSta
 import { createPortal } from 'react-dom';
 import type { VirtuosoHandle } from 'react-virtuoso';
 import * as stylex from '@stylexjs/stylex';
-import { ArrowDown, Check, CircleAlert, Ellipsis, Menu, Sparkles, SquarePen, X } from 'lucide-react';
+import { ArrowDown, Check, CircleAlert, Ellipsis, Menu, Sparkles, SquarePen, WifiOff, X } from 'lucide-react';
 import { AnimatePresence, MotionConfig, motion, usePresence, useReducedMotion } from 'motion/react';
 import { useChat } from './chat';
 import { isRecord } from './responses';
@@ -10,7 +10,7 @@ import { usePushNotifications } from './notifications';
 import type { ChatSession, Toast, RunOptions } from './types';
 import { tokens } from './tokens.stylex';
 import { Sidebar } from './Sidebar';
-import { Composer } from './Composer';
+import { Composer, type Starter } from './Composer';
 import { Button } from './Button';
 import { Dialog, DialogActions, DialogDescription } from './Dialog';
 import { BrowserLive } from './BrowserLive';
@@ -38,11 +38,14 @@ const DRAWER_SWIPE_DISTANCE = 48;
 const HORIZONTAL_GESTURE_RATIO = 1.25;
 const RESUME_BLANK_AFTER_MS = 30 * 60_000;
 const NOTIFICATION_OPEN_GRACE_MS = 5_000;
-const STARTERS = [
-  { title: 'Summarise a page', hint: 'from the open tab', prompt: 'Summarise the page in my current tab.' },
-  { title: 'Draft an email', hint: 'reply in my voice', prompt: 'Draft a reply to the email I have open.' },
-  { title: 'Check my calendar', hint: 'for tomorrow', prompt: 'What is on my calendar tomorrow?' },
-  { title: 'Compare two tabs', hint: 'side by side', prompt: 'Compare the two pages I have open.' },
+const OFFLINE_BANNER_DELAY_MS = 2_000;
+const STARTERS: { title: string; hint: string; text: string; skill?: string }[] = [
+  { title: 'Handle a message', hint: 'from someone on Slack', text: 'Handle the Slack message from ' },
+  { title: 'Handle a thread', hint: 'paste the Slack link', text: 'Handle this Slack thread: ' },
+  { title: '1:1 prep', hint: 'add the name', text: '', skill: 'one-on-one-prep' },
+  { title: 'Meeting action items', hint: 'from Wispr Flow', text: 'Give me my action items and the Slack messages I need to send from my Wispr Flow meeting with ' },
+  { title: 'QE board check', hint: 'what needs attention', text: 'Check the QE board and tell me which tickets need attention: overdue, out of scope, or ready to close. ' },
+  { title: 'Reschedule a meeting', hint: 'on my calendar', text: 'Reschedule my meeting with ' },
 ];
 type Panel = 'settings' | 'browser' | 'workspace' | 'files';
 const panelsByPath: Record<string, Panel | undefined> = { '/settings': 'settings', '/tabs': 'browser', '/workspace': 'workspace', '/files': 'files' };
@@ -71,7 +74,15 @@ export function App() {
   const [clearConfirm, setClearConfirm] = useState(false);
   const [isClearing, setClearing] = useState(false);
   const [zoom, setZoom] = useState<string>();
-  const [draft, setDraft] = useState(''); const [revision, setRevision] = useState(0);
+  const [draft, setDraft] = useState('');
+  const [starter, setStarter] = useState<Starter>();
+  const [isOffline, setOffline] = useState(false);
+  const isDisconnected = chat.isReady && !chat.isConnected && !chat.authError;
+  useEffect(() => {
+    if (!isDisconnected) { setOffline(false); return; }
+    const timer = window.setTimeout(() => setOffline(true), OFFLINE_BANNER_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [isDisconnected]); const [revision, setRevision] = useState(0);
   const [isKeyboardOpen, setKeyboardOpen] = useState(false);
   const [localToasts, setLocalToasts] = useState<Toast[]>([]);
   const localToastIdRef = useRef(0);
@@ -177,7 +188,7 @@ export function App() {
       swipe = undefined;
       const target = event.target;
       if (event.touches.length !== 1 || !(target instanceof Element) || !matchMedia('(max-width: 820px)').matches) return;
-      if (target.closest('input, textarea, select, [contenteditable="true"], [data-selectable="true"], [aria-label="Live browser preview"], [popover]') || horizontalScroller(target)) return;
+      if (target.closest('input, textarea, select, [contenteditable="true"], [data-selectable="true"], [aria-label="Live browser preview"], [popover], [data-swipe-row]') || horizontalScroller(target)) return;
       const dialog = target.closest('dialog, [data-app-dialog]');
       if (dialog ? dialog.getAttribute('aria-label') !== 'Conversation menu' : !target.closest('main[aria-label="Chat"]')) return;
       const touch = event.touches[0];
@@ -352,17 +363,17 @@ export function App() {
         <div {...stylex.props(styles.headerSide, styles.headerActions)}><IconButton label="New chat" onClick={newChat}><SquarePen size={21} strokeWidth={ICON_STROKE} aria-hidden="true" /></IconButton>{chat.sessionId && !chat.authError && <IconButton disabled={!chat.isReady || chat.isOpening} label={SESSION_MENU_LABEL} aria-haspopup="menu" aria-expanded={menuSession?.id === chat.sessionId} onClick={event => { const id = chat.sessionId; if (menuSession) setMenuSession(undefined); else if (id) setMenuSession({ id, title: sessionTitle, anchor: event.currentTarget }); }}><Ellipsis aria-hidden="true" size={21} strokeWidth={ICON_STROKE} /></IconButton>}</div>
       </header>
       {chat.authError && <div role="alert" {...stylex.props(styles.notice)}><span>Connect to load your conversations.</span><button {...stylex.props(styles.noticeAction)} onClick={() => openPanel('settings')}>Settings</button></div>}
-      {chat.isReady && !chat.isConnected && !chat.authError && <div role="status" {...stylex.props(styles.connectionIndicator)}><span className="sr-only">Reconnecting…</span><motion.span aria-hidden="true" {...stylex.props(styles.connectionSpinner)} animate={shouldReduceMotion ? undefined : { rotate: 360 }} transition={{ duration: .8, repeat: Infinity, ease: 'linear' }} /></div>}
+      {isOffline && <div role="status" {...stylex.props(styles.offline)}><WifiOff size={16} strokeWidth={ICON_STROKE} aria-hidden="true" {...stylex.props(styles.offlineIcon)} /><span>Mac disconnected. Reconnecting…</span><motion.span aria-hidden="true" {...stylex.props(styles.connectionSpinner)} animate={shouldReduceMotion ? undefined : { rotate: 360 }} transition={{ duration: .8, repeat: Infinity, ease: 'linear' }} /></div>}
       <div {...stylex.props(styles.scrollRegion)}>
-        {chat.isOpening || !chat.isReady ? <ConversationLoading /> : chat.messages.length || chat.pendingPrompt !== undefined || chat.isRunning || chat.liveAssistant?.text ? <Suspense fallback={<ConversationLoading />}><Messages key={chat.sessionId} chat={chat} listRef={listRef} onAtBottomChange={changeAtBottom} notify={notify} onZoom={setZoom} onOpenSession={openSession} onComposeContext={composeContext} onPrefill={prefill} onAskSidechat={askSidechat} agentIds={workspaceState?.sessionId === chat.sessionId ? workspaceState?.agents.map(agent => agent.id) : undefined} /></Suspense> : <div {...stylex.props(styles.empty)}><div {...stylex.props(styles.emptyCopy)}><span aria-hidden="true" {...stylex.props(styles.emptyMark)}><Sparkles size={22} strokeWidth={ICON_STROKE} /></span><h1 {...stylex.props(styles.emptyTitle)}>What can I help with?</h1></div>{!chat.authError && <div role="group" aria-label="Starter prompts" {...stylex.props(styles.starters)}>{STARTERS.map(starter => <button key={starter.title} type="button" {...stylex.props(styles.starter)} onClick={() => prefill(starter.prompt)}><span>{starter.title}</span><small {...stylex.props(styles.starterHint)}>{starter.hint}</small></button>)}</div>}</div>}
+        {chat.isOpening || !chat.isReady ? <ConversationLoading /> : chat.messages.length || chat.pendingPrompt !== undefined || chat.isRunning || chat.liveAssistant?.text ? <Suspense fallback={<ConversationLoading />}><Messages key={chat.sessionId} chat={chat} listRef={listRef} onAtBottomChange={changeAtBottom} notify={notify} onZoom={setZoom} onOpenSession={openSession} onComposeContext={composeContext} onPrefill={prefill} onAskSidechat={askSidechat} agentIds={workspaceState?.sessionId === chat.sessionId ? workspaceState?.agents.map(agent => agent.id) : undefined} /></Suspense> : <div {...stylex.props(styles.empty)}><div {...stylex.props(styles.emptyCopy)}><span aria-hidden="true" {...stylex.props(styles.emptyMark)}><Sparkles size={22} strokeWidth={ICON_STROKE} /></span><h1 {...stylex.props(styles.emptyTitle)}>What can I help with?</h1></div>{!chat.authError && <div role="group" aria-label="Starter prompts" {...stylex.props(styles.starters)}>{STARTERS.map(starter => <button key={starter.title} type="button" {...stylex.props(styles.starter)} onClick={() => setStarter({ id: Date.now(), text: starter.text, skill: starter.skill })}><span>{starter.title}</span><small {...stylex.props(styles.starterHint)}>{starter.hint}</small></button>)}</div>}</div>}
         <AnimatePresence>{canJump && !chat.isOpening && <motion.button key="jump" aria-label="Scroll to latest message" {...stylex.props(styles.jump, ui.glass)} initial={{ opacity: 0, scale: .86, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .9, y: 6 }} transition={{ duration: .16 }} whileTap={{ scale: .9 }} onClick={() => listRef.current?.scrollToIndex(latestMessage)}><ArrowDown size={19} strokeWidth={ICON_STROKE} /></motion.button>}</AnimatePresence>
         {chat.sessionId && chat.isReady && !chat.isOpening && !chat.authError && <BrowserLive key={chat.sessionId} sessionId={chat.sessionId} request={chat.request} isBrowserOpen={panel === 'browser'} isVisible={!panel && !isDrawer && !menuSession && !deleteTarget && !zoom} onOpen={targetId => openPanel('browser', targetId)} />}
       </div>
       {chat.isReady && !chat.isOpening && !chat.authError && <SessionWorkspace chat={chat} notify={notify} onOpenSession={openSession} onOutputs={() => openPanel('files')} onStateChange={setWorkspaceState} />}
-      <Composer runOptions={runOptions} chat={chat} modelSelection={modelSelection} onBrowser={() => openPanel('browser')} draft={draft} setDraft={setDraft} revision={revision} notify={notify} textSize={textSize} uiFont={appearance.uiFont} isKeyboardOpen={isKeyboardOpen} onNewChat={newChat} onConfirmClear={() => setClearConfirm(true)} />
+      <Composer runOptions={runOptions} chat={chat} modelSelection={modelSelection} starter={starter} onBrowser={() => openPanel('browser')} draft={draft} setDraft={setDraft} revision={revision} notify={notify} textSize={textSize} uiFont={appearance.uiFont} isKeyboardOpen={isKeyboardOpen} onNewChat={newChat} onConfirmClear={() => setClearConfirm(true)} />
     </main>
-    <AnimatePresence>{isDrawer && <Drawer key="drawer" onClose={() => { setMenuSession(undefined); setDrawer(false); }}><TabContext.Provider value={{ current: 'chats', select: selectTab }}><Sidebar chat={chat} isDrawer onClose={() => { setMenuSession(undefined); setDrawer(false); }} onNew={newChat} onNewIncognito={newIncognitoChat} onOpen={openSession} onSettings={() => openPanel('settings')} onBrowser={() => openPanel('browser')} onMenu={setMenuSession} /></TabContext.Provider></Drawer>}</AnimatePresence>
-    <AnimatePresence mode="wait">{panel === 'settings' ? <TabContext.Provider key="settings" value={{ current: 'settings', select: selectTab }}><Dialog title="Settings" onClose={closePanel}><Settings chat={chat} notifications={notifications} notify={notify} isDarkMode={theme === 'dark'} onThemeToggle={() => changeThemeMode(theme === 'light' ? 'dark' : 'light')} themeMode={themeMode} onThemeModeChange={changeThemeMode} appearance={appearance} onAppearanceChange={changeAppearance} textSize={textSize} onTextSizeChange={changeTextSize} onWorkspace={() => openPanel('workspace')} /></Dialog></TabContext.Provider> : panel === 'browser' ? <TabContext.Provider key={`browser:${chat.sessionId ?? "new"}:${browserTarget ?? "all"}`} value={{ current: 'browser', select: selectTab }}><Sheet title="Browser" isWide onClose={closePanel}><BrowserPanel initialTargetId={browserTarget} sessionId={chat.sessionId} request={chat.request} notify={notify} onClose={closePanel} onStart={prompt => { closePanel();  if (!chat.sessionId) newChat(); setDraft(prompt); }} /></Sheet></TabContext.Provider> : panel === 'workspace' ? <TabContext.Provider key="workspace" value={{ current: 'workspace', select: selectTab }}><Suspense fallback={<Dialog title="Workspace & preferences" onClose={closePanel}><DialogDescription>Loading workspace…</DialogDescription></Dialog>}><Workspace chat={chat} notify={notify} onClose={closePanel} onOpenSession={id => { closePanel(); openSession(id); }} onNewProjectChat={projectId => { closePanel(); newChat(); setRunOptions({ projectId }); }} /></Suspense></TabContext.Provider> : panel === 'files' && effectiveFilesSessionId ? <Suspense key={effectiveFilesSessionId} fallback={<Dialog title="Files & outputs" onClose={closePanel}><DialogDescription>Loading files…</DialogDescription></Dialog>}><Artifacts sessionId={effectiveFilesSessionId} request={chat.request} notify={notify} onZoom={setZoom} onClose={closePanel} /></Suspense> : undefined}</AnimatePresence>
+    <AnimatePresence>{isDrawer && <Drawer key="drawer" onClose={() => { setMenuSession(undefined); setDrawer(false); }}><TabContext.Provider value={{ current: 'chats', select: selectTab }}><Sidebar chat={chat} isDrawer onClose={() => { setMenuSession(undefined); setDrawer(false); }} onNew={newChat} onNewIncognito={newIncognitoChat} onOpen={openSession} onSettings={() => openPanel('settings')} onBrowser={() => openPanel('browser')} onMenu={setMenuSession} onDelete={setDeleteTarget} /></TabContext.Provider></Drawer>}</AnimatePresence>
+    <AnimatePresence mode="wait">{panel === 'settings' ? <TabContext.Provider key="settings" value={{ current: 'settings', select: selectTab }}><Dialog title="Settings" onClose={closePanel}><Settings chat={chat} notifications={notifications} notify={notify} isDarkMode={theme === 'dark'} themeMode={themeMode} onThemeModeChange={changeThemeMode} appearance={appearance} onAppearanceChange={changeAppearance} textSize={textSize} onTextSizeChange={changeTextSize} onWorkspace={() => openPanel('workspace')} /></Dialog></TabContext.Provider> : panel === 'browser' ? <TabContext.Provider key={`browser:${chat.sessionId ?? "new"}:${browserTarget ?? "all"}`} value={{ current: 'browser', select: selectTab }}><Sheet title="Browser" isWide onClose={closePanel}><BrowserPanel initialTargetId={browserTarget} sessionId={chat.sessionId} request={chat.request} notify={notify} onClose={closePanel} onStart={prompt => { closePanel();  if (!chat.sessionId) newChat(); setDraft(prompt); }} /></Sheet></TabContext.Provider> : panel === 'workspace' ? <TabContext.Provider key="workspace" value={{ current: 'workspace', select: selectTab }}><Suspense fallback={<Dialog title="Workspace & preferences" onClose={closePanel}><DialogDescription>Loading workspace…</DialogDescription></Dialog>}><Workspace chat={chat} notify={notify} onClose={closePanel} onOpenSession={id => { closePanel(); openSession(id); }} onNewProjectChat={projectId => { closePanel(); newChat(); setRunOptions({ projectId }); }} /></Suspense></TabContext.Provider> : panel === 'files' && effectiveFilesSessionId ? <Suspense key={effectiveFilesSessionId} fallback={<Dialog title="Files & outputs" onClose={closePanel}><DialogDescription>Loading files…</DialogDescription></Dialog>}><Artifacts sessionId={effectiveFilesSessionId} request={chat.request} notify={notify} onZoom={setZoom} onClose={closePanel} /></Suspense> : undefined}</AnimatePresence>
     {menuSession && !chat.authError && <SessionMenu key={menuSession.id} target={menuSession} chat={chat} onClose={() => setMenuSession(undefined)} notify={notify} onRename={setRenameTarget} onDelete={setDeleteTarget} onFiles={id => openPanel('files', id)} />}
     <AnimatePresence>{sidechat && <Dialog key="sidechat" title="Ask in side chat" onClose={() => { if (!isStartingSidechat) setSidechat(undefined); }}><blockquote {...stylex.props(styles.sidechatQuote)}>{sidechat.text}</blockquote><label {...stylex.props(styles.sidechatLabel)}>Message<textarea autoFocus rows={3} value={sidechatPrompt} disabled={isStartingSidechat} onChange={event => setSidechatPrompt(event.currentTarget.value)} {...stylex.props(ui.field)} /></label><DialogActions><Button disabled={isStartingSidechat} onClick={() => setSidechat(undefined)}>Cancel</Button><Button variant="primary" disabled={isStartingSidechat || !sidechatPrompt.trim()} onClick={() => { void startSidechat(); }}>{isStartingSidechat ? 'Starting…' : 'Send'}</Button></DialogActions></Dialog>}</AnimatePresence>
     <AnimatePresence>{renameTarget && <RenameConversation key={renameTarget.id} session={renameTarget} chat={chat} onClose={() => setRenameTarget(undefined)} />}</AnimatePresence>
@@ -462,8 +473,9 @@ const styles = stylex.create({
   jump: { position: 'absolute', right: 'max(16px, env(safe-area-inset-right))', bottom: 'calc(var(--composer-height) + var(--workspace-height, 0px) + 12px)', width: 44, height: 44, zIndex: 2, borderRadius: '50%', borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, backgroundColor: tokens.canvas, color: tokens.text, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgb(0 0 0 / .06)' },
   notice: { display: 'flex', position: 'absolute', top: 'var(--header-height)', right: 16, left: 16, zIndex: 3, alignItems: 'center', justifyContent: 'space-between', gap: 10, margin: 0, padding: '10px 14px', borderRadius: 14, backgroundColor: tokens.surface, fontSize: '0.8125rem', lineHeight: 1.5, flexShrink: 0 },
   noticeAction: { backgroundColor: 'transparent', color: tokens.text, borderWidth: 0, minHeight: 32, fontSize: '0.8125rem', textDecoration: 'underline' },
-  connectionIndicator: { position: 'absolute', top: 'calc(var(--header-height) + 4px)', left: '50%', marginLeft: -7, width: 14, height: 14, zIndex: 3, pointerEvents: 'none' },
-  connectionSpinner: { display: 'block', width: '100%', height: '100%', borderRadius: '50%', borderWidth: 2, borderStyle: 'solid', borderColor: tokens.muted, borderTopColor: 'transparent' },
+  offline: { display: 'flex', position: 'absolute', top: 'var(--header-height)', left: 0, right: 0, zIndex: 3, alignItems: 'center', gap: 8, minHeight: 44, padding: '0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left))', backgroundColor: 'color-mix(in srgb, #c27c0e 14%, var(--canvas))', borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: tokens.border, fontSize: '.875rem' },
+  offlineIcon: { color: '#c27c0e', flexShrink: 0 },
+  connectionSpinner: { display: 'block', marginLeft: 'auto', width: 14, height: 14, flexShrink: 0, borderRadius: '50%', borderWidth: 2, borderStyle: 'solid', borderColor: tokens.muted, borderTopColor: 'transparent' },
   drawer: { display: 'block', position: 'fixed', inset: 0, padding: 0, margin: 0, borderWidth: 0, backgroundColor: 'transparent', width: '100%', height: '100dvh', maxWidth: '100%', maxHeight: '100%', overflow: 'hidden' },
   drawerBackdrop: { position: 'absolute', inset: 0, width: '100%', height: '100%', padding: 0, borderWidth: 0, backgroundColor: 'rgb(0 0 0 / .28)' },
   drawerContent: { position: 'relative', zIndex: 1, width: '100%', height: '100%' },

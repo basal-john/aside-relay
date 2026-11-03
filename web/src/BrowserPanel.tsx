@@ -481,15 +481,15 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
             {listMode === "tabs" && !listError && isLoadingTabs && tabs.length === 0 && <EmptyState title="Loading tabs…" detail="Chrome may take a moment to respond." />}
             {listMode === "tabs" && !listError && !isLoadingTabs && filteredTabs.length === 0 && openingTabs.length === 0 && <EmptyState title={availableTabs.length ? "No matching tabs" : "No browser tabs"} detail={availableTabs.length ? "Try a different search." : "Open a tab here or in Aside."} />}
             {listMode === "tabs" && openingTabs.map(tab => <div key={tab.id} role="status" {...stylex.props(styles.tabRow)}><Globe2 size={ICON_SIZE} aria-hidden="true" /><span {...stylex.props(styles.tabCopy)}><span {...stylex.props(styles.rowTitle)}>{new URL(tab.url).hostname}</span><span {...stylex.props(styles.rowMeta)}>Opening…</span></span></div>)}
-            {listMode === "tabs" && filteredTabs.map((tab) => (
-              <button key={tab.targetId} data-browser-tab={tab.targetId} title={tab.title || "Untitled tab"} {...stylex.props(styles.tabRow)} type="button" onClick={() => setSelectedTab(tab)}>
-                <TabThumbnail tab={tab} request={request} sessionQuery={sessionQuery} />
-                <span {...stylex.props(styles.tabCopy)}>
-                  <span {...stylex.props(styles.rowTitle)}>{tab.title || "Untitled tab"}</span>
+            {listMode === "tabs" && filteredTabs.length > 0 && <div {...stylex.props(styles.tabGrid)}>{filteredTabs.map((tab) => (
+              <button key={tab.targetId} data-browser-tab={tab.targetId} title={tab.title || "Untitled tab"} {...stylex.props(styles.tabCard, tab.active && styles.activeTabCard)} type="button" onClick={() => setSelectedTab(tab)}>
+                <TabThumbnail tab={tab} request={request} sessionQuery={sessionQuery} isLarge />
+                <span {...stylex.props(styles.tabCardCopy)}>
+                  <span {...stylex.props(styles.rowTitle, styles.cardTitle)}>{tab.title || "Untitled tab"}</span>
                   <span {...stylex.props(styles.rowMeta)}>{tab.loaded === false ? "Asleep" : tab.active ? "Active" : "Available"}</span>
                 </span>
               </button>
-            ))}
+            ))}</div>}
             {listMode !== "tabs" && libraryError && <EmptyState title="Could not load browser data" detail={libraryError} />}
             {listMode !== "tabs" && isLoadingLibrary && libraryItems.length === 0 && <EmptyState title={`Loading ${listMode}…`} detail="" />}
             {listMode !== "tabs" && !isLoadingLibrary && !libraryError && libraryItems.length === 0 && <EmptyState title={`No ${listMode}`} detail={query ? "Try a different search." : "Nothing is available yet."} />}
@@ -520,7 +520,7 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
 
 }
 
-function TabThumbnail({ tab, request, sessionQuery }: { tab: BrowserTab; request: BrowserPanelProps["request"]; sessionQuery: string }) {
+function TabThumbnail({ tab, request, sessionQuery, isLarge = false }: { tab: BrowserTab; request: BrowserPanelProps["request"]; sessionQuery: string; isLarge?: boolean }) {
   const [src, setSrc] = useState<string>()
   const [isVisible, setIsVisible] = useState(false)
   const thumbnailRef = useRef<HTMLSpanElement>(null)
@@ -557,7 +557,7 @@ function TabThumbnail({ tab, request, sessionQuery }: { tab: BrowserTab; request
     }
   }, [])
   return (
-    <span ref={thumbnailRef} {...stylex.props(styles.thumbnail)}>
+    <span ref={thumbnailRef} {...stylex.props(styles.thumbnail, isLarge && styles.largeThumbnail)}>
       {src && !isAsleep ? <img {...stylex.props(styles.thumbnailImage)} src={src} alt="" /> : tab.favicon ? <img {...stylex.props(styles.favicon)} src={tab.favicon} alt="" /> : <Globe2 size={20} strokeWidth={ICON_STROKE} />}
     </span>
   )
@@ -620,6 +620,12 @@ const styles = stylex.create({
   meta: { padding: "2px 18px 9px", color: tokens.muted, fontSize: '0.75rem' },
   list: { minHeight: 0, flex: 1, overflowY: "auto", overscrollBehavior: "contain", padding: "0 10px 18px" },
   tabRow: { width: "100%", minHeight: 76, display: "flex", alignItems: "center", gap: 12, padding: "9px 8px", borderWidth: 0, borderRadius: 14, textAlign: "left", backgroundColor: { default: "transparent", ":hover": tokens.surface }, color: tokens.text, fontFamily: tokens.font },
+  tabGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 12, padding: "4px 2px 12px" },
+  tabCard: { minWidth: 0, display: "flex", flexDirection: "column", gap: 0, padding: 0, overflow: "hidden", borderWidth: 1, borderStyle: "solid", borderColor: tokens.border, borderRadius: 18, textAlign: "left", backgroundColor: { default: tokens.surface, ":hover": tokens.hover }, color: tokens.text, fontFamily: tokens.font },
+  activeTabCard: { borderColor: tokens.primary, boxShadow: "0 0 0 1.5px var(--primary)" },
+  tabCardCopy: { minWidth: 0, display: "flex", flexDirection: "column", gap: 2, padding: "8px 10px 10px" },
+  cardTitle: { WebkitLineClamp: 1, fontSize: '0.8125rem', fontWeight: 650 },
+  largeThumbnail: { width: "100%", height: "auto", aspectRatio: "4 / 3", borderWidth: 0, borderRadius: 0, borderBottomWidth: 1, borderBottomStyle: "solid", borderBottomColor: tokens.border },
   thumbnail: { width: 84, height: 56, flexShrink: 0, display: "grid", placeItems: "center", overflow: "hidden", borderRadius: 10, borderWidth: 1, borderStyle: "solid", borderColor: tokens.border, backgroundColor: tokens.surface, color: tokens.muted },
   thumbnailImage: { display: "block", width: "100%", height: "100%", objectFit: "cover" },
   favicon: { width: 22, height: 22, objectFit: "contain" },

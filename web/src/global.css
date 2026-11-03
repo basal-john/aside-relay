@@ -66,6 +66,7 @@
   dialog::backdrop { background: rgb(0 0 0 / .28); backdrop-filter: blur(2px); }
   .queued-message-menu, .message-menu, .session-menu { opacity: 0; transition: opacity 140ms ease, display 140ms allow-discrete, overlay 140ms allow-discrete; }
   .queued-message-menu:popover-open, .message-menu:popover-open, .session-menu:popover-open { opacity: 1; }
+  body:has(.queued-message-menu:popover-open, .message-menu:popover-open) #root::after { content: ''; position: fixed; inset: 0; z-index: 30; pointer-events: none; background: rgb(0 0 0 / .14); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
   @starting-style { .queued-message-menu:popover-open, .message-menu:popover-open, .session-menu:popover-open { opacity: 0; } }
   article[data-message-id] { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; transition: background-color 200ms ease; }
   article[data-message-id][data-pressing] { background-color: var(--hover); border-radius: 16px; }

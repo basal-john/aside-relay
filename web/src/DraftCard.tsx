@@ -6,6 +6,7 @@ import { Button } from './Button';
 import { describeDraft, type DraftData, type DraftKind } from './drafts';
 
 const icons: Record<DraftKind, typeof Mail> = { mail: Mail, imessage: MessageCircle, slack: MessageSquare, linkedin: Briefcase, calendar: Calendar, x: AtSign };
+const tileColors: Record<DraftKind, string> = { mail: '#3b82f6', imessage: '#22c55e', slack: '#611f69', linkedin: '#0a66c2', calendar: '#ef4444', x: '#111111' };
 
 /**
  * Renders an Aside draft-preview fence as a card. Copy works locally. Edit prefills the composer.
@@ -29,7 +30,7 @@ export function DraftCard({ language, data, source, notify, onAction, onPrefill 
     setArmed(false); onAction(draft.action);
   }
   return <section aria-label={draft.label} {...stylex.props(styles.card)}>
-    <header {...stylex.props(styles.header)}><span {...stylex.props(styles.title)}><Icon size={16} aria-hidden="true" />{draft.label}</span><Button size="compact" aria-label={isSource ? 'Show draft' : 'Show draft source'} onClick={() => setSource(!isSource)}><Code2 size={16} aria-hidden="true" />{isSource ? 'Draft' : 'JSON'}</Button></header>
+    <header {...stylex.props(styles.header)}><span {...stylex.props(styles.title)}><span aria-hidden="true" {...stylex.props(styles.tile)} style={{ backgroundColor: tileColors[draft.kind] }}><Icon size={16} /></span>{draft.label}</span><Button aria-label={isSource ? 'Show draft' : 'Show draft source'} onClick={() => setSource(!isSource)}><Code2 size={16} aria-hidden="true" />{isSource ? 'Draft' : 'JSON'}</Button></header>
     {isSource ? <pre role="region" aria-label="Draft source" tabIndex={0} {...stylex.props(styles.source)}>{source}</pre> : <>
       {fields.length > 0 && <dl {...stylex.props(styles.fields)}>{fields.map(([name, value]) => <div key={name} {...stylex.props(styles.field)}><dt {...stylex.props(styles.fieldName)}>{name}</dt><dd {...stylex.props(styles.fieldValue)}>{value}</dd></div>)}</dl>}
       {draft.thread.length > 0 && <div {...stylex.props(styles.thread)}>{draft.thread.map((message, index) => <p key={index} {...stylex.props(styles.threadLine)}><strong>{message.name}</strong> {message.message}</p>)}</div>}
@@ -45,9 +46,10 @@ export function DraftCard({ language, data, source, notify, onAction, onPrefill 
 }
 
 const styles = stylex.create({
-  card: { minWidth: 0, maxWidth: '100%', borderRadius: 16, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, overflow: 'hidden', marginTop: 16, marginBottom: 20, backgroundColor: tokens.surface },
-  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '6px 6px 6px 16px', borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: tokens.border },
-  title: { display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: '0.8125rem', fontWeight: 600, color: tokens.muted },
+  card: { minWidth: 0, maxWidth: '100%', borderRadius: 20, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, overflow: 'hidden', marginTop: 16, marginBottom: 20, backgroundColor: tokens.surface },
+  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 6px 4px 12px' },
+  tile: { display: 'grid', placeItems: 'center', width: 28, height: 28, borderRadius: 8, color: '#ffffff', flexShrink: 0 },
+  title: { display: 'inline-flex', alignItems: 'center', gap: 10, fontSize: '0.875rem', fontWeight: 650, color: tokens.text },
   fields: { margin: 0, padding: '10px 16px 4px', display: 'flex', flexDirection: 'column', gap: 6 },
   field: { display: 'grid', gridTemplateColumns: '5.5rem 1fr', gap: 8, fontSize: '0.875rem', lineHeight: 1.45 },
   fieldName: { color: tokens.muted },
@@ -56,5 +58,5 @@ const styles = stylex.create({
   threadLine: { margin: 0, overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' },
   body: { margin: '10px 16px 4px', paddingTop: 10, borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: tokens.border, fontFamily: 'var(--font-content)', fontSize: '1rem', lineHeight: 1.55, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: tokens.text },
   source: { margin: 0, padding: 16, maxHeight: '50svh', overflow: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: '0.8125rem' },
-  actions: { display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8, padding: '10px 12px 12px' },
+  actions: { display: 'grid', gridAutoFlow: 'column', gridAutoColumns: 'minmax(0, 1fr)', gap: 8, padding: '10px 12px 12px', '@media (max-width: 380px)': { gridAutoFlow: 'row' } },
 });

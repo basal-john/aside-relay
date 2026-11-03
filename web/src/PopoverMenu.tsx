@@ -62,5 +62,5 @@ export function PopoverMenu({ anchor, point, label, children, onClose }: {
 }
 
 const styles = stylex.create({
-  menu: { position: 'fixed', inset: 'auto', margin: 0, width: 'min(268px, calc(100vw - 16px))', padding: 8, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, borderRadius: 22, backgroundColor: tokens.surface, color: tokens.text, boxShadow: '0 8px 32px rgb(0 0 0 / .22)', overflowY: 'auto' },
+  menu: { position: 'fixed', inset: 'auto', margin: 0, width: 'min(268px, calc(100vw - 16px))', padding: 8, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.glassBorder, borderRadius: 16, backgroundColor: 'color-mix(in srgb, var(--surface) 86%, transparent)', backdropFilter: 'blur(24px) saturate(180%)', WebkitBackdropFilter: 'blur(24px) saturate(180%)', color: tokens.text, boxShadow: '0 8px 32px rgb(0 0 0 / .22)', overflowY: 'auto' },
 });

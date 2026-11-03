@@ -68,7 +68,7 @@ test('files menu opens a real artifact preview and settings theme persists', asy
   if (await drawerButton.isVisible()) await drawerButton.click();
   await page.getByRole('button', { name: /Settings/ }).click();
   const settings = page.getByRole('dialog', { name: 'Settings' });
-  const darkMode = settings.getByRole('switch', { name: 'Dark mode' });
+  const darkMode = settings.getByRole('radiogroup', { name: 'Theme mode' }).getByRole('radio', { name: 'Dark' });
   await darkMode.click();
   await expect(darkMode).toHaveAttribute('aria-checked', 'true');
   await expect.poll(() => page.evaluate(() => localStorage.getItem('asideTheme'))).toBe('dark');
