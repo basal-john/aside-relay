@@ -397,9 +397,9 @@ function parseOutput(value: unknown, index: number): WorkspaceOutput[] {
 }
 
 const styles = stylex.create({
-  workspace: { position: 'absolute', zIndex: 7, left: 'max(16px, env(safe-area-inset-left))', right: 'max(16px, env(safe-area-inset-right))', bottom: 'calc(var(--composer-height, 76px) + 8px)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, pointerEvents: 'none' },
-  toolbar: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, maxWidth: '100%', pointerEvents: 'auto' },
-  chip: { display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 34, minWidth: 0, padding: '6px 11px', borderWidth: 1, borderStyle: 'solid', borderColor: tokens.glassBorder, borderRadius: 999, backgroundColor: tokens.glass, backdropFilter: 'blur(18px) saturate(150%)', boxShadow: tokens.glassShadow, color: tokens.muted, fontSize: '0.75rem', fontWeight: 550, whiteSpace: 'nowrap' },
+  workspace: { position: 'absolute', zIndex: 7, left: 0, right: 0, bottom: 'var(--composer-height, 76px)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, paddingLeft: 'max(12px, env(safe-area-inset-left))', paddingRight: 'max(12px, env(safe-area-inset-right))', backgroundColor: tokens.canvas, pointerEvents: 'none' },
+  toolbar: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, maxWidth: '100%', pointerEvents: 'auto' },
+  chip: { display: 'inline-flex', alignItems: 'center', gap: 5, minHeight: 44, minWidth: 0, padding: '0 8px', borderWidth: 0, borderRadius: 10, backgroundColor: { default: 'transparent', ':hover': tokens.hover }, color: tokens.muted, fontSize: '0.8125rem', fontWeight: 550, whiteSpace: 'nowrap' },
   attention: { display: 'flex', alignItems: 'center', gap: 8, width: 'min(100%, 440px)', minHeight: 40, padding: '8px 12px', borderWidth: 1, borderStyle: 'solid', borderColor: tokens.primary, borderRadius: 14, backgroundColor: tokens.surface, color: tokens.text, boxShadow: tokens.glassShadow, pointerEvents: 'auto', textAlign: 'left', fontSize: '0.8125rem' },
   spinner: { animationName: stylex.keyframes({ to: { transform: 'rotate(360deg)' } }), animationDuration: '1s', animationTimingFunction: 'linear', animationIterationCount: 'infinite' },
   list: { display: 'flex', flexDirection: 'column', gap: 10 },

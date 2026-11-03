@@ -1,8 +1,9 @@
 import type { ReactNode, KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { motion, usePresence, useReducedMotion, useTransform, type HTMLMotionProps, type MotionValue } from 'motion/react';
 import { tokens } from './tokens.stylex';
+import { TabBar, TabContext } from './TabBar';
 
 export const ICON_STROKE = 1.8;
 export const DEFAULT_RECENT_CHAT_LIMIT = 10;
@@ -28,7 +29,8 @@ export function AsideIcon({ size = 20 }: { size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path fill="currentColor" d="M6.90986 2.73871C9.80058 0.968848 13.9716 1.35518 17.1472 3.77582C22.8616 7.73363 23.2313 15.547 21.8425 19.0659C20.1912 23.2491 4.78915 23.4773 2.53779 19.5766C0.541459 16.1174 1.50912 11.74 4.26728 9.37543C3.69303 6.96606 4.60628 4.06868 6.90986 2.73871ZM11.7224 7.57954C10.9172 7.57956 10.2644 8.23242 10.2643 9.03754V11.7768C10.2644 12.5819 10.9172 13.2348 11.7224 13.2348H11.8669C12.672 13.2348 13.3249 12.582 13.3249 11.7768V9.03754C13.3248 8.2324 12.672 7.57954 11.8669 7.57954H11.7224ZM16.9958 7.67914C16.2455 7.67926 15.6374 8.2872 15.6374 9.03754V11.7836C15.6374 12.534 16.2455 13.1419 16.9958 13.142C17.7462 13.142 18.3551 12.5341 18.3552 11.7836V9.03754C18.3551 8.28713 17.7462 7.67914 16.9958 7.67914Z" /></svg>;
 }
 
-export function Sheet({ title, children, onClose, isWide = false, isFullScreen = false, swipeY }: { title: string; children: ReactNode; onClose: () => void; isWide?: boolean; isFullScreen?: boolean; swipeY?: MotionValue<number> }) {
+export function Sheet({ title, children, onClose, isWide = false, isFullScreen: isFullScreenProp = false, swipeY }: { title: string; children: ReactNode; onClose: () => void; isWide?: boolean; isFullScreen?: boolean; swipeY?: MotionValue<number> }) {
+  const tabs = useContext(TabContext);
   const ref = useRef<HTMLDialogElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -42,6 +44,9 @@ export function Sheet({ title, children, onClose, isWide = false, isFullScreen =
   const swipeRadius = useTransform(swipeProgress, [0, .2], [0, 28]);
   const backdropOpacity = useTransform(swipeProgress, [0, 1], [1, 0]);
   const isMobile = useMediaQuery('(max-width: 700px)');
+  const isPhone = useMediaQuery('(max-width: 820px)');
+  const isPage = !!tabs && isPhone;
+  const isFullScreen = isFullScreenProp || isPage;
   const closeFromSwipe = useEffectEvent(requestClose);
   useEffect(() => {
     const surface = surfaceRef.current;
@@ -143,7 +148,8 @@ export function Sheet({ title, children, onClose, isWide = false, isFullScreen =
     <motion.button type="button" tabIndex={-1} data-overlay-backdrop="" aria-label={`Close ${title}`} {...stylex.props(styles.backdrop)} style={swipeY ? { opacity: backdropOpacity } : undefined} initial={swipeY ? false : { opacity: 0 }} animate={swipeY ? undefined : { opacity: isPresent ? 1 : 0 }} transition={{ duration: shouldReduceMotion ? .1 : .2 }} onClick={requestClose} />
     <motion.div ref={surfaceRef} data-dialog-surface="" {...stylex.props(styles.dialogSurface, isWide && styles.wide, isFullScreen && styles.fullSurface)} style={swipeY ? { y: swipeY, scale: swipeScale, borderRadius: swipeRadius } : undefined} initial={sheetMotion.initial} animate={isPresent ? sheetMotion.animate : sheetMotion.exit} transition={sheetMotion.transition} onAnimationComplete={() => { isOpenRef.current = isPresent; if (!isPresent) safeToRemove?.(); }} onClickCapture={event => { if (hasDraggedRef.current) { event.preventDefault(); event.stopPropagation(); hasDraggedRef.current = false; } }}>
       {!isFullScreen && <div {...stylex.props(styles.dragHandle)} aria-hidden="true"><span {...stylex.props(styles.dragHandleBar)} /></div>}
-      <div {...stylex.props(styles.dialogBody, isFullScreen && styles.fullBody)}>{children}</div>
+      <div {...stylex.props(styles.dialogBody, isFullScreen && styles.fullBody, isPage && styles.pageBody)}><TabContext.Provider value={undefined}>{children}</TabContext.Provider></div>
+      {isPage && <TabBar />}
     </motion.div>
   </motion.dialog>;
 }
@@ -210,6 +216,7 @@ export const styles = stylex.create({
   wide: { maxWidth: 680, height: 'min(760px, calc(100dvh - 32px))', '@media (max-width: 700px)': { height: 'min(820px, calc(100dvh - 8px))' } },
   fullSurface: { width: '100%', maxWidth: 'none', height: '100%', maxHeight: '100%', borderRadius: 0, '@media (max-width: 700px)': { maxWidth: 'none', maxHeight: '100%', borderRadius: 0 } },
   fullBody: { display: 'flex', flex: 1, minHeight: 0, padding: 0, maxHeight: 'none', overflow: 'hidden', '@media (max-width: 700px)': { padding: 0, maxHeight: 'none' } },
+  pageBody: { paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'calc(96px + env(safe-area-inset-bottom))' },
   dragHandle: { display: 'none', height: 24, flexShrink: 0, alignItems: 'center', justifyContent: 'center', touchAction: 'none', cursor: 'grab', '@media (max-width: 700px)': { display: 'flex' } },
   dragHandleBar: { width: 36, height: 5, borderRadius: 999, backgroundColor: tokens.controlBorder },
   dialogBody: { padding: 22, maxHeight: 'calc(100dvh - 32px)', overflowY: 'auto', overscrollBehavior: 'contain', minWidth: 0, '@media (max-width: 700px)': { padding: '8px 18px max(18px, env(safe-area-inset-bottom))', maxHeight: 'calc(100dvh - 32px)' } },

@@ -5,9 +5,9 @@ aside-relay uses a restrained, monochrome conversation interface inspired by Cha
 ## Reference and layout
 
 - Current reference: [ChatGPT for iOS](https://apps.apple.com/us/app/chatgpt/id6448311069), version 1.2026.272 listed on October 10, 2026. Store screenshots and public mobile screenshots inform the conversation shell, rounded composer, and outline controls; no ChatGPT branding or unsupported voice controls are included.
-- Mobile: a full-height conversation with a 64px header, independently scrolling messages, and an anchored composer. The conversation drawer opens modally below 821px.
+- Mobile: a classic chat view. A flat 56px header shows the menu, the current model as the title (tap it to change the model), New chat, and the session menu. Messages scroll independently and the composer is docked to the bottom as an outlined field with a dark round send button. Below 821px, Chats, Browser, Workspace and Settings are full-screen pages joined by a floating tab bar; the tab bar is hidden inside a conversation.
 - Desktop: a 288px conversation sidebar and the same conversation surface. Text is bounded to 736px and the composer to 768px.
-- Browser and settings open in accessible dialogs, presented as bottom sheets on phones. Browser captures preserve their source colors and aspect ratio. Conversation deletion requires explicit confirmation and remains blocked during a run.
+- Settings, Workspace and Browser are full-screen tab pages on phones and dialogs on wider screens. Other dialogs (model picker, run details, confirmations) are bottom sheets on phones with a grabber; dragging the grabber or header down by more than 96px closes them. Browser captures preserve their source colors and aspect ratio. Conversation deletion requires explicit confirmation and remains blocked during a run.
 - Browser tab lists update automatically after a two-second delay between completed requests. Selected previews use a one-second delay, visible thumbnails ten seconds, and connection settings five seconds. Requests never overlap within a refresh loop, time out after sixty seconds, and retry automatically. Returning to the app or reconnecting the network triggers an immediate update. No refresh or pause controls are shown; hidden screens stop polling. Closed and sleeping tabs follow the latest tab list rather than stale selection data.
 - The visible viewport controls shell height so the composer stays above a mobile keyboard. Safe-area insets cover the header, composer, and drawers.
 - Home-screen apps render the canvas beneath the iOS status bar. Theme changes update the page background, color scheme, and browser theme color together so the status bar follows the selected appearance.
@@ -50,7 +50,7 @@ Settings → Appearance exposes Light/Dark/System modes, separate light and dark
 
 ## Conversation lifecycle
 
-Explicitly opening a conversation persists its ID. Initial load restores the saved conversation, including when a browser/settings panel is open; without a saved selection it opens the latest conversation. Explicit New chat persists the empty conversation choice until a message creates a session or the user selects an existing conversation.
+The app always opens on a blank chat with four starter prompts. Only a conversation link (`/c/<id>`, used by notifications and shared links) opens a conversation on load. Returning to the app after 30 minutes or more in the background also starts a blank chat, unless the composer holds an unsent draft, a page is open, or a notification was just tapped. Nothing is created until the first message is sent.
 
 The drawer orders conversations by the last user or assistant message timestamp, newest first, with the session ID as a stable tie-breaker. Opening a conversation, changing daemon metadata, or touching its log file does not promote it. Incoming messages update the order immediately; older list responses cannot undo newer message activity. Date groups and pagination use this same activity time, including equal-time page boundaries. Sessions without timestamped messages use the log's modification time; newly created sessions without a log use their reported update time.
 

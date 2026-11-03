@@ -1,16 +1,17 @@
 import { parseProjects } from './responses';
 import { APP_NAME } from './brand';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { motion, useReducedMotion } from 'motion/react';
 import { Virtuoso } from 'react-virtuoso';
-import { ArrowDownUp, ChevronRight, Ellipsis, EyeOff, Grid2X2, List, Pin, Plus, Search, Settings2, X } from 'lucide-react';
+import { ArrowDownUp, ChevronLeft, ChevronRight, Ellipsis, EyeOff, Grid2X2, List, Pin, Plus, Search, Settings2, SquarePen, X } from 'lucide-react';
 import type { ChatSession, SessionSettings, UseChat } from './types';
 import type { SessionMenuTarget } from './SessionMenu';
 import { tokens } from './tokens.stylex';
 import { DEFAULT_RECENT_CHAT_LIMIT, ICON_STROKE, SESSION_CHANGE_EVENT, BrowserIcon, IconButton, styles as ui } from './ui';
 import { Button } from './Button';
 import { useAutoRefresh } from './useAutoRefresh';
+import { TabBar, TabContext, useIsPhone } from './TabBar';
 
 const NATIVE_PAGE_SIZE = 50;
 const NATIVE_REFRESH_INTERVAL_MS = 5_000;
@@ -23,6 +24,9 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen
   chat: UseChat; isDrawer?: boolean; onClose?: () => void; onNew: () => void; onNewIncognito?: () => void; onOpen: (id: string) => void; onSettings: () => void; onBrowser: () => void; onMenu: (target: SessionMenuTarget) => void;
 }) {
   const shouldReduceMotion = useReducedMotion();
+  const tabs = useContext(TabContext);
+  const isPhone = useIsPhone();
+  const isPage = !!isDrawer && !!tabs && isPhone;
   const [isShowingAll, setShowingAll] = useState(false);
   const [recentLimit, setRecentLimit] = useState(DEFAULT_RECENT_CHAT_LIMIT);
   useEffect(() => {
@@ -165,7 +169,7 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen
     return [...(hasHeading ? [{ kind: 'heading' as const, group }] : []), { kind: 'session' as const, session }];
   });
   if (isExpanded && (nextCursor != null || isLoadingMoreNative)) rows.push({ kind: 'more' });
-  return <aside {...stylex.props(styles.sidebar)} aria-label="Conversations" onPointerDown={event => {
+  return <aside {...stylex.props(styles.sidebar, isPage && styles.page)} aria-label="Conversations" onPointerDown={event => {
     cancelPress(); hasLongPressed.current = false;
     if (event.button !== 0 || !event.isPrimary) return;
     const target = targetFor(event.target); if (!target) return;
@@ -179,9 +183,14 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen
     const target = targetFor(event.target); if (!target) return;
     event.preventDefault(); onMenu(target);
   }}>
-    <div {...stylex.props(styles.top)}><span {...stylex.props(styles.brand)}><img src="/icons/mark.svg" width={24} height={24} alt="" aria-hidden="true" />{APP_NAME}</span>{isDrawer && <IconButton label="Close conversations" onClick={onClose}><X size={22} strokeWidth={ICON_STROKE} /></IconButton>}</div>
-    <div {...stylex.props(styles.newChatRow)}><button {...stylex.props(styles.newChat)} onClick={onNew}><Plus size={20} strokeWidth={ICON_STROKE} />New chat</button>{onNewIncognito && <IconButton label="New incognito chat" onClick={onNewIncognito}><EyeOff size={19} strokeWidth={ICON_STROKE} /></IconButton>}</div>
-    <div {...stylex.props(styles.search)}><Search size={17} strokeWidth={ICON_STROKE} /><input aria-label="Search conversations" placeholder="Search" value={chat.searchQuery} onChange={event => chat.setSearchQuery(event.target.value)} {...stylex.props(styles.searchInput)} />{chat.searchQuery && <button {...stylex.props(styles.clear)} aria-label="Clear search" onClick={() => chat.setSearchQuery('')}><X size={16} /></button>}</div>
+    {isPage ? <>
+      <div {...stylex.props(styles.pageBar)}><IconButton label="Close conversations" onClick={onClose}><ChevronLeft size={24} strokeWidth={ICON_STROKE} /></IconButton><span {...stylex.props(styles.pageActions)}>{onNewIncognito && <IconButton label="New incognito chat" onClick={onNewIncognito}><EyeOff size={20} strokeWidth={ICON_STROKE} /></IconButton>}<IconButton label="New chat" onClick={onNew}><SquarePen size={21} strokeWidth={ICON_STROKE} /></IconButton></span></div>
+      <h1 {...stylex.props(styles.largeTitle)}>Chats</h1>
+    </> : <>
+      <div {...stylex.props(styles.top)}><span {...stylex.props(styles.brand)}><img src="/icons/mark.svg" width={24} height={24} alt="" aria-hidden="true" />{APP_NAME}</span>{isDrawer && <IconButton label="Close conversations" onClick={onClose}><X size={22} strokeWidth={ICON_STROKE} /></IconButton>}</div>
+      <div {...stylex.props(styles.newChatRow)}><button {...stylex.props(styles.newChat)} onClick={onNew}><Plus size={20} strokeWidth={ICON_STROKE} />New chat</button>{onNewIncognito && <IconButton label="New incognito chat" onClick={onNewIncognito}><EyeOff size={19} strokeWidth={ICON_STROKE} /></IconButton>}</div>
+    </>}
+    <div {...stylex.props(styles.search, isPage && styles.pageSearch)}><Search size={17} strokeWidth={ICON_STROKE} /><input aria-label="Search conversations" placeholder="Search" value={chat.searchQuery} onChange={event => chat.setSearchQuery(event.target.value)} {...stylex.props(styles.searchInput)} />{chat.searchQuery && <button {...stylex.props(styles.clear)} aria-label="Clear search" onClick={() => chat.setSearchQuery('')}><X size={16} /></button>}</div>
     {isShowingAll && <div {...stylex.props(styles.controls)}>
       <div {...stylex.props(styles.segment)}><button type="button" aria-pressed={view === 'active'} {...stylex.props(styles.control, view === 'active' && styles.activeControl)} onClick={() => setView('active')}>Chats</button><button type="button" aria-pressed={view === 'archived'} {...stylex.props(styles.control, view === 'archived' && styles.activeControl)} onClick={() => setView('archived')}><span>Archive</span></button></div>
       <select aria-label="Filter by project" value={projectId} {...stylex.props(styles.projectFilter)} onChange={event => setProjectId(event.target.value)}><option value="">All projects</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
@@ -189,22 +198,22 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen
       <IconButton label={sort === 'newest' ? 'Newest first' : 'Oldest first'} onClick={() => setSort(current => current === 'newest' ? 'oldest' : 'newest')}><ArrowDownUp size={17} strokeWidth={ICON_STROKE} /></IconButton>
       <IconButton label={layout === 'list' ? 'Card view' : 'List view'} onClick={() => setLayout(current => current === 'list' ? 'card' : 'list')}>{layout === 'list' ? <Grid2X2 size={17} strokeWidth={ICON_STROKE} /> : <List size={17} strokeWidth={ICON_STROKE} />}</IconButton>
     </div>}
-    <div {...stylex.props(styles.list)}>
+    <div {...stylex.props(styles.list, isPage && styles.pageList)}>
       {rows.length > 0 && <Virtuoso data={rows} initialItemCount={12} defaultItemHeight={layout === 'card' ? 76 : 50} increaseViewportBy={150} style={{ height: '100%' }} computeItemKey={(_, row) => row.kind === 'heading' ? row.group : row.kind === 'more' ? 'load-more' : row.session.id} components={recentSessionListComponents} itemContent={(_, row) => {
         if (row.kind === 'heading') return <h2 {...stylex.props(styles.group)}>{row.group}</h2>;
         if (row.kind === 'more') return <Button {...stylex.props(styles.more)} disabled={isLoadingMoreNative} onClick={() => { void loadMoreNative(); }}>{isLoadingMoreNative ? 'Loading…' : 'Show more'}<ChevronRight size={16} /></Button>;
         const session = row.session;
         const isRunning = session.status === 'running' || session.id === chat.sessionId && chat.isRunning;
         const needsAttention = !!session.suspensionKind || session.status === 'suspended' || session.status === 'waiting';
-        return <div {...stylex.props(styles.session, layout === 'card' && styles.card, session.id === chat.sessionId && styles.selected)}>
-          <button data-session-id={session.id} {...stylex.props(styles.sessionButton, layout === 'card' && styles.cardButton)} title={session.statusLabel ? `${session.title || 'Untitled conversation'} · ${session.statusLabel}` : session.title || 'Untitled conversation'} aria-current={session.id === chat.sessionId ? 'page' : undefined} onClick={() => onOpen(session.id)}><span {...stylex.props(styles.sessionCopy)}><span {...stylex.props(styles.sessionTitle)}>{session.title || 'Untitled conversation'}</span>{layout === 'card' && session.statusLabel && <span {...stylex.props(styles.statusLabel)}>{session.statusLabel}</span>}</span>{session.isPinned && <Pin {...stylex.props(styles.pin)} size={13} strokeWidth={ICON_STROKE} aria-label="Pinned" />}{isRunning ? <span {...stylex.props(styles.status)} role="img" aria-label="Running"><motion.span {...stylex.props(styles.spinner)} aria-hidden="true" animate={shouldReduceMotion ? undefined : { rotate: 360 }} transition={{ duration: .8, repeat: Infinity, ease: 'linear' }} /></span> : needsAttention ? <span {...stylex.props(styles.status)} role="img" aria-label={session.statusLabel || 'Needs attention'}><span {...stylex.props(styles.attention)} /></span> : session.status === 'errored' ? <span {...stylex.props(styles.status)} role="img" aria-label={session.statusLabel || 'Task failed'}><span {...stylex.props(styles.failed)} /></span> : session.unread && session.id !== chat.sessionId ? <span {...stylex.props(styles.status)} role="img" aria-label="Unread"><span {...stylex.props(styles.indicator)} /></span> : undefined}</button>
+        return <div {...stylex.props(styles.session, isPage && styles.pageSession, layout === 'card' && styles.card, session.id === chat.sessionId && styles.selected)}>
+          <button data-session-id={session.id} {...stylex.props(styles.sessionButton, isPage && styles.pageSessionButton, layout === 'card' && styles.cardButton)} title={session.statusLabel ? `${session.title || 'Untitled conversation'} · ${session.statusLabel}` : session.title || 'Untitled conversation'} aria-current={session.id === chat.sessionId ? 'page' : undefined} onClick={() => onOpen(session.id)}><span {...stylex.props(styles.sessionCopy)}><span {...stylex.props(styles.sessionTitle)}>{session.title || 'Untitled conversation'}</span>{layout === 'card' && session.statusLabel && <span {...stylex.props(styles.statusLabel)}>{session.statusLabel}</span>}</span>{session.isPinned && <Pin {...stylex.props(styles.pin)} size={13} strokeWidth={ICON_STROKE} aria-label="Pinned" />}{isRunning ? <span {...stylex.props(styles.status)} role="img" aria-label="Running"><motion.span {...stylex.props(styles.spinner)} aria-hidden="true" animate={shouldReduceMotion ? undefined : { rotate: 360 }} transition={{ duration: .8, repeat: Infinity, ease: 'linear' }} /></span> : needsAttention ? <span {...stylex.props(styles.status)} role="img" aria-label={session.statusLabel || 'Needs attention'}><span {...stylex.props(styles.attention)} /></span> : session.status === 'errored' ? <span {...stylex.props(styles.status)} role="img" aria-label={session.statusLabel || 'Task failed'}><span {...stylex.props(styles.failed)} /></span> : session.unread && session.id !== chat.sessionId ? <span {...stylex.props(styles.status)} role="img" aria-label="Unread"><span {...stylex.props(styles.indicator)} /></span> : undefined}</button>
           <button type="button" {...stylex.props(styles.options)} aria-label={'Options for ' + (session.title || 'conversation')} aria-haspopup="menu" onClick={event => onMenu({ id: session.id, title: session.title, anchor: event.currentTarget, archived: session.archived, projectId: session.projectId, unread: session.unread, status: session.status })}><Ellipsis size={17} strokeWidth={ICON_STROKE} aria-hidden="true" /></button>
         </div>;
       }} />}
       {!rows.length && <p role="status" {...stylex.props(styles.empty)}>{isLoadingNative ? 'Loading conversations…' : nativeError ? 'Could not load conversations.' : chat.isLoadingSessions ? 'Loading conversations…' : chat.authError ? 'Connect in Settings to see your conversations.' : chat.searchQuery ? 'No matching conversations' : view === 'archived' ? 'No archived conversations.' : 'Your conversations will appear here.'}</p>}
     </div>
     {!chat.searchQuery.trim() && (isShowingAll || recentSessions.length > recentLimit || chat.hasMore) && <Button {...stylex.props(styles.showAll)} aria-expanded={isShowingAll} onClick={() => { setShowingAll(current => !current); setView('active'); setProjectId(''); setStatusFilter(''); }}>{isShowingAll ? 'Show recent' : 'Show all'}<ChevronRight size={16} aria-hidden="true" /></Button>}
-    <div {...stylex.props(styles.bottom)}><button {...stylex.props(styles.nav)} onClick={onBrowser}><BrowserIcon size={19} />Browser</button><button {...stylex.props(styles.nav)} onClick={onSettings}><Settings2 size={19} strokeWidth={ICON_STROKE} />Settings<span {...stylex.props(styles.connection, chat.isConnected && styles.connected)} role="img" aria-label={chat.isConnected ? 'Connected' : 'Disconnected'} /></button></div>
+    {isPage ? <TabBar /> : <div {...stylex.props(styles.bottom)}><button {...stylex.props(styles.nav)} onClick={onBrowser}><BrowserIcon size={19} />Browser</button><button {...stylex.props(styles.nav)} onClick={onSettings}><Settings2 size={19} strokeWidth={ICON_STROKE} />Settings<span {...stylex.props(styles.connection, chat.isConnected && styles.connected)} role="img" aria-label={chat.isConnected ? 'Connected' : 'Disconnected'} /></button></div>}
   </aside>;
 }
 
@@ -258,6 +267,14 @@ function dateSeconds(value: unknown) {
 
 const styles = stylex.create({
   sidebar: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, width: '100%', backgroundColor: tokens.surface, paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', minWidth: 0 },
+  page: { backgroundColor: tokens.canvas, paddingBottom: 'calc(88px + env(safe-area-inset-bottom))' },
+  pageBar: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 52, padding: '4px max(6px, env(safe-area-inset-right)) 0 max(6px, env(safe-area-inset-left))', flexShrink: 0 },
+  pageActions: { display: 'flex', alignItems: 'center' },
+  largeTitle: { margin: 0, padding: '0 20px 10px', fontSize: '2.125rem', fontWeight: 700, letterSpacing: '-.6px', lineHeight: 1.15, flexShrink: 0 },
+  pageSearch: { margin: '0 16px 10px', padding: '0 12px', borderRadius: 12, backgroundColor: tokens.bubble },
+  pageList: { padding: '0 8px 0' },
+  pageSession: { borderRadius: 14 },
+  pageSessionButton: { minHeight: 52, fontSize: '1rem', padding: '12px 4px 12px 12px' },
   top: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 68, padding: '8px 16px 8px 24px', flexShrink: 0 },
   brand: { display: 'flex', alignItems: 'center', gap: 8, fontSize: '1.3125rem', fontWeight: 650, letterSpacing: '-.5px' },
   newChatRow: { display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, margin: '0 14px 12px' },

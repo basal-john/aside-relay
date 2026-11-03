@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { Check, ChevronDown } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight } from 'lucide-react';
 import { AnimatePresence } from 'motion/react';
 import { parseModelConfig, parseModels } from './responses';
 import { tokens } from './tokens.stylex';
@@ -101,8 +101,8 @@ function configureModel(model: AvailableModel, current: ModelConfig): ModelConfi
     fastMode: model.supportsFastMode && current.fastMode };
 }
 
-export function ModelPicker({ selection, disabled, isRunning }: {
-  selection: ReturnType<typeof useModelSelection>; disabled: boolean; isRunning: boolean;
+export function ModelPicker({ selection, disabled, isRunning, variant = 'chip' }: {
+  selection: ReturnType<typeof useModelSelection>; disabled: boolean; isRunning: boolean; variant?: 'chip' | 'title';
 }) {
   const [isOpen, setOpen] = useState(false);
   const current = selection.items.find(model => model.id === selection.current?.modelId && model.provider === selection.current.provider);
@@ -113,8 +113,10 @@ export function ModelPicker({ selection, disabled, isRunning }: {
   const open = () => { selection.reload(); setOpen(true); };
 
   return <>
-    <button type="button" aria-label={'Choose model, ' + name + (thinkingLabel ? ', ' + thinkingLabel : '')} aria-haspopup="dialog" aria-expanded={isOpen} disabled={disabled || selection.isUpdating} {...stylex.props(styles.trigger, ui.glass)} onPointerDown={event => { if (event.pointerType === 'touch') { event.preventDefault(); if (!disabled && !selection.isUpdating) open(); } }} onClick={open}>
-      <span {...stylex.props(styles.triggerText)}><span {...stylex.props(styles.name)}>{name}</span>{thinkingLabel && <span {...stylex.props(styles.effort)}>{thinkingLabel}</span>}</span><ChevronDown size={13} strokeWidth={ICON_STROKE} aria-hidden="true" />
+    <button type="button" aria-label={'Choose model, ' + name + (thinkingLabel ? ', ' + thinkingLabel : '')} aria-haspopup="dialog" aria-expanded={isOpen} disabled={disabled || selection.isUpdating} {...stylex.props(variant === 'title' ? styles.titleTrigger : [styles.trigger, ui.glass])} onPointerDown={event => { if (event.pointerType === 'touch') { event.preventDefault(); if (!disabled && !selection.isUpdating) open(); } }} onClick={open}>
+      {variant === 'title'
+        ? <><span {...stylex.props(styles.name)}>{name}</span><ChevronRight size={15} strokeWidth={ICON_STROKE} aria-hidden="true" {...stylex.props(styles.titleChevron)} /></>
+        : <><span {...stylex.props(styles.triggerText)}><span {...stylex.props(styles.name)}>{name}</span>{thinkingLabel && <span {...stylex.props(styles.effort)}>{thinkingLabel}</span>}</span><ChevronDown size={13} strokeWidth={ICON_STROKE} aria-hidden="true" /></>}
     </button>
     <AnimatePresence>{isOpen && <Dialog key="models" title="Models" onClose={close}>
       {isRunning && <p {...stylex.props(styles.note)}>Applies to your next response.</p>}
@@ -147,6 +149,8 @@ function sortModels(models: AvailableModel[]) {
 
 const styles = stylex.create({
   trigger: { position: 'relative', '::after': { content: '""', position: 'absolute', inset: '-6px 0' }, display: 'flex', alignItems: 'center', gap: 6, minHeight: 32, maxWidth: 190, minWidth: 0, padding: '0 10px', borderWidth: 0, borderRadius: 20, backgroundColor: { default: 'transparent', ':hover': tokens.hover }, color: tokens.muted, fontSize: '.6875rem', pointerEvents: 'auto', '@media (max-width: 375px)': { maxWidth: 172 } },
+  titleTrigger: { display: 'flex', alignItems: 'center', gap: 3, minHeight: 44, maxWidth: 'min(60vw, 320px)', minWidth: 0, padding: '0 8px', borderWidth: 0, borderRadius: 12, backgroundColor: { default: 'transparent', ':hover': tokens.hover }, color: tokens.text, fontFamily: tokens.font, fontSize: '1.0625rem', fontWeight: 650, letterSpacing: '-.2px' },
+  titleChevron: { color: tokens.muted, flexShrink: 0 },
   name: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 },
   triggerText: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 },
   effort: { fontSize: '0.625rem' },

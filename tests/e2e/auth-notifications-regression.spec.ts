@@ -137,7 +137,7 @@ test('uses a saved token when the web token endpoint is temporarily unavailable'
     }
   });
 
-  await page.goto(`/?session=${SESSION_A}`);
+  await page.goto(`/c/${SESSION_A}`);
 
   await expect(page.getByText('Hello from the assistant.')).toBeVisible();
   await expect.poll(() => sessionAuthorizations).toContain('Bearer saved-token');
@@ -154,7 +154,7 @@ test('keeps the tab connected when persistent token storage throws', async ({ pa
     }
   });
 
-  await page.goto(`/?session=${SESSION_A}`);
+  await page.goto(`/c/${SESSION_A}`);
 
   await expect(page.getByText('Hello from the assistant.')).toBeVisible();
   await expect(page.getByText("Connected for this tab, but the access token couldn't be saved.")).toBeVisible();
@@ -163,7 +163,7 @@ test('keeps the tab connected when persistent token storage throws', async ({ pa
 test('refreshes authentication after a WebSocket closes before opening', async ({ page, mockAside }) => {
   await installSocketSequence(page, [1006, undefined]);
 
-  await page.goto(`/?session=${SESSION_A}`);
+  await page.goto(`/c/${SESSION_A}`);
 
   await expect(page.getByText('Hello from the assistant.')).toBeVisible();
   await expect.poll(() => page.evaluate(() => Reflect.get(window, '__authSocketRegression').created)).toBe(2);
@@ -173,7 +173,7 @@ test('refreshes authentication after a WebSocket closes before opening', async (
 test('stops refreshing authentication after a repeated pre-open 4401', async ({ page, mockAside }) => {
   await installSocketSequence(page, [4401, 4401]);
 
-  await page.goto(`/?session=${SESSION_A}`);
+  await page.goto(`/c/${SESSION_A}`);
 
   await expect(page.getByRole('alert')).toContainText('Connect to load your conversations.');
   await expect.poll(() => page.evaluate(() => Reflect.get(window, '__authSocketRegression').created)).toBe(2);
@@ -212,7 +212,7 @@ test('finishes disabling after an in-flight notification restore', async ({ page
     return fulfillJson(route, { ok: true });
   });
 
-  await page.goto(`/?session=${SESSION_A}`);
+  await page.goto(`/c/${SESSION_A}`);
   const settings = await openSettings(page);
   await expect(settings.getByText('Enabled', { exact: true })).toBeVisible();
   holdNextPut = true;
@@ -244,7 +244,7 @@ test('replaces a stale VAPID subscription before enabling notifications', async 
     return fulfillJson(route, { ok: true });
   });
 
-  await page.goto(`/?session=${SESSION_A}`);
+  await page.goto(`/c/${SESSION_A}`);
   const settings = await openSettings(page);
   await expect(settings.getByText('Off', { exact: true })).toBeVisible();
   await settings.getByRole('button', { name: 'Enable notifications' }).click();

@@ -5,7 +5,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { tokens } from './tokens.stylex';
 import { ICON_STROKE, OPEN_DIALOG_SELECTOR, BrowserIcon, IconButton, styles as ui } from './ui';
 import type { RunOptions, UploadAttachment, UseChat } from './types';
-import { ModelPicker, useModelSelection } from './ModelPicker';
+import type { useModelSelection } from './ModelPicker';
 import { ContextPicker, parseSkills, type ContextReference, type ContextSkill } from './ContextPicker';
 import { SlashMenu } from './SlashMenu';
 import {
@@ -28,12 +28,11 @@ const MAX_ATTACHMENTS = 12;
 const COMPACT_DRAFT_HEIGHT = 28;
 const MAX_DRAFT_HEIGHT = 160;
 
-export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, textSize, uiFont, isKeyboardOpen, runOptions, onNewChat, onConfirmClear }: {
-  chat: UseChat; onBrowser: () => void; draft: string; setDraft: (value: string) => void; revision: number; notify: (text: string, kind?: 'error' | 'success') => void; textSize: number; uiFont: string; isKeyboardOpen: boolean; runOptions?: RunOptions; onNewChat: () => void; onConfirmClear: () => void;
+export function Composer({ chat, modelSelection, onBrowser, draft, setDraft, revision, notify, textSize, uiFont, isKeyboardOpen, runOptions, onNewChat, onConfirmClear }: {
+  chat: UseChat; modelSelection: ReturnType<typeof useModelSelection>; onBrowser: () => void; draft: string; setDraft: (value: string) => void; revision: number; notify: (text: string, kind?: 'error' | 'success') => void; textSize: number; uiFont: string; isKeyboardOpen: boolean; runOptions?: RunOptions; onNewChat: () => void; onConfirmClear: () => void;
 }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const footerRef = useRef<HTMLElement>(null);
-  const modelSelection = useModelSelection(chat, notify);
   const shouldReduceMotion = useReducedMotion();
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
@@ -318,9 +317,8 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
   return <footer ref={footerRef} id="composer" {...stylex.props(styles.footer, isExpanded && styles.expandedFooter)} onFocusCapture={() => setFocus(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocus(false); }}>
     <div {...stylex.props(styles.tools)}>
       <motion.button type="button" aria-haspopup="dialog" aria-label="Open browser" {...stylex.props(styles.browser, ui.glass)} whileTap={shouldReduceMotion ? undefined : { scale: .96 }} onPointerDown={event => { if (event.pointerType === 'touch') { event.preventDefault(); onBrowser(); } }} onClick={onBrowser}><BrowserIcon size={17} /><span>Browser</span></motion.button>
-      <ModelPicker selection={modelSelection} disabled={!chat.isReady || chat.isOpening || chat.isSending || !!chat.authError} isRunning={chat.isRunning} />
     </div>
-    <form {...stylex.props(styles.composer, ui.glass, isExpanded && styles.expandedComposer)} onSubmit={event => { event.preventDefault(); void submit(); }} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addFiles([...event.dataTransfer.files]); }}>
+    <form {...stylex.props(styles.composer, isExpanded && styles.expandedComposer)} onSubmit={event => { event.preventDefault(); void submit(); }} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addFiles([...event.dataTransfer.files]); }}>
       {slashOpen && <SlashMenu items={slashItems} activeIndex={slashIndex} onActiveIndexChange={setSlashIndex} onSelect={chooseSlashItem} onClose={() => setSlashDismissed(true)} />}
       <AnimatePresence initial={false}>
         {contextChips.length > 0 && <motion.div key="context-chips" {...stylex.props(styles.contextChips)} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: .18 }}>
@@ -335,7 +333,7 @@ export function Composer({ chat, onBrowser, draft, setDraft, revision, notify, t
           <AnimatePresence initial={false} onExitComplete={flushPreviewRevokes}>{attachments.map(attachment => <AttachmentItem key={attachment.key} attachment={attachment} onPreviewUnmount={markSubmittedPreviewUnmounted} onRemove={() => { if (attachment.preview) pendingPreviewRevokesRef.current.push(attachment.preview); attachmentRef.current = attachmentRef.current.filter(item => item.key !== attachment.key); setAttachments(attachmentRef.current); }} />)}</AnimatePresence>
         </motion.div>}
       </AnimatePresence>
-      <div {...stylex.props(styles.inputActions)}><IconButton label="Add to message" aria-haspopup="dialog" style={{ width: 36, height: 36 }} disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={() => setAddingContext(true)}><Plus size={24} strokeWidth={ICON_STROKE} /></IconButton>{speechRecognition && <IconButton label={isDictating ? 'Stop dictation' : 'Dictate'} aria-pressed={isDictating} style={{ width: 36, height: 36 }} disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={toggleDictation}><Mic size={21} strokeWidth={ICON_STROKE} /></IconButton>}</div>
+      <div {...stylex.props(styles.inputActions)}><IconButton label="Add to message" aria-haspopup="dialog" disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={() => setAddingContext(true)}><Plus size={22} strokeWidth={ICON_STROKE} /></IconButton>{speechRecognition && <IconButton label={isDictating ? 'Stop dictation' : 'Dictate'} aria-pressed={isDictating} disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={toggleDictation}><Mic size={21} strokeWidth={ICON_STROKE} /></IconButton>}</div>
       <textarea ref={input} id="draft" aria-label="Message" placeholder={chat.authError ? 'Connect in Settings' : chat.isRunning ? 'Follow up' : 'Message'} rows={1} value={draft} disabled={!chat.isReady || chat.isOpening || !!chat.authError} {...stylex.props(styles.input, isExpanded && styles.expandedInput)} onChange={event => { draftRef.current = event.target.value; setDraft(event.target.value); setCursor(event.target.selectionStart); }} onSelect={event => setCursor(event.currentTarget.selectionStart)} onClick={event => setCursor(event.currentTarget.selectionStart)} onKeyUp={event => setCursor(event.currentTarget.selectionStart)} onPaste={event => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); void addFiles(files); } }} onKeyDown={event => {
         if (slashOpen && slashItems.length) {
           if (event.key === 'ArrowDown') { event.preventDefault(); setSlashIndex(index => (index + 1) % slashItems.length); return; }
@@ -402,18 +400,18 @@ async function resizeImage(file: File) {
 }
 
 const styles = stylex.create({
-  footer: { position: 'absolute', bottom: 0, left: 0, width: '100%', zIndex: 3, pointerEvents: 'none', padding: '6px max(32px, env(safe-area-inset-right)) var(--composer-bottom-padding, max(18px, env(safe-area-inset-bottom))) max(32px, env(safe-area-inset-left))', '@media (max-width: 375px)': { paddingLeft: 20, paddingRight: 20 } },
-  expandedFooter: { paddingLeft: 'max(16px, env(safe-area-inset-left))', paddingRight: 'max(16px, env(safe-area-inset-right))' },
+  footer: { position: 'absolute', bottom: 0, left: 0, width: '100%', zIndex: 3, backgroundColor: tokens.canvas, padding: '6px max(12px, env(safe-area-inset-right)) var(--composer-bottom-padding, max(12px, env(safe-area-inset-bottom))) max(12px, env(safe-area-inset-left))' },
+  expandedFooter: { paddingLeft: 'max(12px, env(safe-area-inset-left))', paddingRight: 'max(12px, env(safe-area-inset-right))' },
   tools: { display: 'var(--composer-tools-display, none)', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 10, minWidth: 0 },
-  composer: { position: 'relative', display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr) auto', alignItems: 'center', width: '100%', maxWidth: 736, margin: '0 auto', borderRadius: 30, padding: '2px 4px', minWidth: 0, pointerEvents: 'auto' },
-  expandedComposer: { borderRadius: 28, padding: 8 },
+  composer: { position: 'relative', display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr) auto', alignItems: 'center', width: '100%', maxWidth: 768, margin: '0 auto', borderRadius: 24, padding: 0, minWidth: 0, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.controlBorder, backgroundColor: tokens.canvas },
+  expandedComposer: { borderRadius: 22, padding: 4 },
   input: { display: 'block', width: '100%', resize: 'none', borderWidth: 0, backgroundColor: 'transparent', color: tokens.text, fontSize: '1rem', lineHeight: 1.5, minHeight: COMPACT_DRAFT_HEIGHT, maxHeight: MAX_DRAFT_HEIGHT, overflowY: 'auto', overflowWrap: 'anywhere', padding: '2px 4px', '::placeholder': { color: tokens.muted } },
   expandedInput: { order: -1, gridColumn: '1 / -1', minHeight: 44, padding: '8px 10px 12px' },
   browser: { position: 'relative', '::after': { content: '""', position: 'absolute', inset: '-6px 0' }, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 32, padding: '0 10px', borderRadius: 24, color: tokens.text, fontSize: '.6875rem', fontWeight: 500, pointerEvents: 'auto' },
   inputActions: { display: 'flex', alignItems: 'center', gap: 0 },
   submitActions: { display: 'flex', gridColumn: 3, alignItems: 'center', gap: 4, minWidth: 0 },
-  stop: { position: 'relative', '::after': { content: '""', position: 'absolute', inset: -3 }, width: 38, height: 38, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderStyle: 'solid', borderColor: tokens.primary, backgroundColor: tokens.primary, color: tokens.primaryForeground, flexShrink: 0 },
-  send: { position: 'relative', '::after': { content: '""', position: 'absolute', inset: -3 }, width: 38, height: 38, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderWidth: 0, backgroundColor: tokens.primary, color: tokens.primaryForeground, flexShrink: 0 },
+  stop: { position: 'relative', width: 44, height: 44, padding: 5, backgroundClip: 'content-box', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderWidth: 0, backgroundColor: tokens.text, color: tokens.canvas, flexShrink: 0 },
+  send: { position: 'relative', width: 44, height: 44, padding: 5, backgroundClip: 'content-box', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderWidth: 0, backgroundColor: { default: tokens.text, ':disabled': tokens.bubble }, color: { default: tokens.canvas, ':disabled': tokens.muted }, flexShrink: 0 },
   contextChips: { order: -3, gridColumn: '1 / -1', display: 'flex', flexWrap: 'wrap', gap: 8, padding: '4px 10px 8px', maxWidth: '100%', minWidth: 0 },
   contextChip: { display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: '100%', minHeight: 32, padding: '4px 6px 4px 10px', borderRadius: 999, backgroundColor: tokens.canvas, color: tokens.text, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border },
   contextChipLabel: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '.8125rem', fontWeight: 550 },

@@ -1,9 +1,8 @@
-import { APP_NAME } from './brand';
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { VirtuosoHandle } from 'react-virtuoso';
 import * as stylex from '@stylexjs/stylex';
-import { ArrowDown, Check, CircleAlert, Ellipsis, Menu, SquarePen, X } from 'lucide-react';
+import { ArrowDown, Check, CircleAlert, Ellipsis, Menu, Sparkles, SquarePen, X } from 'lucide-react';
 import { AnimatePresence, MotionConfig, motion, usePresence, useReducedMotion } from 'motion/react';
 import { useChat } from './chat';
 import { isRecord } from './responses';
@@ -18,6 +17,8 @@ import { BrowserLive } from './BrowserLive';
 import { BrowserPanel } from './BrowserPanel';
 import { ImagePreview } from './ImagePreview';
 import { Settings } from './Settings';
+import { ModelPicker, useModelSelection } from './ModelPicker';
+import { TabContext, type Tab } from './TabBar';
 import { SessionWorkspace, type SessionWorkspaceState } from './SessionWorkspace';
 import { RenameConversation, SessionMenu, type SessionMenuTarget } from './SessionMenu';
 import { applyTheme, loadThemeMode, resolveTheme, loadAppearance, APPEARANCE_STORAGE_KEY, type Appearance, type ThemeMode, THEME_STORAGE_KEY, applyTextSize, loadTextSize, TEXT_SIZE_STORAGE_KEY, type Theme } from './theme';
@@ -35,6 +36,14 @@ const latestMessage = { index: 'LAST', align: 'end' } as const;
 const SWIPE_AXIS_THRESHOLD = 10;
 const DRAWER_SWIPE_DISTANCE = 48;
 const HORIZONTAL_GESTURE_RATIO = 1.25;
+const RESUME_BLANK_AFTER_MS = 30 * 60_000;
+const NOTIFICATION_OPEN_GRACE_MS = 5_000;
+const STARTERS = [
+  { title: 'Summarise a page', hint: 'from the open tab', prompt: 'Summarise the page in my current tab.' },
+  { title: 'Draft an email', hint: 'reply in my voice', prompt: 'Draft a reply to the email I have open.' },
+  { title: 'Check my calendar', hint: 'for tomorrow', prompt: 'What is on my calendar tomorrow?' },
+  { title: 'Compare two tabs', hint: 'side by side', prompt: 'Compare the two pages I have open.' },
+];
 type Panel = 'settings' | 'browser' | 'workspace' | 'files';
 const panelsByPath: Record<string, Panel | undefined> = { '/settings': 'settings', '/tabs': 'browser', '/workspace': 'workspace', '/files': 'files' };
 
@@ -72,6 +81,7 @@ export function App() {
   const headerRef = useRef<HTMLElement>(null);
   const effectiveFilesSessionId = filesSessionId ?? chat.sessionId;
   const sessionTitle = chat.sessions.find(session => session.id === chat.sessionId)?.title || (chat.sessionId ? 'Conversation' : 'New chat');
+  const headerStatus = runOptions?.mode === 'incognito' && !chat.sessionId ? 'Incognito' : workspaceState && workspaceState.sessionId === chat.sessionId && workspaceState.suspension ? workspaceState.suspension.title : chat.isRunning ? 'Working…' : workspaceState?.sessionId === chat.sessionId && workspaceState?.status === 'errored' ? 'Task failed' : '';
   const toasts = [...chat.toasts, ...localToasts].sort((first, second) => first.createdAt - second.createdAt);
 
   function changeAtBottom(isAtBottom: boolean) { setCanJump(!isAtBottom); }
@@ -80,6 +90,9 @@ export function App() {
     const id = `local:${++localToastIdRef.current}`; setLocalToasts(current => [...current, { id, createdAt: Date.now(), message, tone: kind }]);
   }, []);
   const notifications = usePushNotifications(chat, notify);
+  const modelSelection = useModelSelection(chat, notify);
+  const resumeStateRef = useRef({ hasSession: false, hasDraft: false, hasPanel: false, notificationOpenedAt: 0 });
+  useEffect(() => { Object.assign(resumeStateRef.current, { hasSession: !!chat.sessionId, hasDraft: !!draft.trim(), hasPanel: !!panel }); }, [chat.sessionId, draft, panel]);
   const dismissToast = useCallback((id: string) => { chat.dismissToast(id); setLocalToasts(current => current.filter(toast => toast.id !== id)); }, [chat.dismissToast]);
   function changeTextSize(size: number) {
     applyTextSize(size); setTextSize(size);
@@ -104,6 +117,8 @@ export function App() {
     media.addEventListener('change', update);
     return () => media.removeEventListener('change', update);
   }, [themeMode, appearance]);
+  const newChatRef = useRef<() => void>(() => undefined);
+  useEffect(() => { newChatRef.current = newChat; });
   function newChat() { chat.newChat(); setRunOptions(undefined); setDraft(''); setRevision(value => value + 1); setDrawer(false); setMenuSession(undefined); changeAtBottom(true); }
   async function clearChatMessages() {
     if (!chat.sessionId || isClearing) return;
@@ -121,6 +136,10 @@ export function App() {
   function newIncognitoChat() { newChat(); setRunOptions({ mode: 'incognito' }); }
   function openSession(id: string) { void chat.openSession(id); setRunOptions(undefined); setDraft(''); setRevision(value => value + 1); setDrawer(false); setMenuSession(undefined); changeAtBottom(true); }
   function openPanel(next: Panel, targetId?: string) { const sessionId = targetId ?? chat.sessionId; const path = next === 'browser' ? '/tabs' : next === 'files' && sessionId ? '/files?session=' + encodeURIComponent(sessionId) : '/' + next; setBrowserTarget(next === 'browser' ? targetId : undefined); if (next === 'files') setFilesSessionId(sessionId); setPanel(next); setDrawer(false); if (panel) history.replaceState({ panel: next }, '', path); else history.pushState({ panel: next }, '', path); }
+  function selectTab(tab: Tab) {
+    if (tab === 'chats') { if (panel) closePanel(); setDrawer(true); return; }
+    openPanel(tab);
+  }
   function closePanel() { setPanel(undefined); setBrowserTarget(undefined); history.replaceState({}, '', chat.sessionId ? '/c/' + encodeURIComponent(chat.sessionId) : '/'); }
   function prefill(text: string) { setDraft(text); requestAnimationFrame(() => { const area = document.querySelector<HTMLTextAreaElement>('#draft'); area?.focus({ preventScroll: true }); area?.setSelectionRange(text.length, text.length); }); }
   function composeContext({ text }: { messageId: string; text: string }) { setDraft(current => `${text.split('\n').map(line => '> ' + line).join('\n')}\n\n${current}`); requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('#draft')?.focus({ preventScroll: true })); }
@@ -217,6 +236,19 @@ export function App() {
     window.addEventListener('popstate', onPop); return () => window.removeEventListener('popstate', onPop);
   }, []);
   useEffect(() => {
+    let hiddenAt = document.visibilityState === 'hidden' ? Date.now() : 0;
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
+      const awayFor = hiddenAt ? Date.now() - hiddenAt : 0;
+      hiddenAt = 0;
+      const state = resumeStateRef.current;
+      if (awayFor < RESUME_BLANK_AFTER_MS || !state.hasSession || state.hasDraft || state.hasPanel || Date.now() - state.notificationOpenedAt < NOTIFICATION_OPEN_GRACE_MS) return;
+      newChatRef.current();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+  useEffect(() => {
     if (!chat.isReady || !('serviceWorker' in navigator)) return;
     function openNotification(event: MessageEvent<unknown>) {
       if (typeof event.data !== 'object' || event.data === null || Reflect.get(event.data, 'type') !== 'open-conversation') return;
@@ -227,6 +259,7 @@ export function App() {
       if (target.origin !== location.origin || !/^\/c\/[A-Za-z0-9]{12,32}$/.test(target.pathname)) return;
       if (location.pathname !== target.pathname) history.pushState({}, '', target.pathname);
       setPanel(undefined); setBrowserTarget(undefined); setDrawer(false); setMenuSession(undefined); setRenameTarget(undefined); setDeleteTarget(undefined); setZoom(undefined);
+      resumeStateRef.current.notificationOpenedAt = Date.now();
       openSession(target.pathname.slice(3));
       event.ports[0]?.postMessage(target.pathname);
     }
@@ -245,7 +278,7 @@ export function App() {
   useLayoutEffect(() => {
     const hasWorkspace = workspaceState?.sessionId === chat.sessionId && !!workspaceState && (workspaceState.agents.length > 0 || workspaceState.todos.length > 0 || workspaceState.outputs.length > 0 || !!workspaceState.summary);
     const hasSuspension = workspaceState?.sessionId === chat.sessionId && !!workspaceState?.suspension;
-    viewportRef.current?.style.setProperty('--workspace-height', `${(hasWorkspace ? 40 : 0) + (hasSuspension ? 44 : 0)}px`);
+    viewportRef.current?.style.setProperty('--workspace-height', `${(hasWorkspace ? 44 : 0) + (hasSuspension ? 44 : 0)}px`);
   }, [workspaceState, chat.sessionId]);
   useEffect(() => {
     const viewport = window.visualViewport;
@@ -314,21 +347,22 @@ export function App() {
     <main aria-label="Chat" {...stylex.props(styles.main)}>
       <div className="sr-only" role="status" aria-atomic="true">{announcement}</div>
       <header ref={headerRef} id="header" {...stylex.props(styles.header)}>
-        <div {...stylex.props(styles.headerLeft)}><span {...stylex.props(ui.glass, styles.mobileMenu)}><IconButton label="Open conversations" style={{ width: 40, height: 40 }} aria-haspopup="dialog" aria-expanded={isDrawer} onClick={() => setDrawer(true)}><Menu size={24} strokeWidth={ICON_STROKE} aria-hidden="true" /></IconButton></span><div {...stylex.props(styles.heading)}><span title={sessionTitle} {...stylex.props(styles.title)}>{sessionTitle}</span><span {...stylex.props(styles.subtitle)}>{runOptions?.mode === 'incognito' && !chat.sessionId ? 'Incognito' : workspaceState && workspaceState.sessionId === chat.sessionId && workspaceState.suspension ? workspaceState.suspension.title : chat.isRunning ? `${APP_NAME} · Working…` : workspaceState?.sessionId === chat.sessionId && workspaceState?.status === 'errored' ? `${APP_NAME} · Task failed` : APP_NAME}</span></div></div>
-        <div {...stylex.props(ui.glass, styles.headerActions)}><IconButton label="New chat" style={{ height: 40 }} onClick={newChat}><SquarePen size={23} strokeWidth={ICON_STROKE} aria-hidden="true" /></IconButton>{chat.sessionId && !chat.authError && <IconButton disabled={!chat.isReady || chat.isOpening} label={SESSION_MENU_LABEL} style={{ height: 40 }} aria-haspopup="menu" aria-expanded={menuSession?.id === chat.sessionId} onClick={event => { const id = chat.sessionId; if (menuSession) setMenuSession(undefined); else if (id) setMenuSession({ id, title: sessionTitle, anchor: event.currentTarget }); }}><Ellipsis aria-hidden="true" size={23} strokeWidth={ICON_STROKE} /></IconButton>}</div>
+        <div {...stylex.props(styles.headerSide)}><span {...stylex.props(styles.mobileMenu)}><IconButton label="Open conversations" aria-haspopup="dialog" aria-expanded={isDrawer} onClick={() => setDrawer(true)}><Menu size={22} strokeWidth={ICON_STROKE} aria-hidden="true" /></IconButton></span></div>
+        <div {...stylex.props(styles.heading)}><ModelPicker variant="title" selection={modelSelection} disabled={!chat.isReady || chat.isOpening || chat.isSending || !!chat.authError} isRunning={chat.isRunning} />{headerStatus && <span {...stylex.props(styles.subtitle)}>{headerStatus}</span>}<span className="sr-only">{sessionTitle}</span></div>
+        <div {...stylex.props(styles.headerSide, styles.headerActions)}><IconButton label="New chat" onClick={newChat}><SquarePen size={21} strokeWidth={ICON_STROKE} aria-hidden="true" /></IconButton>{chat.sessionId && !chat.authError && <IconButton disabled={!chat.isReady || chat.isOpening} label={SESSION_MENU_LABEL} aria-haspopup="menu" aria-expanded={menuSession?.id === chat.sessionId} onClick={event => { const id = chat.sessionId; if (menuSession) setMenuSession(undefined); else if (id) setMenuSession({ id, title: sessionTitle, anchor: event.currentTarget }); }}><Ellipsis aria-hidden="true" size={21} strokeWidth={ICON_STROKE} /></IconButton>}</div>
       </header>
       {chat.authError && <div role="alert" {...stylex.props(styles.notice)}><span>Connect to load your conversations.</span><button {...stylex.props(styles.noticeAction)} onClick={() => openPanel('settings')}>Settings</button></div>}
       {chat.isReady && !chat.isConnected && !chat.authError && <div role="status" {...stylex.props(styles.connectionIndicator)}><span className="sr-only">Reconnecting…</span><motion.span aria-hidden="true" {...stylex.props(styles.connectionSpinner)} animate={shouldReduceMotion ? undefined : { rotate: 360 }} transition={{ duration: .8, repeat: Infinity, ease: 'linear' }} /></div>}
       <div {...stylex.props(styles.scrollRegion)}>
-        {chat.isOpening || !chat.isReady ? <ConversationLoading /> : chat.messages.length || chat.pendingPrompt !== undefined || chat.isRunning || chat.liveAssistant?.text ? <Suspense fallback={<ConversationLoading />}><Messages key={chat.sessionId} chat={chat} listRef={listRef} onAtBottomChange={changeAtBottom} notify={notify} onZoom={setZoom} onOpenSession={openSession} onComposeContext={composeContext} onPrefill={prefill} onAskSidechat={askSidechat} agentIds={workspaceState?.sessionId === chat.sessionId ? workspaceState?.agents.map(agent => agent.id) : undefined} /></Suspense> : <div {...stylex.props(styles.empty)}><h1 {...stylex.props(styles.emptyTitle)}>What’s on your mind?</h1></div>}
+        {chat.isOpening || !chat.isReady ? <ConversationLoading /> : chat.messages.length || chat.pendingPrompt !== undefined || chat.isRunning || chat.liveAssistant?.text ? <Suspense fallback={<ConversationLoading />}><Messages key={chat.sessionId} chat={chat} listRef={listRef} onAtBottomChange={changeAtBottom} notify={notify} onZoom={setZoom} onOpenSession={openSession} onComposeContext={composeContext} onPrefill={prefill} onAskSidechat={askSidechat} agentIds={workspaceState?.sessionId === chat.sessionId ? workspaceState?.agents.map(agent => agent.id) : undefined} /></Suspense> : <div {...stylex.props(styles.empty)}><div {...stylex.props(styles.emptyCopy)}><span aria-hidden="true" {...stylex.props(styles.emptyMark)}><Sparkles size={22} strokeWidth={ICON_STROKE} /></span><h1 {...stylex.props(styles.emptyTitle)}>What can I help with?</h1></div>{!chat.authError && <div role="group" aria-label="Starter prompts" {...stylex.props(styles.starters)}>{STARTERS.map(starter => <button key={starter.title} type="button" {...stylex.props(styles.starter)} onClick={() => prefill(starter.prompt)}><span>{starter.title}</span><small {...stylex.props(styles.starterHint)}>{starter.hint}</small></button>)}</div>}</div>}
         <AnimatePresence>{canJump && !chat.isOpening && <motion.button key="jump" aria-label="Scroll to latest message" {...stylex.props(styles.jump, ui.glass)} initial={{ opacity: 0, scale: .86, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .9, y: 6 }} transition={{ duration: .16 }} whileTap={{ scale: .9 }} onClick={() => listRef.current?.scrollToIndex(latestMessage)}><ArrowDown size={19} strokeWidth={ICON_STROKE} /></motion.button>}</AnimatePresence>
         {chat.sessionId && chat.isReady && !chat.isOpening && !chat.authError && <BrowserLive key={chat.sessionId} sessionId={chat.sessionId} request={chat.request} isBrowserOpen={panel === 'browser'} isVisible={!panel && !isDrawer && !menuSession && !deleteTarget && !zoom} onOpen={targetId => openPanel('browser', targetId)} />}
       </div>
       {chat.isReady && !chat.isOpening && !chat.authError && <SessionWorkspace chat={chat} notify={notify} onOpenSession={openSession} onOutputs={() => openPanel('files')} onStateChange={setWorkspaceState} />}
-      <Composer runOptions={runOptions} chat={chat} onBrowser={() => openPanel('browser')} draft={draft} setDraft={setDraft} revision={revision} notify={notify} textSize={textSize} uiFont={appearance.uiFont} isKeyboardOpen={isKeyboardOpen} onNewChat={newChat} onConfirmClear={() => setClearConfirm(true)} />
+      <Composer runOptions={runOptions} chat={chat} modelSelection={modelSelection} onBrowser={() => openPanel('browser')} draft={draft} setDraft={setDraft} revision={revision} notify={notify} textSize={textSize} uiFont={appearance.uiFont} isKeyboardOpen={isKeyboardOpen} onNewChat={newChat} onConfirmClear={() => setClearConfirm(true)} />
     </main>
-    <AnimatePresence>{isDrawer && <Drawer key="drawer" onClose={() => { setMenuSession(undefined); setDrawer(false); }}><Sidebar chat={chat} isDrawer onClose={() => { setMenuSession(undefined); setDrawer(false); }} onNew={newChat} onNewIncognito={newIncognitoChat} onOpen={openSession} onSettings={() => openPanel('settings')} onBrowser={() => openPanel('browser')} onMenu={setMenuSession} /></Drawer>}</AnimatePresence>
-    <AnimatePresence mode="wait">{panel === 'settings' ? <Dialog key="settings" title="Settings" onClose={closePanel}><Settings chat={chat} notifications={notifications} notify={notify} isDarkMode={theme === 'dark'} onThemeToggle={() => changeThemeMode(theme === 'light' ? 'dark' : 'light')} themeMode={themeMode} onThemeModeChange={changeThemeMode} appearance={appearance} onAppearanceChange={changeAppearance} textSize={textSize} onTextSizeChange={changeTextSize} onWorkspace={() => openPanel('workspace')} /></Dialog> : panel === 'browser' ? <Sheet key={`browser:${chat.sessionId ?? "new"}:${browserTarget ?? "all"}`} title="Browser" isWide onClose={closePanel}><BrowserPanel initialTargetId={browserTarget} sessionId={chat.sessionId} request={chat.request} notify={notify} onClose={closePanel} onStart={prompt => { closePanel(); if (!chat.sessionId) newChat(); setDraft(prompt); }} /></Sheet> : panel === 'workspace' ? <Suspense key="workspace" fallback={<Dialog title="Workspace & preferences" onClose={closePanel}><DialogDescription>Loading workspace…</DialogDescription></Dialog>}><Workspace chat={chat} notify={notify} onClose={closePanel} onOpenSession={id => { closePanel(); openSession(id); }} onNewProjectChat={projectId => { closePanel(); newChat(); setRunOptions({ projectId }); }} /></Suspense> : panel === 'files' && effectiveFilesSessionId ? <Suspense key={effectiveFilesSessionId} fallback={<Dialog title="Files & outputs" onClose={closePanel}><DialogDescription>Loading files…</DialogDescription></Dialog>}><Artifacts sessionId={effectiveFilesSessionId} request={chat.request} notify={notify} onZoom={setZoom} onClose={closePanel} /></Suspense> : undefined}</AnimatePresence>
+    <AnimatePresence>{isDrawer && <Drawer key="drawer" onClose={() => { setMenuSession(undefined); setDrawer(false); }}><TabContext.Provider value={{ current: 'chats', select: selectTab }}><Sidebar chat={chat} isDrawer onClose={() => { setMenuSession(undefined); setDrawer(false); }} onNew={newChat} onNewIncognito={newIncognitoChat} onOpen={openSession} onSettings={() => openPanel('settings')} onBrowser={() => openPanel('browser')} onMenu={setMenuSession} /></TabContext.Provider></Drawer>}</AnimatePresence>
+    <AnimatePresence mode="wait">{panel === 'settings' ? <TabContext.Provider key="settings" value={{ current: 'settings', select: selectTab }}><Dialog title="Settings" onClose={closePanel}><Settings chat={chat} notifications={notifications} notify={notify} isDarkMode={theme === 'dark'} onThemeToggle={() => changeThemeMode(theme === 'light' ? 'dark' : 'light')} themeMode={themeMode} onThemeModeChange={changeThemeMode} appearance={appearance} onAppearanceChange={changeAppearance} textSize={textSize} onTextSizeChange={changeTextSize} onWorkspace={() => openPanel('workspace')} /></Dialog></TabContext.Provider> : panel === 'browser' ? <TabContext.Provider key={`browser:${chat.sessionId ?? "new"}:${browserTarget ?? "all"}`} value={{ current: 'browser', select: selectTab }}><Sheet title="Browser" isWide onClose={closePanel}><BrowserPanel initialTargetId={browserTarget} sessionId={chat.sessionId} request={chat.request} notify={notify} onClose={closePanel} onStart={prompt => { closePanel();  if (!chat.sessionId) newChat(); setDraft(prompt); }} /></Sheet></TabContext.Provider> : panel === 'workspace' ? <TabContext.Provider key="workspace" value={{ current: 'workspace', select: selectTab }}><Suspense fallback={<Dialog title="Workspace & preferences" onClose={closePanel}><DialogDescription>Loading workspace…</DialogDescription></Dialog>}><Workspace chat={chat} notify={notify} onClose={closePanel} onOpenSession={id => { closePanel(); openSession(id); }} onNewProjectChat={projectId => { closePanel(); newChat(); setRunOptions({ projectId }); }} /></Suspense></TabContext.Provider> : panel === 'files' && effectiveFilesSessionId ? <Suspense key={effectiveFilesSessionId} fallback={<Dialog title="Files & outputs" onClose={closePanel}><DialogDescription>Loading files…</DialogDescription></Dialog>}><Artifacts sessionId={effectiveFilesSessionId} request={chat.request} notify={notify} onZoom={setZoom} onClose={closePanel} /></Suspense> : undefined}</AnimatePresence>
     {menuSession && !chat.authError && <SessionMenu key={menuSession.id} target={menuSession} chat={chat} onClose={() => setMenuSession(undefined)} notify={notify} onRename={setRenameTarget} onDelete={setDeleteTarget} onFiles={id => openPanel('files', id)} />}
     <AnimatePresence>{sidechat && <Dialog key="sidechat" title="Ask in side chat" onClose={() => { if (!isStartingSidechat) setSidechat(undefined); }}><blockquote {...stylex.props(styles.sidechatQuote)}>{sidechat.text}</blockquote><label {...stylex.props(styles.sidechatLabel)}>Message<textarea autoFocus rows={3} value={sidechatPrompt} disabled={isStartingSidechat} onChange={event => setSidechatPrompt(event.currentTarget.value)} {...stylex.props(ui.field)} /></label><DialogActions><Button disabled={isStartingSidechat} onClick={() => setSidechat(undefined)}>Cancel</Button><Button variant="primary" disabled={isStartingSidechat || !sidechatPrompt.trim()} onClick={() => { void startSidechat(); }}>{isStartingSidechat ? 'Starting…' : 'Send'}</Button></DialogActions></Dialog>}</AnimatePresence>
     <AnimatePresence>{renameTarget && <RenameConversation key={renameTarget.id} session={renameTarget} chat={chat} onClose={() => setRenameTarget(undefined)} />}</AnimatePresence>
@@ -398,7 +432,7 @@ function Drawer({ children, onClose }: { children: React.ReactNode; onClose: () 
   function requestClose() { if (!isPresent || closeRequestedRef.current) return; closeRequestedRef.current = true; onClose(); }
   return <motion.dialog ref={ref} tabIndex={-1} data-motion-overlay="" style={{ pointerEvents: isPresent ? 'auto' : 'none' }} aria-label="Conversation menu" {...stylex.props(styles.drawer)} onKeyDown={trapDialogFocus} onCancel={event => { event.preventDefault(); requestClose(); }}>
     <motion.button type="button" tabIndex={-1} data-overlay-backdrop="" aria-label="Close conversation menu" {...stylex.props(styles.drawerBackdrop)} initial={{ opacity: 0 }} animate={{ opacity: isPresent ? 1 : 0 }} transition={{ duration: shouldReduceMotion ? .1 : .2 }} onClick={requestClose} />
-    <motion.div data-dialog-surface="" {...stylex.props(styles.drawerContent)} initial={shouldReduceMotion ? { opacity: 0 } : { x: -340 }} animate={isPresent ? shouldReduceMotion ? { opacity: 1 } : { x: 0 } : shouldReduceMotion ? { opacity: 0 } : { x: -340 }} transition={shouldReduceMotion ? { duration: .12 } : { duration: .22, ease: [0.22, 1, 0.36, 1] }}>{children}</motion.div>
+    <motion.div data-dialog-surface="" {...stylex.props(styles.drawerContent)} initial={shouldReduceMotion ? { opacity: 0 } : { x: '-100%' }} animate={isPresent ? shouldReduceMotion ? { opacity: 1 } : { x: 0 } : shouldReduceMotion ? { opacity: 0 } : { x: '-100%' }} transition={shouldReduceMotion ? { duration: .12 } : { duration: .22, ease: [0.22, 1, 0.36, 1] }}>{children}</motion.div>
   </motion.dialog>;
 }
 
@@ -408,16 +442,20 @@ const styles = stylex.create({
   app: { display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', position: 'fixed', top: 0, left: 0, color: tokens.text, backgroundColor: tokens.canvas },
   desktopSidebar: { width: 288, flexShrink: 0, height: '100%', borderRightWidth: 1, borderRightStyle: 'solid', borderRightColor: tokens.border, '@media (max-width: 820px)': { display: 'none' } },
   main: { display: 'flex', flexDirection: 'column', position: 'relative', height: '100%', minHeight: 0, minWidth: 0, flex: 1 },
-  header: { position: 'absolute', top: 0, left: 0, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 68, padding: 'calc(12px + env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) 12px max(18px, env(safe-area-inset-left))', backgroundImage: 'linear-gradient(to bottom, var(--canvas), color-mix(in srgb, var(--canvas) 80%, transparent) 60%, transparent)', backdropFilter: 'blur(10px)', zIndex: 3, pointerEvents: 'none' },
-  headerLeft: { display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 },
-  heading: { display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 },
-  headerActions: { display: 'flex', alignItems: 'center', gap: 0, padding: 0, borderRadius: 28, flexShrink: 0, pointerEvents: 'auto' },
-  mobileMenu: { display: 'none', borderRadius: '50%', pointerEvents: 'auto', '@media (max-width: 820px)': { display: 'inline-flex' } },
-  title: { fontSize: '.9375rem', lineHeight: 1.25, fontWeight: 650, letterSpacing: '-.2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-  subtitle: { color: tokens.muted, fontSize: '.75rem', lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  header: { position: 'absolute', top: 0, left: 0, width: '100%', display: 'grid', gridTemplateColumns: 'minmax(88px, 1fr) minmax(0, auto) minmax(88px, 1fr)', alignItems: 'center', gap: 4, minHeight: 56, padding: 'calc(4px + env(safe-area-inset-top)) max(6px, env(safe-area-inset-right)) 4px max(6px, env(safe-area-inset-left))', backgroundColor: tokens.canvas, borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: tokens.border, zIndex: 3 },
+  headerSide: { display: 'flex', alignItems: 'center', minWidth: 0 },
+  heading: { display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 0 },
+  headerActions: { justifyContent: 'flex-end' },
+  mobileMenu: { display: 'none', '@media (max-width: 820px)': { display: 'inline-flex' } },
+  subtitle: { color: tokens.muted, fontSize: '.75rem', lineHeight: 1.2, marginTop: -6, paddingBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' },
   scrollRegion: { position: 'relative', flex: 1, minHeight: 0, minWidth: 0 },
-  empty: { display: 'flex', height: '100%', flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 'calc(var(--composer-height) + 70px)', textAlign: 'center' },
-  emptyTitle: { fontSize: '1.6875rem', lineHeight: 1.3, letterSpacing: '-.7px', fontWeight: 600, margin: 0, '@media (max-width: 375px)': { fontSize: '1.5rem' } },
+  empty: { display: 'flex', flexDirection: 'column', height: '100%', flex: 1, alignItems: 'stretch', justifyContent: 'flex-end', gap: 24, padding: 'var(--header-height) max(12px, env(safe-area-inset-right)) calc(var(--composer-height) + 16px) max(12px, env(safe-area-inset-left))', textAlign: 'center' },
+  emptyCopy: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14 },
+  emptyMark: { display: 'grid', placeItems: 'center', width: 44, height: 44, borderRadius: '50%', borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border },
+  emptyTitle: { fontSize: '1.375rem', lineHeight: 1.3, letterSpacing: '-.4px', fontWeight: 650, margin: 0 },
+  starters: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, width: '100%', maxWidth: 768, margin: '0 auto' },
+  starter: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, minHeight: 56, padding: '10px 12px', borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, borderRadius: 14, backgroundColor: { default: 'transparent', ':hover': tokens.hover }, color: tokens.text, fontFamily: tokens.font, fontSize: '.875rem', fontWeight: 600, textAlign: 'left' },
+  starterHint: { color: tokens.muted, fontSize: '.8125rem', fontWeight: 400 },
   conversationLoading: { display: 'flex', height: '100%', alignItems: 'flex-end', padding: '20px max(20px, env(safe-area-inset-right)) calc(var(--composer-height) + 28px) max(20px, env(safe-area-inset-left))', minWidth: 0 },
   messageSkeleton: { display: 'flex', flexDirection: 'column', gap: 12, width: '100%', maxWidth: 736, margin: '0 auto' },
   skeletonLine: { height: 12, borderRadius: 6, backgroundColor: tokens.bubble },
@@ -428,7 +466,7 @@ const styles = stylex.create({
   connectionSpinner: { display: 'block', width: '100%', height: '100%', borderRadius: '50%', borderWidth: 2, borderStyle: 'solid', borderColor: tokens.muted, borderTopColor: 'transparent' },
   drawer: { display: 'block', position: 'fixed', inset: 0, padding: 0, margin: 0, borderWidth: 0, backgroundColor: 'transparent', width: '100%', height: '100dvh', maxWidth: '100%', maxHeight: '100%', overflow: 'hidden' },
   drawerBackdrop: { position: 'absolute', inset: 0, width: '100%', height: '100%', padding: 0, borderWidth: 0, backgroundColor: 'rgb(0 0 0 / .28)' },
-  drawerContent: { position: 'relative', zIndex: 1, width: 'min(320px, 87vw)', height: '100%', boxShadow: '8px 0 32px rgb(0 0 0 / .08)' },
+  drawerContent: { position: 'relative', zIndex: 1, width: '100%', height: '100%' },
   deleteTitle: { fontSize: '1rem', fontWeight: 550, lineHeight: 1.5, overflowWrap: 'anywhere' },
   toasts: { position: 'fixed', top: 'calc(env(safe-area-inset-top) + 72px)', right: 16, left: 16, bottom: 'auto', margin: 0, width: 'auto', height: 'auto', borderWidth: 0, padding: 0, overflow: 'visible', backgroundColor: 'transparent', display: 'grid', justifyItems: 'center', zIndex: 10, pointerEvents: 'none' },
   toast: { gridArea: '1 / 1', transformOrigin: 'top center', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px 10px 16px', minHeight: 48, width: '100%', maxWidth: 440, boxSizing: 'border-box', backgroundColor: tokens.text, color: tokens.canvas, borderRadius: 18, boxShadow: '0 4px 20px rgb(0 0 0 / .14)', pointerEvents: 'none' },

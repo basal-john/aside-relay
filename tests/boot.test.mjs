@@ -57,8 +57,7 @@ await Promise.race([
   import(pathToFileURL(entryPath).href),
   new Promise((_, reject) => setTimeout(() => reject(new Error('Timed out importing the production bundle.')), UI_TIMEOUT_MS)),
 ]);
-await waitFor(() => document.querySelector('[aria-current="page"]')?.textContent.includes('Beta'));
-await waitFor(() => document.querySelector('[aria-label="Your message"]'));
+await waitFor(() => document.querySelector('aside[aria-label="Conversations"]')?.textContent.includes('Beta conversation'));
 check('no boot errors', runtimeErrors.length === 0);
 check('product title is aside-relay', document.title === PRODUCT_NAME);
 check('Home Screen title is aside-relay', document.querySelector('meta[name="apple-mobile-web-app-title"]')?.content === PRODUCT_NAME);
@@ -66,10 +65,13 @@ check('drawer brand is aside-relay', document.querySelector('aside[aria-label="C
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'web/manifest.webmanifest'), 'utf8'));
 check('installation manifest uses aside-relay', manifest.name === PRODUCT_NAME && manifest.short_name === PRODUCT_NAME);
 check('conversation list rendered', document.querySelectorAll('aside[aria-label="Conversations"]').length === 1);
-check('settings refresh restores the last conversation in the background', location.pathname === '/settings' && document.querySelector('[aria-current="page"]')?.textContent.includes('Beta'));
-check('restored messages rendered', document.querySelector('[aria-label="Your message"]')?.textContent.includes('Inspect this'));
+check('launch opens a blank chat behind settings instead of the remembered one', location.pathname === '/settings' && !document.querySelector('[aria-current="page"]') && document.body.textContent.includes('What can I help with?'));
 click(document.querySelector('[role="dialog"][data-app-dialog] button[aria-label="Close"]'));
+await waitFor(() => location.pathname === '/');
+click([...document.querySelectorAll('aside[aria-label="Conversations"] button')].find(button => button.textContent.includes('Beta conversation')));
 await waitFor(() => location.pathname === '/c/BETASESSION0001');
+await waitFor(() => document.querySelector('[aria-label="Your message"]'));
+check('opening a chat renders its messages', document.querySelector('[aria-label="Your message"]')?.textContent.includes('Inspect this'));
 
 console.log('activity state and mobile drawer');
 const activity = document.querySelector('details');

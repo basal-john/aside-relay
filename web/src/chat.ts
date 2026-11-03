@@ -617,30 +617,13 @@ export const useChat = (): UseChat => {
     return () => { controller.abort(); document.removeEventListener("visibilitychange", markRead) }
   }, [sessionId, isOpening, isReady, authError, messages.at(-1)?.seq, request, updateSessions])
 
-  const restoreSavedSession = useCallback(async (sessionPage?: Promise<void>) => {
+  const restoreRouteSession = useCallback(async (sessionPage?: Promise<void>) => {
     const routeSessionId = getRouteSessionId()
-    let mode: string | null = null
-    let savedSessionId: string | null = null
-    try {
-      mode = localStorage.getItem(LAST_SESSION_MODE_KEY)
-      savedSessionId = localStorage.getItem(LAST_SESSION_KEY)
-    } catch {
-      // Restore the available session list when persistent storage is unavailable.
-    }
-    const lastSessionId = routeSessionId ?? (mode === "new" ? undefined : savedSessionId)
-    if (lastSessionId) {
-      const restored = await openSession(lastSessionId, Boolean(routeSessionId))
-      if (!restored && !routeSessionId) {
-        await sessionPage
-        if (sessionsRef.current[0]) await openSession(sessionsRef.current[0].id, false)
-      }
+    if (routeSessionId) {
+      await openSession(routeSessionId, true)
       return
     }
-    if (mode === "new") return
     await sessionPage
-    if (sessionsRef.current[0]) {
-      await openSession(sessionsRef.current[0].id, false)
-    }
   }, [openSession])
 
   const newChat = useCallback(() => {
@@ -1340,7 +1323,7 @@ export const useChat = (): UseChat => {
         socketRef.current = undefined
         connectSocket()
         await loadSessionPage("reset")
-        await restoreSavedSession()
+        await restoreRouteSession()
         pushToast("Access token saved.", "success")
         return true
       } catch (error) {
@@ -1350,7 +1333,7 @@ export const useChat = (): UseChat => {
         return false
       }
     },
-    [connectSocket, loadSessionPage, pushToast, restoreSavedSession, storeToken],
+    [connectSocket, loadSessionPage, pushToast, restoreRouteSession, storeToken],
   )
 
   const deleteSession = useCallback(
@@ -1544,7 +1527,7 @@ export const useChat = (): UseChat => {
       tokenRef.current = accessToken
       storeToken(accessToken)
       if (isUnmountedRef.current) return
-      await restoreSavedSession(loadSessionPage("reset"))
+      await restoreRouteSession(loadSessionPage("reset"))
       connectSocket()
       if (!isUnmountedRef.current) setIsReady(true)
     }
@@ -1559,7 +1542,7 @@ export const useChat = (): UseChat => {
       pendingRequestsRef.current.forEach((pending) => pending.resolve(false))
       pendingRequestsRef.current.clear()
     }
-  }, [connectSocket, loadSessionPage, restoreSavedSession, storeToken])
+  }, [connectSocket, loadSessionPage, restoreRouteSession, storeToken])
 
   useEffect(() => {
     window.addEventListener("pagehide", releaseQueueEdit)

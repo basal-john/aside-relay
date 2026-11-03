@@ -37,12 +37,14 @@ test('workspace exposes every native section and keeps project edits in sync', a
   const title = workspace.getByRole('heading', { name: 'Workspace & preferences', exact: true });
   const close = workspace.getByRole('button', { name: 'Close', exact: true });
   const body = workspace.locator('[data-app-dialog-body]');
+  const isPage = await workspace.getAttribute('data-dialog-variant') === 'page';
   const titleBefore = await title.boundingBox();
-  const closeBefore = await close.boundingBox();
+  const closeBefore = isPage ? null : await close.boundingBox();
   await body.evaluate(element => element.scrollTo(0, element.scrollHeight));
   await expect.poll(() => body.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
   expect(await title.boundingBox()).toEqual(titleBefore);
-  expect(await close.boundingBox()).toEqual(closeBefore);
+  if (isPage) await expect(close).toBeHidden();
+  else expect(await close.boundingBox()).toEqual(closeBefore);
   expect(await workspace.evaluate(element => element.scrollTop)).toBe(0);
   await expect(workspace.getByRole('button', { name: /Native preferences/ })).toBeInViewport();
   await page.setViewportSize(viewport);
@@ -84,7 +86,7 @@ test('workspace exposes every native section and keeps project edits in sync', a
   await expect.poll(() => workspace.locator('[data-app-dialog-body]').evaluate(element => element.scrollTop)).toBeGreaterThan(0);
   expect(await skillsHeader.boundingBox()).toEqual(headerBefore);
   await expect(workspace.getByRole('button', { name: 'Back to workspace' })).toBeInViewport();
-  await expect(workspace.getByRole('button', { name: 'Close', exact: true })).toBeInViewport();
+  if (await workspace.getAttribute('data-dialog-variant') !== 'page') await expect(workspace.getByRole('button', { name: 'Close', exact: true })).toBeInViewport();
   await workspace.locator('[data-app-dialog-body]').evaluate(element => element.scrollTo(0, 0));
   await expect(workspace.getByRole('heading', { name: 'Research helper', exact: true })).toBeVisible();
   await expect(workspace.getByText('Local catalog')).toBeVisible();
@@ -118,7 +120,8 @@ test('workspace exposes every native section and keeps project edits in sync', a
   await openSection(workspace, 'Native preferences');
   await expect(workspace.getByLabel('Follow-up behavior')).toHaveValue('queue');
   await expect(workspace.getByLabel('Timezone')).toHaveValue('Asia/Seoul');
-  await workspace.getByRole('button', { name: 'Close', exact: true }).click();
+  if (await workspace.getAttribute('data-dialog-variant') === 'page') await workspace.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: 'Chats' }).click();
+  else await workspace.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(workspace).toBeHidden();
 });
 
@@ -233,7 +236,8 @@ async function backToWorkspace(workspace: ReturnType<Page['getByRole']>) {
   await workspace.getByRole('button', { name: 'Back to workspace' }).click();
   await expect(workspace).toHaveAccessibleName('Workspace & preferences');
   await expect(workspace.getByRole('heading', { name: 'Workspace & preferences', exact: true })).toBeVisible();
-  await expect(workspace.getByRole('button', { name: 'Close', exact: true })).toBeFocused();
+  if (await workspace.getAttribute('data-dialog-variant') === 'page') await expect(workspace.getByRole('heading', { name: 'Workspace & preferences', exact: true })).toBeFocused();
+  else await expect(workspace.getByRole('button', { name: 'Close', exact: true })).toBeFocused();
 }
 
 function reply(route: Route, body: unknown, status = 200) {
