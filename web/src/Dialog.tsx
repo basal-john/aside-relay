@@ -10,7 +10,7 @@ import { TabBar, TabContext, useIsPhone } from './TabBar';
 
 export function Dialog({ title, description, back, children, onClose, initialFocus }: { title: string; description?: string; back?: { label: string; onClick: () => void }; children: ReactNode; onClose: () => void; initialFocus?: BaseDialog.Popup.Props['initialFocus'] }) {
   const [isPresent, safeToRemove] = usePresence();
-  const [portalContainer, setPortalContainer] = useState<HTMLElement>();
+  const [portalContainer, setPortalContainer] = useState<HTMLElement | undefined>(findPortalContainer);
   const [returnFocus] = useState(() => document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
@@ -28,7 +28,7 @@ export function Dialog({ title, description, back, children, onClose, initialFoc
     target?.focus({ preventScroll: true });
   }, [title]);
   useLayoutEffect(() => {
-    setPortalContainer([...document.querySelectorAll<HTMLDialogElement>('dialog[open]')].filter(dialog => getComputedStyle(dialog).pointerEvents !== 'none').at(-1) ?? document.body);
+    setPortalContainer(findPortalContainer());
   }, []);
   useLayoutEffect(() => {
     const viewport = window.visualViewport;
@@ -87,6 +87,10 @@ export function Dialog({ title, description, back, children, onClose, initialFoc
       </BaseDialog.Viewport>
     </BaseDialog.Portal>
   </BaseDialog.Root>;
+}
+
+function findPortalContainer() {
+  return [...document.querySelectorAll<HTMLDialogElement>('dialog[open]')].filter(dialog => getComputedStyle(dialog).pointerEvents !== 'none').at(-1) ?? document.body;
 }
 
 export function DialogDescription({ className, ...props }: Omit<ComponentProps<typeof BaseDialog.Description>, 'className'> & { className?: string }) {

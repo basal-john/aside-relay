@@ -17,6 +17,7 @@
   [data-app-dialog], [data-app-dialog-backdrop] { opacity: 1; transition: opacity .16s ease, transform .16s ease; }
   [data-app-dialog] { transform: scale(1); }
   [data-app-dialog][data-starting-style], [data-app-dialog][data-ending-style] { opacity: 0; transform: scale(.97); }
+  [data-app-dialog][data-dialog-variant="page"], [data-app-dialog][data-dialog-variant="page"][data-starting-style], [data-app-dialog][data-dialog-variant="page"][data-ending-style] { opacity: 1; transform: none; transition: none; }
   [data-app-dialog-backdrop][data-starting-style], [data-app-dialog-backdrop][data-ending-style] { opacity: 0; }
   @media (prefers-reduced-motion: reduce) { [data-app-dialog], [data-app-dialog-backdrop] { transition: none; } }
   * { box-sizing: border-box; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }

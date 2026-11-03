@@ -1,12 +1,16 @@
 import type { Page, Route } from '@playwright/test';
 import type { BrowserControl } from '../../web/src/browser';
-import { BROWSER_TAB_ID, BROWSER_TAB_TITLE, BROWSER_TAB_URL, SESSION_A, expect, test } from './fixture';
+import { BROWSER_TAB_ID, BROWSER_TAB_TITLE, BROWSER_TAB_URL, SESSION_A, expect, isPhoneLayout, test } from './fixture';
 
 const CONTROL_ROUTE = `**/api/native/browser/tabs/${BROWSER_TAB_ID}/control?*`;
 
 async function openControlledTab(page: Page) {
   await page.goto(`/c/${SESSION_A}`);
-  await page.getByRole('button', { name: 'Expand browser preview', exact: true }).click();
+  if (await isPhoneLayout(page)) {
+    await page.getByRole('button', { name: 'Open conversations' }).click();
+    await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: 'Browser' }).click();
+    await page.getByRole('dialog', { name: 'Browser', exact: true }).locator(`[data-browser-tab="${BROWSER_TAB_ID}"]`).click();
+  } else await page.getByRole('button', { name: 'Expand browser preview', exact: true }).click();
   const browser = page.getByRole('dialog', { name: 'Browser', exact: true });
   await expect(browser.getByRole('heading', { name: BROWSER_TAB_TITLE })).toBeVisible();
   return browser;
@@ -100,11 +104,15 @@ test('the selected control view receives finite snapshots without relying on a s
     shots += 1;
     await route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"><rect width="320" height="240" fill="blue"/></svg>' });
   });
-  await page.goto(`/c/${SESSION_A}`);
+  if (test.info().project.name === 'mobile-webkit') await openControlledTab(page);
+  else {
+    await page.goto(`/c/${SESSION_A}`);
+    await expect.poll(() => shots).toBeGreaterThan(0);
+    const before = shots;
+    await page.getByRole('button', { name: 'Expand browser preview', exact: true }).click();
+    await expect.poll(() => shots).toBeGreaterThan(before);
+  }
   await expect.poll(() => shots).toBeGreaterThan(0);
-  const before = shots;
-  await page.getByRole('button', { name: 'Expand browser preview', exact: true }).click();
-  await expect.poll(() => shots).toBeGreaterThan(before);
   const image = page.getByRole('dialog', { name: 'Browser', exact: true }).getByRole('img', { name: `Current view of ${BROWSER_TAB_TITLE}` });
   await expect(image).toHaveAttribute('src', /^blob:/);
 });

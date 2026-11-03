@@ -156,6 +156,62 @@ test.describe('edge cases', () => {
     await expect(page.getByRole('heading', { name: 'Chats', level: 1 })).toBeVisible();
   });
 
+  test('switching tabs never shows the chat underneath, not even for one frame', async ({ page }, testInfo) => {
+    test.skip(!isPhone(testInfo.project.name), 'The tab bar only exists on phones.');
+    await page.goto(`/c/${SESSION_A}`);
+    await expect(page.getByRole('article', { name: 'Response' })).toContainText('Hello from the assistant.');
+    await openChats(page);
+    await page.waitForTimeout(400);
+    await page.evaluate(() => {
+      const log: string[] = [];
+      Reflect.set(window, '__chatFlashes', log);
+      const probe = () => {
+        const points = [[0.5, 0.3], [0.5, 0.6], [0.2, 0.45]] as const;
+        for (const [x, y] of points) {
+          const element = document.elementFromPoint(window.innerWidth * x, window.innerHeight * y);
+          const cover = element?.closest('[data-app-dialog][data-dialog-variant="page"], [data-dialog-surface], aside[aria-label="Conversations"]');
+          let opacity = 1;
+          for (let node: Element | null = element; node; node = node.parentElement) opacity *= Number(getComputedStyle(node).opacity);
+          if (!cover || opacity < 0.95) { log.push(`${performance.now().toFixed(0)} ${x},${y} ${element?.tagName ?? 'none'} opacity ${opacity.toFixed(2)}`); break; }
+        }
+        if (Reflect.get(window, '__chatFlashes') === log) requestAnimationFrame(probe);
+      };
+      requestAnimationFrame(probe);
+    });
+    const tabs = () => page.getByRole('navigation', { name: 'Sections' }).last();
+    for (const [tab, check] of [['Settings', () => page.locator('[data-app-dialog][data-dialog-variant="page"]').getByRole('heading', { name: 'Settings' })], ['Browser', () => page.getByRole('dialog', { name: 'Browser' })], ['Settings', () => page.locator('[data-app-dialog][data-dialog-variant="page"]').getByRole('heading', { name: 'Settings' })], ['Chats', () => page.getByRole('heading', { name: 'Chats', level: 1 })]] as const) {
+      await tabs().getByRole('button', { name: tab }).click();
+      await expect(check()).toBeVisible();
+      await page.waitForTimeout(500);
+    }
+    const flashes = await page.evaluate(() => Reflect.get(window, '__chatFlashes') as string[]);
+    expect(flashes, 'frames where the chat was visible during a tab switch').toEqual([]);
+  });
+
+  test('the chat has no browser shortcut or floating browser preview on phones', async ({ page }, testInfo) => {
+    test.skip(!isPhone(testInfo.project.name), 'Phone-only.');
+    await page.goto(`/c/${SESSION_A}`);
+    await expect(page.getByRole('article', { name: 'Response' })).toContainText('Hello from the assistant.');
+    await page.getByRole('textbox', { name: 'Message' }).focus();
+    await expect(page.locator('#composer button[aria-label="Open browser"]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Open browser preview/ })).toHaveCount(0);
+    await expect(page.getByLabel('Live browser preview')).toHaveCount(0);
+  });
+
+  test('a browser tab card closes its tab after confirmation', async ({ page, mockAside }, testInfo) => {
+    test.skip(!isPhone(testInfo.project.name), 'Tested on the phone layout.');
+    await page.goto('/');
+    await openChats(page);
+    await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: 'Browser' }).click();
+    const browser = page.getByRole('dialog', { name: 'Browser' });
+    await browser.locator('[data-browser-tab="tab-docs-001"]').locator('..').getByRole('button', { name: 'Close tab' }).click();
+    const confirm = page.locator('[data-app-dialog]').filter({ hasText: 'Close this tab?' });
+    await expect(confirm).toBeVisible();
+    await confirm.getByRole('button', { name: 'Close tab' }).click();
+    await expect.poll(() => mockAside.calls.some(call => call.method === 'DELETE' && call.path.startsWith('/api/tabs/tab-docs-001'))).toBe(true);
+    await expect(browser.locator('[data-browser-tab="tab-docs-001"]')).toHaveCount(0);
+  });
+
   test('pinned chats show as cards on the phone Chats page', async ({ page }, testInfo) => {
     test.skip(!isPhone(testInfo.project.name), 'Pinned cards are phone-only.');
     await page.goto('/');

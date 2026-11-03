@@ -1,4 +1,4 @@
-import { BROWSER_TAB_TITLE, test, expect, SESSION_A } from './fixture';
+import { BROWSER_TAB_TITLE, test, expect, SESSION_A, minimizeBrowserPreview } from './fixture';
 
 test('subagent approval omits always-allow and resolves optimistically', async ({ page, mockAside }) => {
   mockAside.workspace = {
@@ -15,6 +15,7 @@ test('subagent approval omits always-allow and resolves optimistically', async (
 });
 
 test('browser preview supports keyboard movement, minimize, restore, expand, and close', async ({ page }) => {
+  test.skip(test.info().project.name === 'mobile-webkit', 'Phones have no floating browser preview in the chat.');
   await page.goto(`/c/${SESSION_A}`);
   const preview = page.getByRole('region', { name: 'Browser preview' });
   await expect(preview).toBeVisible();
@@ -40,7 +41,7 @@ test('browser preview supports keyboard movement, minimize, restore, expand, and
   await expect(preview).toBeVisible();
   const restored = await stablePreviewBox();
   expect({ x: Math.round(restored.x - moved.x), y: Math.round(restored.y - moved.y) }).toEqual({ x: 0, y: 0 });
-  await page.getByRole('button', { name: 'Minimize browser preview' }).click();
+  await minimizeBrowserPreview(page);
   await expect(page.getByRole('button', { name: 'Expand browser preview' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Restore browser preview' }).click();
   await page.getByRole('button', { name: 'Expand browser preview' }).click();
@@ -53,7 +54,7 @@ test('browser preview supports keyboard movement, minimize, restore, expand, and
 
 test('files menu opens a real artifact preview and settings theme persists', async ({ page }) => {
   await page.goto(`/c/${SESSION_A}`);
-  await page.getByRole('button', { name: 'Minimize browser preview' }).click();
+  await minimizeBrowserPreview(page);
   const drawerButton = page.getByRole('button', { name: 'Open conversations' });
   if (await drawerButton.isVisible()) await drawerButton.click();
   const sidebar = page.getByRole('complementary', { name: 'Conversations' });

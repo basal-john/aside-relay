@@ -1,4 +1,4 @@
-import { test, expect, SESSION_A } from './fixture';
+import { test, expect, SESSION_A, minimizeBrowserPreview } from './fixture';
 
 test.beforeEach(async ({ page, mockAside }) => {
   mockAside.running.add(SESSION_A);
@@ -15,7 +15,7 @@ test('queued follow-up can be edited and steered without losing optimistic state
   const queued = page.getByRole('article', { name: 'Queued message 1' });
   try { await expect(queued).toContainText('Queued follow-up'); }
   finally { releaseEnqueue(); }
-  await page.getByRole('button', { name: 'Minimize browser preview' }).click();
+  await minimizeBrowserPreview(page);
 
   await queued.getByRole('button', { name: 'Options for queued message 1' }).click();
   await page.getByRole('menuitem', { name: 'Edit message' }).click();
@@ -42,7 +42,7 @@ test('steer preference changes submission delivery and queued messages can be ca
   await expect.poll(() => mockAside.calls.some(call => call.method === 'POST' && call.path === `/api/sessions/${SESSION_A}/followups` && Reflect.get(call.body as object, 'delivery') === 'steer')).toBe(true);
 
   const queued = page.getByRole('article', { name: 'Queued message 1' });
-  await page.getByRole('button', { name: 'Minimize browser preview' }).click();
+  await minimizeBrowserPreview(page);
   const releaseCancel = mockAside.holdNextRequest('DELETE', /\/api\/sessions\/[^/]+\/followups\/[^/]+$/);
   await queued.getByRole('button', { name: 'Options for queued message 1' }).click();
   await page.getByRole('menuitem', { name: 'Cancel message' }).click();
@@ -55,7 +55,7 @@ test('paused queue resumes before the request completes', async ({ page, mockAsi
   await page.reload();
   const paused = page.getByRole('status').filter({ hasText: 'Queue paused' });
   await expect(paused).toBeVisible();
-  await page.getByRole('button', { name: 'Minimize browser preview' }).click();
+  await minimizeBrowserPreview(page);
   const releaseResume = mockAside.holdNextRequest('POST', `/api/sessions/${SESSION_A}/followups/resume`);
   await paused.getByRole('button', { name: 'Resume' }).click();
   try { await expect(paused).toHaveCount(0); }

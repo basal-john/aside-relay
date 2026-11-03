@@ -78,11 +78,11 @@ test('keyboard panning keeps the fixed header and composer inside the visible vi
   };
   await setViewport(page, keyboard);
   await expectKeyboardLayout(page, keyboard.offsetTop, keyboard.offsetTop + keyboard.height);
-  await expect(page.getByRole('button', { name: 'Open browser', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open browser', exact: true })).toHaveCount(0);
 
   await setViewport(page, { ...keyboard, innerHeight: keyboard.height, layoutHeight: keyboard.height });
   await expectKeyboardLayout(page, keyboard.offsetTop, keyboard.offsetTop + keyboard.height);
-  await expect(page.getByRole('button', { name: 'Open browser', exact: true })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Open browser', exact: true })).toHaveCount(0);
   await expect(draft).toHaveValue('Draft survives keyboard geometry changes');
 });
 
@@ -133,7 +133,7 @@ test('a viewport correction that settles after 100ms is reconciled without anoth
   await setViewport(page, settled, false);
 
   await expect.poll(() => composerBottom(page), { timeout: 2_000 }).toBeCloseTo(settled.offsetTop + settled.height, 0);
-  await expect(page.getByRole('button', { name: 'Open browser', exact: true })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Open browser', exact: true })).toHaveCount(0);
   await expect(draft).toHaveValue('Late viewport draft');
 });
 
@@ -153,7 +153,7 @@ test('app return signals recover stale geometry across repeated keyboard and rot
     };
     await setViewport(page, keyboard);
     await expectKeyboardLayout(page, keyboard.offsetTop, keyboard.offsetTop + keyboard.height);
-    await expect(page.getByRole('button', { name: 'Open browser', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open browser', exact: true })).toHaveCount(0);
 
     await page.setViewportSize(landscape);
     const rotatedKeyboard = {
@@ -181,8 +181,7 @@ test('app return signals recover stale geometry across repeated keyboard and rot
     await expect.poll(() => composerBottom(page)).toBeCloseTo(portrait.height, 0);
     await expect.poll(() => shellBounds(page)).toMatchObject({ top: 0, height: portrait.height });
     const toolbarButton = page.locator('#composer button[aria-label="Open browser"]');
-    await expect(toolbarButton).toHaveCount(1);
-    await expect(toolbarButton).toBeHidden();
+    await expect(toolbarButton).toHaveCount(0);
     await expect(draft).toHaveValue('Persistent draft');
   }
   expect(mockAside.socketMessages.filter(message => message.op === 'run' || message.op === 'continue')).toEqual([]);

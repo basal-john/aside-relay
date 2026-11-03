@@ -1,10 +1,10 @@
-import { test, expect, SESSION_A } from './fixture';
+import { test, expect, SESSION_A, minimizeBrowserPreview } from './fixture';
 
 test('appearance responds immediately, persists fonts and colors and syncs the HTML preview', async ({ page, mockAside }) => {
   mockAside.messages.get(SESSION_A)!.push({ seq: 2, role: 'assistant', ts: Date.now(), responseId: 'appearance-visual', blocks: [{ type: 'text', text: '```visual\n<html><body><h1>Theme preview</h1></body></html>\n```' }] });
   await page.goto(`/c/${SESSION_A}`);
   await expect(page.getByTitle('HTML visual')).toBeVisible();
-  await page.getByRole('button', { name: 'Minimize browser preview' }).click();
+  await minimizeBrowserPreview(page);
   const drawer = page.getByRole('button', { name: 'Open conversations' });
   if (await drawer.isVisible()) await drawer.click();
   await page.getByRole('button', { name: /Settings/ }).click();

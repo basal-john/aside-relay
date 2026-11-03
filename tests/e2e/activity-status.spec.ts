@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
-import { expect, SESSION_A, SESSION_B, test } from './fixture';
+import { expect, SESSION_A, SESSION_B, test, minimizeBrowserPreview } from './fixture';
 
 const UNREAD_SESSION = 'sessioncharlie03';
 const READ_SESSION = 'sessiondelta004';
@@ -103,7 +103,7 @@ test('activity keeps distinct stable subagent identities and meaningful web, cod
   ]);
 
   await page.goto(`/c/${SESSION_A}`);
-  await page.getByRole('button', { name: 'Minimize browser preview' }).click();
+  await minimizeBrowserPreview(page);
   await expect(page.getByRole('button', { name: 'Open agents, 1 active, 1 complete, 0 failed' })).toBeVisible();
   const activitySummary = page.getByText('Used subagents, browsed the web, ran actions +1 more', { exact: true });
   await activitySummary.click();

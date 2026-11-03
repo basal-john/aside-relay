@@ -139,7 +139,9 @@ export function Sheet({ title, children, onClose, isWide = false, isFullScreen: 
     closeRequestedRef.current = true;
     onClose();
   }
-  const sheetMotion = shouldReduceMotion || isFullScreen
+  const sheetMotion = isPage
+    ? { initial: false as const, animate: { opacity: 1 }, exit: { opacity: .99 }, transition: { duration: 0 } }
+    : shouldReduceMotion || isFullScreen
     ? { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: { duration: .12 } }
     : isMobile
       ? { initial: { y: SHEET_CLOSED_Y, opacity: .98 }, animate: { y: 0, opacity: 1 }, exit: { y: SHEET_CLOSED_Y, opacity: .98 }, transition: { type: 'tween' as const, duration: .32, ease: DIALOG_EASE } }

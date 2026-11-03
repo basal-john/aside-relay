@@ -71,6 +71,7 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
   const [isLoadingLibrary, setLoadingLibrary] = useState(false)
   const [busyAction, setBusyAction] = useState<string>()
   const [isConfirmingClose, setIsConfirmingClose] = useState(false)
+  const [closeCandidate, setCloseCandidate] = useState<BrowserTab>()
   const listGenerationRef = useRef(0)
   const captureGenerationRef = useRef(0)
   const previewUrlRef = useRef<string | undefined>(undefined)
@@ -223,28 +224,28 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
     }
   }, [listMode, query, request, sessionId])
 
-  const runTabAction = async (action: "focus" | "open" | "close") => {
-    if (!selectedTab || busyAction || closingTabsRef.current.has(selectedTab.targetId)) return
+  const runTabAction = async (action: "focus" | "open" | "close", tabToClose?: BrowserTab) => {
+    const target = tabToClose ?? selectedTab
+    if (!target || busyAction || closingTabsRef.current.has(target.targetId)) return
     if (action !== "close") setBusyAction(action)
-    const target = selectedTab
     if (action === "close") {
       closingTabsRef.current.add(target.targetId)
       listGenerationRef.current += 1
       setTabs(current => current.filter(tab => tab.targetId !== target.targetId))
-      setSelectedTab(undefined)
+      setSelectedTab(current => current?.targetId === target.targetId ? undefined : current)
       setIsConfirmingClose(false)
     }
     try {
       if (action === "focus") {
-        await request(`/api/tabs/${encodeURIComponent(selectedTab.targetId)}/focus?${sessionQuery.slice(1)}`, { method: "POST" })
+        await request(`/api/tabs/${encodeURIComponent(target.targetId)}/focus?${sessionQuery.slice(1)}`, { method: "POST" })
         notify("Focus request sent.", "success")
       } else if (action === "open") {
-        await request(`/api/tabs?${sessionQuery.slice(1)}`, { method: "POST", body: JSON.stringify({ url: selectedTab.url }) })
+        await request(`/api/tabs?${sessionQuery.slice(1)}`, { method: "POST", body: JSON.stringify({ url: target.url }) })
         notify("Opened a new copy of the tab.", "success")
         await loadTabs()
       } else {
         try {
-          await request(`/api/tabs/${encodeURIComponent(selectedTab.targetId)}?${sessionQuery.slice(1)}`, { method: "DELETE", signal: AbortSignal.timeout(BROWSER_REQUEST_TIMEOUT_MS) })
+          await request(`/api/tabs/${encodeURIComponent(target.targetId)}?${sessionQuery.slice(1)}`, { method: "DELETE", signal: AbortSignal.timeout(BROWSER_REQUEST_TIMEOUT_MS) })
         } catch (error) {
           if (getErrorStatus(error) !== 404) throw error
         }
@@ -482,13 +483,13 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
             {listMode === "tabs" && !listError && !isLoadingTabs && filteredTabs.length === 0 && openingTabs.length === 0 && <EmptyState title={availableTabs.length ? "No matching tabs" : "No browser tabs"} detail={availableTabs.length ? "Try a different search." : "Open a tab here or in Aside."} />}
             {listMode === "tabs" && openingTabs.map(tab => <div key={tab.id} role="status" {...stylex.props(styles.tabRow)}><Globe2 size={ICON_SIZE} aria-hidden="true" /><span {...stylex.props(styles.tabCopy)}><span {...stylex.props(styles.rowTitle)}>{new URL(tab.url).hostname}</span><span {...stylex.props(styles.rowMeta)}>Opening…</span></span></div>)}
             {listMode === "tabs" && filteredTabs.length > 0 && <div {...stylex.props(styles.tabGrid)}>{filteredTabs.map((tab) => (
-              <button key={tab.targetId} data-browser-tab={tab.targetId} title={tab.title || "Untitled tab"} {...stylex.props(styles.tabCard, tab.active && styles.activeTabCard)} type="button" onClick={() => setSelectedTab(tab)}>
+              <div key={tab.targetId} {...stylex.props(styles.tabCardWrap)}><button data-browser-tab={tab.targetId} title={tab.title || "Untitled tab"} {...stylex.props(styles.tabCard, tab.active && styles.activeTabCard)} type="button" onClick={() => setSelectedTab(tab)}>
                 <TabThumbnail tab={tab} request={request} sessionQuery={sessionQuery} isLarge />
                 <span {...stylex.props(styles.tabCardCopy)}>
                   <span {...stylex.props(styles.rowTitle, styles.cardTitle)}>{tab.title || "Untitled tab"}</span>
                   <span {...stylex.props(styles.rowMeta)}>{tab.loaded === false ? "Asleep" : tab.active ? "Active" : "Available"}</span>
                 </span>
-              </button>
+              </button><button type="button" aria-label="Close tab" aria-haspopup="dialog" {...stylex.props(styles.tabCardClose)} onClick={() => { setCloseCandidate(tab); setIsConfirmingClose(true) }}><span {...stylex.props(styles.tabCardCloseDot)}><X size={14} strokeWidth={2.4} aria-hidden="true" /></span></button></div>
             ))}</div>}
             {listMode !== "tabs" && libraryError && <EmptyState title="Could not load browser data" detail={libraryError} />}
             {listMode !== "tabs" && isLoadingLibrary && libraryItems.length === 0 && <EmptyState title={`Loading ${listMode}…`} detail="" />}
@@ -513,7 +514,7 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
           </div>
         </div>
       )}
-      <AnimatePresence>{isConfirmingClose && selectedTab && <Dialog title="Close this tab?" initialFocus={cancelCloseRef} onClose={() => setIsConfirmingClose(false)}><DialogDescription>{selectedTab.title || "Untitled tab"}</DialogDescription><DialogActions><Button ref={cancelCloseRef} onClick={() => setIsConfirmingClose(false)}>Cancel</Button><Button variant="danger" disabled={!!busyAction} onClick={() => { void runTabAction("close") }}>Close tab</Button></DialogActions></Dialog>}</AnimatePresence>
+      <AnimatePresence>{isConfirmingClose && (closeCandidate ?? selectedTab) && <Dialog title="Close this tab?" initialFocus={cancelCloseRef} onClose={() => { setIsConfirmingClose(false); setCloseCandidate(undefined) }}><DialogDescription>{(closeCandidate ?? selectedTab)?.title || "Untitled tab"}</DialogDescription><DialogActions><Button ref={cancelCloseRef} onClick={() => { setIsConfirmingClose(false); setCloseCandidate(undefined) }}>Cancel</Button><Button variant="danger" disabled={!!busyAction} onClick={() => { const candidate = closeCandidate; setCloseCandidate(undefined); void runTabAction("close", candidate) }}>Close tab</Button></DialogActions></Dialog>}</AnimatePresence>
       <AnimatePresence>{isPreviewExpanded && previewSource && selectedTab && !isSelectedTabAsleep && !isSelectedTabMissing && <ImagePreview kind="browser" key={selectedTab.targetId} src={previewSource} title={selectedTab.title || "Browser"} url={websiteUrl} onControl={sendControl} browserInput={browserTypeBar} onClose={() => setPreviewExpanded(false)} />}</AnimatePresence>
     </section>
   )
@@ -621,7 +622,10 @@ const styles = stylex.create({
   list: { minHeight: 0, flex: 1, overflowY: "auto", overscrollBehavior: "contain", padding: "0 10px 18px" },
   tabRow: { width: "100%", minHeight: 76, display: "flex", alignItems: "center", gap: 12, padding: "9px 8px", borderWidth: 0, borderRadius: 14, textAlign: "left", backgroundColor: { default: "transparent", ":hover": tokens.surface }, color: tokens.text, fontFamily: tokens.font },
   tabGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 12, padding: "4px 2px 12px" },
-  tabCard: { minWidth: 0, display: "flex", flexDirection: "column", gap: 0, padding: 0, overflow: "hidden", borderWidth: 1, borderStyle: "solid", borderColor: tokens.border, borderRadius: 18, textAlign: "left", backgroundColor: { default: tokens.surface, ":hover": tokens.hover }, color: tokens.text, fontFamily: tokens.font },
+  tabCardWrap: { position: "relative", minWidth: 0, display: "flex" },
+  tabCardClose: { position: "absolute", top: 0, right: 0, width: 44, height: 44, display: "grid", placeItems: "center", borderWidth: 0, padding: 0, backgroundColor: "transparent" },
+  tabCardCloseDot: { display: "grid", placeItems: "center", width: 24, height: 24, borderRadius: "50%", backgroundColor: "rgb(0 0 0 / .55)", color: "#ffffff" },
+  tabCard: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 0, padding: 0, overflow: "hidden", borderWidth: 1, borderStyle: "solid", borderColor: tokens.border, borderRadius: 18, textAlign: "left", backgroundColor: { default: tokens.surface, ":hover": tokens.hover }, color: tokens.text, fontFamily: tokens.font },
   activeTabCard: { borderColor: tokens.primary, boxShadow: "0 0 0 1.5px var(--primary)" },
   tabCardCopy: { minWidth: 0, display: "flex", flexDirection: "column", gap: 2, padding: "8px 10px 10px" },
   cardTitle: { WebkitLineClamp: 1, fontSize: '0.8125rem', fontWeight: 650 },

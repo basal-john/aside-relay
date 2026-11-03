@@ -312,4 +312,15 @@ export const test = base.extend<Fixtures>({
   }, { auto: true }],
 });
 
+/** Minimizes the floating browser preview where it exists. Phones have no floating preview in the chat. */
+export async function minimizeBrowserPreview(page: Page) {
+  if (await isPhoneLayout(page)) return;
+  await page.getByRole('button', { name: 'Minimize browser preview' }).click();
+}
+
+/** True when the app renders its phone layout (tab bar pages, no floating browser preview). */
+export function isPhoneLayout(page: Page) {
+  return page.evaluate(() => matchMedia('(max-width: 820px)').matches);
+}
+
 export { expect };

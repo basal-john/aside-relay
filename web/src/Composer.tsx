@@ -6,6 +6,7 @@ import { tokens } from './tokens.stylex';
 import { ICON_STROKE, OPEN_DIALOG_SELECTOR, BrowserIcon, IconButton, styles as ui } from './ui';
 import type { RunOptions, UploadAttachment, UseChat } from './types';
 import type { useModelSelection } from './ModelPicker';
+import { useIsPhone } from './TabBar';
 import { ContextPicker, parseSkills, type ContextReference, type ContextSkill } from './ContextPicker';
 import { SlashMenu } from './SlashMenu';
 import {
@@ -37,6 +38,7 @@ export function Composer({ chat, modelSelection, starter, onBrowser, draft, setD
   const input = useRef<HTMLTextAreaElement>(null);
   const footerRef = useRef<HTMLElement>(null);
   const shouldReduceMotion = useReducedMotion();
+  const isPhone = useIsPhone();
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | undefined>(undefined);
@@ -336,9 +338,9 @@ export function Composer({ chat, modelSelection, starter, onBrowser, draft, setD
   }
 
   return <footer ref={footerRef} id="composer" {...stylex.props(styles.footer, isExpanded && styles.expandedFooter)} onFocusCapture={() => setFocus(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocus(false); }}>
-    <div {...stylex.props(styles.tools)}>
+    {!isPhone && <div {...stylex.props(styles.tools)}>
       <motion.button type="button" aria-haspopup="dialog" aria-label="Open browser" {...stylex.props(styles.browser, ui.glass)} whileTap={shouldReduceMotion ? undefined : { scale: .96 }} onPointerDown={event => { if (event.pointerType === 'touch') { event.preventDefault(); onBrowser(); } }} onClick={onBrowser}><BrowserIcon size={17} /><span>Browser</span></motion.button>
-    </div>
+    </div>}
     <form {...stylex.props(styles.composer, isExpanded && styles.expandedComposer)} onSubmit={event => { event.preventDefault(); void submit(); }} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addFiles([...event.dataTransfer.files]); }}>
       {slashOpen && <SlashMenu items={slashItems} activeIndex={slashIndex} onActiveIndexChange={setSlashIndex} onSelect={chooseSlashItem} onClose={() => setSlashDismissed(true)} />}
       <AnimatePresence initial={false}>

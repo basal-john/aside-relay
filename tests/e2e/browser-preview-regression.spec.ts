@@ -1,6 +1,8 @@
 import type { Page, Route } from '@playwright/test';
 import { BROWSER_TAB_ID, BROWSER_TAB_TITLE, SESSION_A, expect, test } from './fixture';
 
+test.skip(({ isMobile }) => isMobile, 'Phones have no floating browser preview in the chat. The Browser tab covers browser viewing there.');
+
 const SHOT_ROUTE = '**/api/tabs/*/shot?*';
 const REFRESH_SETTLE_MS = 1_250;
 
