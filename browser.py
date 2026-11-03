@@ -60,6 +60,10 @@ class TabAsleep(RuntimeError):
         self.tab = tab
 
 
+class TabNotClosable(RuntimeError):
+    """Aside closes only tabs it opened. A close request for one of the user's own tabs leaves it open."""
+
+
 class TabNotFound(RuntimeError):
     pass
 
@@ -315,7 +319,7 @@ async def close_tab(target_id: str, session_id: str | None = None, *, show_all: 
         await daemon.extension("Aside.controlTab", {"action": "close", "targetId": target_id, "url": tab["url"]}, binding)
         tabs = await list_tabs(force=True, session_id=session_id, show_all=show_all)
         if any(tab["targetId"] == target_id for tab in tabs):
-            raise ConnectionError("The browser tab is still open.")
+            raise TabNotClosable(target_id)
         if session_id:
             _targets, active_target = await asyncio.to_thread(daemondb.browser_targets, session_id)
             if active_target == target_id:

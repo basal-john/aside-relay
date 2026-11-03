@@ -78,7 +78,7 @@ test('show-all changes tab scope and confirmed close removes the tab', async ({ 
   await expect(sheet.getByText('No browser tabs')).toBeVisible();
   expect(mockAside.calls.some(call =>
     call.method === 'DELETE'
-      && call.path === `/api/tabs/${TAB_ID}?session=${SESSION_A}&all=true`,
+      && call.path === `/api/tabs/${TAB_ID}?all=true&session=${SESSION_A}`,
   )).toBe(true);
 });
 

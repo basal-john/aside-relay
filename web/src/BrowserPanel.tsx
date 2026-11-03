@@ -245,7 +245,7 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
         await loadTabs()
       } else {
         try {
-          await request(`/api/tabs/${encodeURIComponent(target.targetId)}?${sessionQuery.slice(1)}`, { method: "DELETE", signal: AbortSignal.timeout(BROWSER_REQUEST_TIMEOUT_MS) })
+          await request(`/api/tabs/${encodeURIComponent(target.targetId)}?all=true${sessionId ? `&session=${encodeURIComponent(sessionId)}` : ""}`, { method: "DELETE", signal: AbortSignal.timeout(BROWSER_REQUEST_TIMEOUT_MS) })
         } catch (error) {
           if (getErrorStatus(error) !== 404) throw error
         }
@@ -254,7 +254,7 @@ export function BrowserPanel({ request, notify, onStart, onClose, sessionId, ini
     } catch (error) {
       if (action === "close") {
         setTabs(current => [...current.filter(tab => tab.targetId !== target.targetId), target])
-        setSelectedTab(current => current ?? target)
+        if (!tabToClose) setSelectedTab(current => current ?? target)
       }
       const status = getErrorStatus(error)
       if (status === 404) setPreviewStatus("missing")
@@ -605,6 +605,7 @@ function getErrorStatus(error: unknown) {
 function getErrorMessage(error: unknown) {
   if (error instanceof DOMException && error.name === "TimeoutError") return formatRequestError({ status: 504 })
   if (getErrorStatus(error) === 404) return "This tab is no longer available."
+  if (getErrorStatus(error) === 422) return "Aside can only close tabs it opened. Close this one on your Mac."
   return formatRequestError({ message: error instanceof Error ? error.message : undefined })
 }
 

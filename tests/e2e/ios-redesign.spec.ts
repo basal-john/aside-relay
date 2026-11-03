@@ -212,6 +212,24 @@ test.describe('edge cases', () => {
     await expect(browser.locator('[data-browser-tab="tab-docs-001"]')).toHaveCount(0);
   });
 
+  test('a tab Aside cannot close stays in the grid with a clear message', async ({ page, mockAside }, testInfo) => {
+    test.skip(!isPhone(testInfo.project.name), 'Tested on the phone layout.');
+    mockAside.allowConsoleError(/status of 422/);
+    await page.route('**/api/tabs/tab-docs-001?*', route => route.request().method() === 'DELETE'
+      ? route.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({ error: 'tab_not_closable', targetId: 'tab-docs-001' }) })
+      : route.fallback());
+    await page.goto('/');
+    await openChats(page);
+    await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: 'Browser' }).click();
+    const browser = page.getByRole('dialog', { name: 'Browser' });
+    const card = browser.locator('[data-browser-tab="tab-docs-001"]');
+    await card.locator('..').getByRole('button', { name: 'Close tab' }).click();
+    await page.locator('[data-app-dialog]').filter({ hasText: 'Close this tab?' }).getByRole('button', { name: 'Close tab' }).click();
+    await expect(page.getByText('Aside can only close tabs it opened. Close this one on your Mac.')).toBeVisible();
+    await expect(card).toBeVisible();
+    await expect(browser.getByRole('heading', { name: 'Streaming documentation' })).toHaveCount(0);
+  });
+
   test('pinned chats show as cards on the phone Chats page', async ({ page }, testInfo) => {
     test.skip(!isPhone(testInfo.project.name), 'Pinned cards are phone-only.');
     await page.goto('/');

@@ -229,6 +229,11 @@ async def _tab_asleep_handler(_request: Request, exc: browser.TabAsleep):
     }, status_code=409)
 
 
+@app.exception_handler(browser.TabNotClosable)
+async def _tab_not_closable_handler(_request: Request, exc: browser.TabNotClosable):
+    return JSONResponse({"error": "tab_not_closable", "targetId": str(exc)}, status_code=422)
+
+
 @app.exception_handler(browser.TabNotFound)
 async def _tab_missing_handler(_request: Request, exc: browser.TabNotFound):
     return JSONResponse({"error": "tab_not_found", "targetId": str(exc)}, status_code=404)

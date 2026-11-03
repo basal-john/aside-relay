@@ -20,6 +20,32 @@ class BrowserControlContractTests(support.IsolatedBackendTest):
                 self.assertEqual(response.status_code, 200)
                 opened.assert_awaited_once_with("https://example.test/page", session_id=None)
 
+    async def test_closing_a_tab_aside_will_not_close_reports_not_closable(self):
+        tab = {"targetId": "tab-user", "url": "https://calendar.example/", "windowId": 7}
+        extension = AsyncMock(return_value={"ok": True})
+        with patch("browser.mcp.repl_json", new=AsyncMock(return_value={"id": "session-repl"})), \
+             patch("browser.find_tab", new=AsyncMock(return_value=tab)), \
+             patch("browser.daemon.call", new=AsyncMock(return_value={"browserBinding": {"windowId": 7}})), \
+             patch("browser.daemon.extension", new=extension), \
+             patch("browser.list_tabs", new=AsyncMock(return_value=[tab])):
+            async with support.api_client() as client:
+                response = await client.delete("/api/tabs/tab-user?all=true")
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json(), {"error": "tab_not_closable", "targetId": "tab-user"})
+        extension.assert_awaited_once()
+
+    async def test_closing_a_tab_that_goes_away_succeeds(self):
+        tab = {"targetId": "tab-owned", "url": "https://example.test/", "windowId": 7}
+        with patch("browser.mcp.repl_json", new=AsyncMock(return_value={"id": "session-repl"})), \
+             patch("browser.find_tab", new=AsyncMock(return_value=tab)), \
+             patch("browser.daemon.call", new=AsyncMock(return_value={"browserBinding": {"windowId": 7}})), \
+             patch("browser.daemon.extension", new=AsyncMock(return_value={"ok": True})), \
+             patch("browser.list_tabs", new=AsyncMock(return_value=[])):
+            async with support.api_client() as client:
+                response = await client.delete("/api/tabs/tab-owned?all=true")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ok": True})
+
     async def test_click_does_not_evaluate_fields_for_unselected_actions(self):
         repl = AsyncMock(return_value={"ok": True})
         with patch("browser._require_awake", new=AsyncMock()), patch("browser.mcp.repl_json", new=repl):
