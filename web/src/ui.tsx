@@ -216,7 +216,7 @@ export const styles = stylex.create({
   wide: { maxWidth: 680, height: 'min(760px, calc(100dvh - 32px))', '@media (max-width: 700px)': { height: 'min(820px, calc(100dvh - 8px))' } },
   fullSurface: { width: '100%', maxWidth: 'none', height: '100%', maxHeight: '100%', borderRadius: 0, '@media (max-width: 700px)': { maxWidth: 'none', maxHeight: '100%', borderRadius: 0 } },
   fullBody: { display: 'flex', flex: 1, minHeight: 0, padding: 0, maxHeight: 'none', overflow: 'hidden', '@media (max-width: 700px)': { padding: 0, maxHeight: 'none' } },
-  pageBody: { paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'calc(96px + env(safe-area-inset-bottom))' },
+  pageBody: { paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'calc(84px + max(8px, env(safe-area-inset-bottom) - 22px))' },
   dragHandle: { display: 'none', height: 24, flexShrink: 0, alignItems: 'center', justifyContent: 'center', touchAction: 'none', cursor: 'grab', '@media (max-width: 700px)': { display: 'flex' } },
   dragHandleBar: { width: 36, height: 5, borderRadius: 999, backgroundColor: tokens.controlBorder },
   dialogBody: { padding: 22, maxHeight: 'calc(100dvh - 32px)', overflowY: 'auto', overscrollBehavior: 'contain', minWidth: 0, '@media (max-width: 700px)': { padding: '8px 18px max(18px, env(safe-area-inset-bottom))', maxHeight: 'calc(100dvh - 32px)' } },

@@ -47,7 +47,7 @@ export function TabBar() {
 }
 
 const styles = stylex.create({
-  bar: { position: 'fixed', left: 'max(16px, env(safe-area-inset-left))', right: 'max(16px, env(safe-area-inset-right))', bottom: 'max(12px, env(safe-area-inset-bottom))', zIndex: 40, display: 'flex', alignItems: 'center', justifyContent: 'space-around', height: 64, padding: '0 6px', borderRadius: 32, backgroundColor: tokens.glass, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.glassBorder, backdropFilter: 'blur(22px) saturate(180%)', WebkitBackdropFilter: 'blur(22px) saturate(180%)', boxShadow: '0 8px 30px rgb(0 0 0 / .12)' },
+  bar: { position: 'fixed', left: 'max(16px, env(safe-area-inset-left))', right: 'max(16px, env(safe-area-inset-right))', bottom: 'max(8px, calc(env(safe-area-inset-bottom) - 22px))', zIndex: 40, display: 'flex', alignItems: 'center', justifyContent: 'space-around', height: 64, padding: '0 6px', borderRadius: 32, backgroundColor: tokens.glass, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.glassBorder, backdropFilter: 'blur(22px) saturate(180%)', WebkitBackdropFilter: 'blur(22px) saturate(180%)', boxShadow: '0 8px 30px rgb(0 0 0 / .12)' },
   tab: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, height: 54, minWidth: 44, borderWidth: 0, borderRadius: 27, padding: 0, backgroundColor: 'transparent', color: tokens.muted, fontFamily: tokens.font, fontSize: '.6875rem', fontWeight: 600 },
   current: { color: tokens.primary, backgroundColor: 'color-mix(in srgb, var(--primary) 12%, transparent)' },
 });

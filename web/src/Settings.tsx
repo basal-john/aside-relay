@@ -1,5 +1,5 @@
 import { APP_NAME } from './brand';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { ChevronRight, RotateCw, SlidersHorizontal } from 'lucide-react';
 import type { UseChat } from './types';
@@ -55,8 +55,29 @@ export function Settings({ chat, notify, notifications, isDarkMode, textSize, on
       <div role="group" aria-label="Primary color presets" {...stylex.props(styles.swatches)}>{ACCENT_COLORS.map(color => <button key={color} type="button" aria-label={'Primary color ' + color} aria-pressed={appearance.accent === color} onClick={() => onAppearanceChange({ ...appearance, accent: color })} {...stylex.props(styles.swatch, appearance.accent === color && styles.selectedSwatch)} style={{ backgroundColor: color }} />)}</div>
       {([{ key: 'uiFont', label: 'UI font', fonts: UI_FONTS }, { key: 'contentFont', label: 'Content font', fonts: UI_FONTS }, { key: 'codeFont', label: 'Code font', fonts: CODE_FONTS }] as const).map(({ key, label, fonts }) => <div key={key} {...stylex.props(styles.statusRow)}><label htmlFor={key}>{label}</label><select id={key} value={appearance[key]} onChange={event => onAppearanceChange({ ...appearance, [key]: event.target.value })} {...stylex.props(styles.textSize)}>{fonts.map(font => <option key={font.id} value={font.id}>{font.name}</option>)}</select></div>)}
       <p {...stylex.props(ui.muted)}>The interface, messages and code can each use a different font.</p></div></section>
-    <section><h3 {...stylex.props(styles.heading)}>App</h3><div {...stylex.props(styles.group)}><p {...stylex.props(ui.muted)}>Reload to pick up an update or recover a stuck screen. Your conversations stay on the Mac.</p><div {...stylex.props(styles.actions)}><Button onClick={() => location.reload()}><RotateCw size={16} aria-hidden="true" />Reload app</Button></div></div></section>
+    <section><h3 {...stylex.props(styles.heading)}>App</h3><div {...stylex.props(styles.group)}><p {...stylex.props(ui.muted)}>Reload to pick up an update or recover a stuck screen. Your conversations stay on the Mac.</p><div {...stylex.props(styles.actions)}><Button onClick={() => location.reload()}><RotateCw size={16} aria-hidden="true" />Reload app</Button></div><ViewportReadout /></div></section>
   </div>;
+}
+
+/** Live screen measurements, so a gap at the bottom of the phone screen can be diagnosed from a screenshot. */
+function ViewportReadout() {
+  const [text, setText] = useState('');
+  useEffect(() => {
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;left:0;bottom:0;width:0;height:0;padding-bottom:env(safe-area-inset-bottom);visibility:hidden;pointer-events:none';
+    document.body.append(probe);
+    const update = () => {
+      const standalone = Boolean(Reflect.get(navigator, 'standalone')) || !!window.matchMedia?.('(display-mode: standalone)').matches;
+      const safe = Math.round(parseFloat(getComputedStyle(probe).paddingBottom) || 0);
+      const display = Reflect.get(window, 'screen') as Screen | undefined;
+      setText(`Screen ${display?.width ?? '?'}×${display?.height ?? '?'} · window ${window.innerWidth}×${window.innerHeight} · visible ${Math.round(window.visualViewport?.height ?? window.innerHeight)} · bottom inset ${safe} · ${standalone ? 'Home Screen app' : 'browser tab'}`);
+    };
+    update();
+    window.visualViewport?.addEventListener('resize', update);
+    window.addEventListener('resize', update);
+    return () => { probe.remove(); window.visualViewport?.removeEventListener('resize', update); window.removeEventListener('resize', update); };
+  }, []);
+  return <p {...stylex.props(ui.muted)} data-viewport-readout="">{text}</p>;
 }
 
 const styles = stylex.create({

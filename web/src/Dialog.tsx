@@ -117,6 +117,6 @@ const styles = stylex.create({
   pageHeader: { padding: 'calc(10px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left))' },
   largeTitle: { fontSize: '2rem', fontWeight: 700, letterSpacing: '-.5px', lineHeight: 1.2 },
   pageClose: { display: 'none' },
-  pageBody: { flex: 1, padding: '0 max(16px, env(safe-area-inset-right)) calc(96px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left))' },
+  pageBody: { flex: 1, padding: '0 max(16px, env(safe-area-inset-right)) calc(84px + max(8px, env(safe-area-inset-bottom) - 22px)) max(16px, env(safe-area-inset-left))' },
   actions: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 20 },
 });

@@ -421,7 +421,7 @@ async function resizeImage(file: File) {
 }
 
 const styles = stylex.create({
-  footer: { position: 'absolute', bottom: 0, left: 0, width: '100%', zIndex: 3, backgroundColor: tokens.canvas, padding: '6px max(12px, env(safe-area-inset-right)) var(--composer-bottom-padding, max(12px, env(safe-area-inset-bottom))) max(12px, env(safe-area-inset-left))' },
+  footer: { position: 'absolute', bottom: 0, left: 0, width: '100%', zIndex: 3, backgroundColor: tokens.canvas, padding: '6px max(12px, env(safe-area-inset-right)) var(--composer-bottom-padding, max(8px, calc(env(safe-area-inset-bottom) - 20px))) max(12px, env(safe-area-inset-left))' },
   expandedFooter: { paddingLeft: 'max(12px, env(safe-area-inset-left))', paddingRight: 'max(12px, env(safe-area-inset-right))' },
   tools: { display: 'var(--composer-tools-display, none)', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 10, minWidth: 0 },
   composer: { position: 'relative', display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr) auto', alignItems: 'center', width: '100%', maxWidth: 768, margin: '0 auto', borderRadius: 24, padding: 0, minWidth: 0, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.controlBorder, backgroundColor: tokens.canvas },
