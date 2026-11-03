@@ -134,6 +134,26 @@ class UploadsTest(support.IsolatedBackendTest):
         self.assertEqual(body["name"], "IMG_0001.jpg")
         self.assertTrue((self.uploads_root / body["id"]).read_bytes().startswith(b"\xff\xd8\xff"))
 
+    async def test_upload_api_shrinks_large_photos_and_converts_tiff(self):
+        import subprocess
+        import uploads
+        source = next(Path("/System/Library/Desktop Pictures").glob("*.heic"), None)
+        if source is None:
+            self.skipTest("no HEIC sample on this host")
+        jpeg, tiff = self.root / "big.jpg", self.root / "raw.tiff"
+        subprocess.run(["/usr/bin/sips", "-s", "format", "jpeg", "-Z", "3000", str(source), "--out", str(jpeg)], check=True, capture_output=True)
+        subprocess.run(["/usr/bin/sips", "-s", "format", "tiff", "-Z", "400", str(source), "--out", str(tiff)], check=True, capture_output=True)
+
+        with patch.object(uploads, "PHOTO_SHRINK_BYTES", 1024):
+            shrunk = self.client.post("/api/upload", headers={**self.auth, "X-Filename": "IMG_0002.JPG"}, content=jpeg.read_bytes())
+        converted = self.client.post("/api/upload", headers={**self.auth, "X-Filename": "IMG_0003.DNG"}, content=tiff.read_bytes())
+
+        self.assertEqual(shrunk.status_code, 200, shrunk.text)
+        self.assertLess(shrunk.json()["bytes"], jpeg.stat().st_size)
+        self.assertEqual(converted.status_code, 200, converted.text)
+        self.assertEqual(converted.json()["mime"], "image/jpeg")
+        self.assertEqual(converted.json()["name"], "IMG_0003.jpg")
+
 
 if __name__ == "__main__":
     import unittest

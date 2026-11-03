@@ -94,7 +94,9 @@ def save(raw: bytes, name: str | None = None) -> dict:
     if not raw or len(raw) > config.UPLOAD_MAX_BYTES:
         raise ValueError("File is empty or exceeds the upload size limit")
     kind = sniff(raw, name)
-    if not kind and _is_heif(raw):
+    if (not kind and (_is_heif(raw) or _is_tiff(raw))) or (
+        kind and kind[1] in ("jpg", "png") and len(raw) > PHOTO_SHRINK_BYTES
+    ):
         raw = _heif_to_jpeg(raw)
         name = Path(name or "photo").stem + ".jpg"
         kind = sniff(raw, name)
@@ -134,6 +136,8 @@ def save(raw: bytes, name: str | None = None) -> dict:
     }
 
 
+PHOTO_SHRINK_BYTES = 8 * 1024 * 1024
+
 _HEIF_BRANDS = (b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"hevm", b"hevs", b"mif1", b"msf1")
 
 
@@ -142,8 +146,13 @@ def _is_heif(raw: bytes) -> bool:
     return len(raw) >= 12 and raw[4:8] == b"ftyp" and raw[8:12] in _HEIF_BRANDS
 
 
+def _is_tiff(raw: bytes) -> bool:
+    """Return True for TIFF containers, which include iPhone ProRAW DNG files."""
+    return raw[:4] in (b"II*\x00", b"MM\x00*")
+
+
 def _heif_to_jpeg(raw: bytes) -> bytes:
-    """Convert a HEIC/HEIF image to a JPEG capped at 1600 px with macOS sips."""
+    """Convert a HEIC, DNG or oversized photo to a JPEG capped at 1600 px with macOS sips."""
     with tempfile.TemporaryDirectory() as tmp:
         source, target = Path(tmp) / "in.heic", Path(tmp) / "out.jpg"
         source.write_bytes(raw)
@@ -154,7 +163,7 @@ def _heif_to_jpeg(raw: bytes) -> bytes:
         )
         if result.returncode != 0 or not target.is_file():
             log.warning("HEIC conversion failed: %s", result.stderr.decode(errors="replace")[:200])
-            raise ValueError("Could not convert this HEIC photo")
+            raise ValueError("Could not convert this photo")
         return target.read_bytes()
 
 

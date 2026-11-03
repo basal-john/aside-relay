@@ -807,6 +807,7 @@ async def api_upload(request: Request):
     async for chunk in request.stream():
         size += len(chunk)
         if size > config.UPLOAD_MAX_BYTES:
+            log.warning("upload rejected: over %d bytes", config.UPLOAD_MAX_BYTES)
             raise HTTPException(413, "File is too large.")
         chunks.append(chunk)
     raw = b"".join(chunks)
@@ -823,6 +824,7 @@ async def api_upload(request: Request):
     try:
         return uploads.save(raw, name)
     except ValueError as exc:
+        log.warning("upload rejected: %s (%d bytes, starts %s)", exc, len(raw), raw[:12].hex())
         raise HTTPException(415, str(exc))
 
 

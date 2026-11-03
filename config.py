@@ -71,7 +71,7 @@ SESSIONS_DIR = ASIDE_USER_DIR / "sessions"
 # Anything under the bridge's own cache dir would be unreadable to the agent.
 UPLOAD_DIR = ASIDE_USER_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-UPLOAD_MAX_BYTES = int(_env("ASIDE_RELAY_UPLOAD_MAX", str(24 * 1024 * 1024)))
+UPLOAD_MAX_BYTES = int(_env("ASIDE_RELAY_UPLOAD_MAX", str(100 * 1024 * 1024)))
 DAEMON_URL = _env("ASIDE_DAEMON_URL", "http://127.0.0.1:21420")
 
 # --- bridge state ------------------------------------------------------
