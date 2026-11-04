@@ -64,6 +64,7 @@ check('Home Screen title is aside-relay', document.querySelector('meta[name="app
 check('drawer brand is aside-relay', document.querySelector('aside[aria-label="Conversations"]')?.textContent.includes(PRODUCT_NAME));
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'web/manifest.webmanifest'), 'utf8'));
 check('installation manifest uses aside-relay', manifest.name === PRODUCT_NAME && manifest.short_name === PRODUCT_NAME);
+check('iOS Home Screen app avoids the black-translucent status bar that shortens the page by the status-bar height', !fs.readFileSync(path.join(root, 'web/index.html'), 'utf8').includes('black-translucent'));
 check('conversation list rendered', document.querySelectorAll('aside[aria-label="Conversations"]').length === 1);
 check('launch opens a blank chat behind settings instead of the remembered one', location.pathname === '/settings' && !document.querySelector('[aria-current="page"]') && document.body.textContent.includes('What can I help with?'));
 click(document.querySelector('[role="dialog"][data-app-dialog] button[aria-label="Close"]'));
