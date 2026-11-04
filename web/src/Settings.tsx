@@ -1,7 +1,7 @@
 import { APP_NAME } from './brand';
 import { useCallback, useEffect, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { ChevronRight, RotateCw, SlidersHorizontal } from 'lucide-react';
+import { ChevronRight, Download, RotateCw, SlidersHorizontal } from 'lucide-react';
 import type { UseChat } from './types';
 import { ICON_STROKE, styles as ui } from './ui';
 import { Button } from './Button';
@@ -11,6 +11,7 @@ import { TEXT_SIZES, THEME_PRESETS, UI_FONTS, CODE_FONTS, ACCENT_COLORS, DEFAULT
 import { useAutoRefresh } from './useAutoRefresh';
 import type { PushNotifications } from './notifications';
 import { parseHealth } from './responses';
+import { useInstallOption } from './install';
 
 type Health = ReturnType<typeof parseHealth>;
 
@@ -55,8 +56,16 @@ export function Settings({ chat, notify, notifications, isDarkMode, textSize, on
       <div role="group" aria-label="Primary color presets" {...stylex.props(styles.swatches)}>{ACCENT_COLORS.map(color => <button key={color} type="button" aria-label={'Primary color ' + color} aria-pressed={appearance.accent === color} onClick={() => onAppearanceChange({ ...appearance, accent: color })} {...stylex.props(styles.swatch, appearance.accent === color && styles.selectedSwatch)} style={{ backgroundColor: color }} />)}</div>
       {([{ key: 'uiFont', label: 'UI font', fonts: UI_FONTS }, { key: 'contentFont', label: 'Content font', fonts: UI_FONTS }, { key: 'codeFont', label: 'Code font', fonts: CODE_FONTS }] as const).map(({ key, label, fonts }) => <div key={key} {...stylex.props(styles.statusRow)}><label htmlFor={key}>{label}</label><select id={key} value={appearance[key]} onChange={event => onAppearanceChange({ ...appearance, [key]: event.target.value })} {...stylex.props(styles.textSize)}>{fonts.map(font => <option key={font.id} value={font.id}>{font.name}</option>)}</select></div>)}
       <p {...stylex.props(ui.muted)}>The interface, messages and code can each use a different font.</p></div></section>
-    <section><h3 {...stylex.props(styles.heading)}>App</h3><div {...stylex.props(styles.group)}><p {...stylex.props(ui.muted)}>Reload to pick up an update or recover a stuck screen. Your conversations stay on the Mac.</p><div {...stylex.props(styles.actions)}><Button onClick={() => location.reload()}><RotateCw size={16} aria-hidden="true" />Reload app</Button></div><ViewportReadout /></div></section>
+    <section><h3 {...stylex.props(styles.heading)}>App</h3><div {...stylex.props(styles.group)}><p {...stylex.props(ui.muted)}>Reload to pick up an update or recover a stuck screen. Your conversations stay on the Mac.</p><div {...stylex.props(styles.actions)}><Button onClick={() => location.reload()}><RotateCw size={16} aria-hidden="true" />Reload app</Button></div><InstallApp /><ViewportReadout /></div></section>
   </div>;
+}
+
+/** Offers the Install app button where the browser supports it, and the Share sheet steps on iPhone. */
+function InstallApp() {
+  const option = useInstallOption();
+  if (!option) return null;
+  if (option.kind === 'ios') return <p {...stylex.props(ui.muted)} data-install-hint="">To install {APP_NAME}, tap Share in Safari, then Add to Home Screen.</p>;
+  return <div {...stylex.props(styles.actions)}><Button onClick={() => { option.install().catch(() => { }); }}><Download size={16} aria-hidden="true" />Install app</Button></div>;
 }
 
 /** Live screen measurements, so a gap at the bottom of the phone screen can be diagnosed from a screenshot. */

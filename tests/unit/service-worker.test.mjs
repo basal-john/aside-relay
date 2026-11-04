@@ -5,8 +5,32 @@ import vm from 'node:vm'
 
 const serviceWorkerSource = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8')
 
-function serviceWorkerHarness({ clients = [] } = {}) {
+function fakeCaches() {
+  const stores = new Map()
+  const keyOf = request => typeof request === 'string' ? request : new URL(request.url).pathname
+  const open = async name => {
+    if (!stores.has(name)) stores.set(name, new Map())
+    const store = stores.get(name)
+    return {
+      async addAll(urls) { for (const url of urls) store.set(url, new Response('shell:' + url, { headers: { 'content-type': 'text/html' } })) },
+      async put(request, response) { store.set(keyOf(request), response) },
+      async match(request) { return store.get(keyOf(request))?.clone() },
+      async keys() { return [...store.keys()].map(url => ({ url })) },
+      async delete(request) { return store.delete(keyOf(request)) },
+    }
+  }
+  return {
+    stores,
+    open,
+    async keys() { return [...stores.keys()] },
+    async delete(name) { return stores.delete(name) },
+    async match(request, { cacheName }) { return (await open(cacheName)).match(request) },
+  }
+}
+
+function serviceWorkerHarness({ clients = [], fetch = async () => { throw new TypeError('offline') }, instantTimers = true } = {}) {
   const handlers = new Map()
+  const caches = fakeCaches()
   const notifications = []
   const opened = []
   let claimed = false
@@ -30,6 +54,7 @@ function serviceWorkerHarness({ clients = [] } = {}) {
     location: { origin: 'https://aside.test' },
     addEventListener(type, listener) { handlers.set(type, listener) },
     skipWaiting: async () => { skipped = true },
+    caches,
     registration: {
       async showNotification(title, options) { notifications.push({ title, options }) },
     },
@@ -47,9 +72,12 @@ function serviceWorkerHarness({ clients = [] } = {}) {
   const context = vm.createContext({
     self: worker,
     URL,
+    Response,
+    fetch,
     MessageChannel: FakeMessageChannel,
     setTimeout(callback) {
       const timer = { active: true }
+      if (!instantTimers) return timer
       timers.add(timer)
       queueMicrotask(() => {
         if (timer.active) callback()
@@ -63,6 +91,7 @@ function serviceWorkerHarness({ clients = [] } = {}) {
 
   return {
     handlers,
+    caches,
     notifications,
     opened,
     get claimed() { return claimed },
@@ -185,4 +214,44 @@ test('notification clicks open a safe new window when no reusable app window exi
   })
 
   assert.deepEqual(worker.opened, ['https://aside.test/'])
+})
+
+async function respond(worker, request) {
+  let response
+  worker.handlers.get('fetch')({ request, respondWith(value) { response = Promise.resolve(value) } })
+  return response && await response
+}
+
+const navigation = path => ({ method: 'GET', mode: 'navigate', url: 'https://aside.test' + path })
+
+test('install caches the app shell so the Home Screen app opens while the Mac is offline', async () => {
+  const worker = serviceWorkerHarness({ instantTimers: false })
+  await dispatchWaitable(worker.handlers.get('install'), {})
+  const response = await respond(worker, navigation('/c/abcdefghijkl'))
+  assert.equal(await response.text(), 'shell:/')
+})
+
+test('a 502 from the proxy falls back to the cached shell, a 404 does not', async () => {
+  let status = 502
+  const worker = serviceWorkerHarness({ fetch: async () => new Response('bad gateway', { status }), instantTimers: false })
+  await dispatchWaitable(worker.handlers.get('install'), {})
+  assert.equal(await (await respond(worker, navigation('/'))).text(), 'shell:/')
+  status = 404
+  assert.equal((await respond(worker, navigation('/'))).status, 404)
+})
+
+test('API, WebSocket and cross-origin requests are never served from the cache', async () => {
+  const worker = serviceWorkerHarness()
+  for (const url of ['https://aside.test/api/sessions', 'https://aside.test/ws', 'https://other.test/assets/x.js']) {
+    assert.equal(await respond(worker, { method: 'GET', mode: 'cors', url }), undefined)
+  }
+  assert.equal(await respond(worker, { method: 'POST', mode: 'cors', url: 'https://aside.test/assets/x.js' }), undefined)
+})
+
+test('activate deletes old app caches only', async () => {
+  const worker = serviceWorkerHarness()
+  await worker.caches.open('aside-relay-shell-v0')
+  await worker.caches.open('someone-else')
+  await dispatchWaitable(worker.handlers.get('activate'), {})
+  assert.deepEqual([...worker.caches.stores.keys()], ['someone-else'])
 })
