@@ -190,7 +190,7 @@ test('appearance validates every stored choice and rejects CSS injection', () =>
   const environment = installDom();
   try {
     localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify({ lightPreset: 'dracula-dark', darkPreset: 'dracula-dark', accent: 'url(https://unsafe.test)', uiFont: 'unknown', contentFont: 'noto-serif-kr', codeFont: 'jetbrains-mono' }));
-    assert.deepEqual(loadAppearance(), { lightPreset: 'relay', darkPreset: 'dracula-dark', accent: '', uiFont: 'wanted-sans', contentFont: 'noto-serif-kr', codeFont: 'jetbrains-mono' });
+    assert.deepEqual(loadAppearance(), { lightPreset: 'relay', darkPreset: 'dracula-dark', accent: '', uiFont: 'system', contentFont: 'noto-serif-kr', codeFont: 'jetbrains-mono' });
     localStorage.setItem(APPEARANCE_STORAGE_KEY, '{');
     assert.equal(loadAppearance().darkPreset, 'relay');
   } finally { environment.restore(); }

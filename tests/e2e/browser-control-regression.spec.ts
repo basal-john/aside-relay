@@ -7,8 +7,7 @@ const CONTROL_ROUTE = `**/api/native/browser/tabs/${BROWSER_TAB_ID}/control?*`;
 async function openControlledTab(page: Page) {
   await page.goto(`/c/${SESSION_A}`);
   if (await isPhoneLayout(page)) {
-    await page.getByRole('button', { name: 'Open conversations' }).click();
-    await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: 'Browser' }).click();
+    await page.locator('#header').getByRole('button', { name: 'Open browser' }).click();
     await page.getByRole('dialog', { name: 'Browser', exact: true }).locator(`[data-browser-tab="${BROWSER_TAB_ID}"]`).click();
   } else await page.getByRole('button', { name: 'Expand browser preview', exact: true }).click();
   const browser = page.getByRole('dialog', { name: 'Browser', exact: true });

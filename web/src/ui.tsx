@@ -16,9 +16,9 @@ export const OPEN_DIALOG_SELECTOR = 'dialog[open], [data-app-dialog][data-open]'
 const DIALOG_EASE = [0.22, 1, 0.36, 1] as const;
 const SHEET_CLOSED_Y = '100%';
 
-export function IconButton({ label, children, isOutlined = false, ...props }: HTMLMotionProps<'button'> & { label: string; children: ReactNode; isOutlined?: boolean }) {
+export function IconButton({ label, children, isOutlined = false, isGlass = false, ...props }: HTMLMotionProps<'button'> & { label: string; children: ReactNode; isOutlined?: boolean; isGlass?: boolean }) {
   const shouldReduceMotion = useReducedMotion();
-  return <motion.button {...stylex.props(styles.iconButton, isOutlined && styles.outlined)} type="button" aria-label={label} title={label} whileTap={shouldReduceMotion ? undefined : { scale: .92 }} {...props}>{children}</motion.button>;
+  return <motion.button {...stylex.props(styles.iconButton, isOutlined && styles.outlined, isGlass && styles.glassButton)} type="button" aria-label={label} title={label} whileTap={shouldReduceMotion ? undefined : { scale: .92 }} {...props}>{children}</motion.button>;
 }
 
 export function BrowserIcon({ size = 22 }: { size?: number }) {
@@ -210,6 +210,7 @@ function useMediaQuery(query: string) {
 
 export const styles = stylex.create({
   glass: { backgroundColor: tokens.glass, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.glassBorder, backdropFilter: 'blur(20px) saturate(160%)', boxShadow: tokens.glassShadow },
+  glassButton: { position: 'relative', '::after': { content: '""', position: 'absolute', inset: 0, borderRadius: '50%' }, width: 44, height: 44, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--chrome-glass-border, transparent)', backgroundColor: { default: 'var(--chrome-glass, transparent)', ':hover': tokens.hover }, backdropFilter: 'blur(18px) saturate(1.2)', WebkitBackdropFilter: 'blur(18px) saturate(1.2)' },
   iconButton: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: 44, height: 44, borderRadius: '50%', borderWidth: 0, padding: 0, backgroundColor: { default: 'transparent', ':hover': tokens.hover }, color: tokens.text },
   outlined: { borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border },
   dialog: { position: 'fixed', inset: 0, width: '100%', height: '100dvh', maxWidth: 'none', maxHeight: 'none', margin: 0, padding: 0, borderWidth: 0, overflow: 'clip', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', '@media (max-width: 700px)': { alignItems: 'flex-end' } },

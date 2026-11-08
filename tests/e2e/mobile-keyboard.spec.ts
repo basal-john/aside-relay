@@ -78,11 +78,11 @@ test('keyboard panning keeps the fixed header and composer inside the visible vi
   };
   await setViewport(page, keyboard);
   await expectKeyboardLayout(page, keyboard.offsetTop, keyboard.offsetTop + keyboard.height);
-  await expect(page.getByRole('button', { name: 'Open browser', exact: true })).toHaveCount(0);
+  await expect(page.locator('#composer').getByRole('button', { name: 'Open browser', exact: true })).toHaveCount(0);
 
   await setViewport(page, { ...keyboard, innerHeight: keyboard.height, layoutHeight: keyboard.height });
   await expectKeyboardLayout(page, keyboard.offsetTop, keyboard.offsetTop + keyboard.height);
-  await expect(page.getByRole('button', { name: 'Open browser', exact: true })).toHaveCount(0);
+  await expect(page.locator('#composer').getByRole('button', { name: 'Open browser', exact: true })).toHaveCount(0);
   await expect(draft).toHaveValue('Draft survives keyboard geometry changes');
 });
 
@@ -133,7 +133,7 @@ test('a viewport correction that settles after 100ms is reconciled without anoth
   await setViewport(page, settled, false);
 
   await expect.poll(() => composerBottom(page), { timeout: 2_000 }).toBeCloseTo(settled.offsetTop + settled.height, 0);
-  await expect(page.getByRole('button', { name: 'Open browser', exact: true })).toHaveCount(0);
+  await expect(page.locator('#composer').getByRole('button', { name: 'Open browser', exact: true })).toHaveCount(0);
   await expect(draft).toHaveValue('Late viewport draft');
 });
 
@@ -153,7 +153,7 @@ test('app return signals recover stale geometry across repeated keyboard and rot
     };
     await setViewport(page, keyboard);
     await expectKeyboardLayout(page, keyboard.offsetTop, keyboard.offsetTop + keyboard.height);
-    await expect(page.getByRole('button', { name: 'Open browser', exact: true })).toHaveCount(0);
+    await expect(page.locator('#composer').getByRole('button', { name: 'Open browser', exact: true })).toHaveCount(0);
 
     await page.setViewportSize(landscape);
     const rotatedKeyboard = {

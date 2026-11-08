@@ -54,7 +54,7 @@ export type Appearance = {
   lightPreset: string; darkPreset: string; accent: string;
   uiFont: string; contentFont: string; codeFont: string;
 };
-const DEFAULT_APPEARANCE: Appearance = { lightPreset: 'relay', darkPreset: 'relay', accent: '', uiFont: 'wanted-sans', contentFont: 'wanted-sans', codeFont: 'd2coding' };
+const DEFAULT_APPEARANCE: Appearance = { lightPreset: 'relay', darkPreset: 'relay', accent: '', uiFont: 'system', contentFont: 'system', codeFont: 'd2coding' };
 
 export function loadThemeMode(): ThemeMode {
   try {
@@ -107,6 +107,7 @@ function applyAppearance(theme: Theme, appearance: Appearance) {
   values['--font-content'] = (UI_FONTS.find(font => font.id === appearance.contentFont) ?? UI_FONTS[0]).family;
   values['--font-code'] = (CODE_FONTS.find(font => font.id === appearance.codeFont) ?? CODE_FONTS[0]).family;
   Object.entries(values).forEach(([name, value]) => root.style.setProperty(name, value));
+  root.dataset.wallpaper = theme === 'dark' && !preset ? 'on' : 'off';
   const fontIds = [...new Set([appearance.uiFont, appearance.contentFont, appearance.codeFont])].filter(id => !['system', 'system-mono', 'd2coding'].includes(id));
   root.dataset.fontStylesheets = JSON.stringify(fontIds.map(id => '/api/font/css/' + id));
   for (const id of fontIds) {

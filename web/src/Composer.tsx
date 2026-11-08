@@ -5,7 +5,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { tokens } from './tokens.stylex';
 import { ICON_STROKE, OPEN_DIALOG_SELECTOR, BrowserIcon, IconButton, styles as ui } from './ui';
 import type { RunOptions, UploadAttachment, UseChat } from './types';
-import type { useModelSelection } from './ModelPicker';
+import { ModelPicker, type useModelSelection } from './ModelPicker';
 import { useIsPhone } from './TabBar';
 import { ContextPicker, parseSkills, type ContextReference, type ContextSkill } from './ContextPicker';
 import { SlashMenu } from './SlashMenu';
@@ -356,7 +356,7 @@ export function Composer({ chat, modelSelection, starter, onBrowser, draft, setD
           <AnimatePresence initial={false} onExitComplete={flushPreviewRevokes}>{attachments.map(attachment => <AttachmentItem key={attachment.key} attachment={attachment} onPreviewUnmount={markSubmittedPreviewUnmounted} onRemove={() => { if (attachment.preview) pendingPreviewRevokesRef.current.push(attachment.preview); attachmentRef.current = attachmentRef.current.filter(item => item.key !== attachment.key); setAttachments(attachmentRef.current); }} />)}</AnimatePresence>
         </motion.div>}
       </AnimatePresence>
-      <div {...stylex.props(styles.inputActions)}><IconButton label="Add to message" aria-haspopup="dialog" disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={() => setAddingContext(true)}><Plus size={22} strokeWidth={ICON_STROKE} /></IconButton>{speechRecognition && <IconButton label={isDictating ? 'Stop dictation' : 'Dictate'} aria-pressed={isDictating} disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={toggleDictation}><Mic size={21} strokeWidth={ICON_STROKE} /></IconButton>}</div>
+      <div {...stylex.props(styles.inputActions)}><IconButton label="Add to message" aria-haspopup="dialog" disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={() => setAddingContext(true)}><Plus size={22} strokeWidth={ICON_STROKE} /></IconButton>{speechRecognition && <IconButton label={isDictating ? 'Stop dictation' : 'Dictate'} aria-pressed={isDictating} disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={toggleDictation}><Mic size={21} strokeWidth={ICON_STROKE} /></IconButton>}<ModelPicker selection={modelSelection} disabled={!chat.isReady || chat.isOpening || chat.isSending || !!chat.authError} isRunning={chat.isRunning} /></div>
       <textarea ref={input} id="draft" aria-label="Message" placeholder={chat.authError ? 'Connect in Settings' : chat.isRunning ? 'Follow up' : 'Message'} rows={1} value={draft} disabled={!chat.isReady || chat.isOpening || !!chat.authError} {...stylex.props(styles.input, isExpanded && styles.expandedInput)} onChange={event => { draftRef.current = event.target.value; setDraft(event.target.value); setCursor(event.target.selectionStart); }} onSelect={event => setCursor(event.currentTarget.selectionStart)} onClick={event => setCursor(event.currentTarget.selectionStart)} onKeyUp={event => setCursor(event.currentTarget.selectionStart)} onPaste={event => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); void addFiles(files); } }} onKeyDown={event => {
         if (slashOpen && slashItems.length) {
           if (event.key === 'ArrowDown') { event.preventDefault(); setSlashIndex(index => (index + 1) % slashItems.length); return; }
@@ -423,16 +423,16 @@ async function resizeImage(file: File) {
 }
 
 const styles = stylex.create({
-  footer: { position: 'absolute', bottom: 0, left: 0, width: '100%', zIndex: 3, backgroundColor: tokens.canvas, padding: '6px max(12px, env(safe-area-inset-right)) var(--composer-bottom-padding, max(8px, calc(env(safe-area-inset-bottom) - 20px))) max(12px, env(safe-area-inset-left))' },
+  footer: { position: 'absolute', bottom: 0, left: 0, width: '100%', zIndex: 3, backgroundColor: 'var(--composer-footer-bg, var(--canvas))', padding: '6px max(12px, env(safe-area-inset-right)) var(--composer-bottom-padding, max(8px, calc(env(safe-area-inset-bottom) - 20px))) max(12px, env(safe-area-inset-left))' },
   expandedFooter: { paddingLeft: 'max(12px, env(safe-area-inset-left))', paddingRight: 'max(12px, env(safe-area-inset-right))' },
   tools: { display: 'var(--composer-tools-display, none)', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 10, minWidth: 0 },
-  composer: { position: 'relative', display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr) auto', alignItems: 'center', width: '100%', maxWidth: 768, margin: '0 auto', borderRadius: 24, padding: 0, minWidth: 0, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.controlBorder, backgroundColor: tokens.canvas },
-  expandedComposer: { borderRadius: 22, padding: 4 },
-  input: { display: 'block', width: '100%', resize: 'none', borderWidth: 0, backgroundColor: 'transparent', color: tokens.text, fontSize: '1rem', lineHeight: 1.5, minHeight: COMPACT_DRAFT_HEIGHT, maxHeight: MAX_DRAFT_HEIGHT, overflowY: 'auto', overflowWrap: 'anywhere', padding: '2px 4px', '::placeholder': { color: tokens.muted } },
-  expandedInput: { order: -1, gridColumn: '1 / -1', minHeight: 44, padding: '8px 10px 12px' },
+  composer: { position: 'relative', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', width: '100%', maxWidth: 768, margin: '0 auto', borderRadius: 26, padding: '6px 4px 2px', minWidth: 0, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--composer-border, var(--control-border))', backgroundColor: 'var(--composer-bg, var(--canvas))', backdropFilter: 'blur(18px) saturate(1.2)', WebkitBackdropFilter: 'blur(18px) saturate(1.2)' },
+  expandedComposer: {},
+  input: { display: 'block', width: '100%', resize: 'none', borderWidth: 0, backgroundColor: 'transparent', color: tokens.text, fontSize: '1rem', lineHeight: 1.5, minHeight: COMPACT_DRAFT_HEIGHT, maxHeight: MAX_DRAFT_HEIGHT, overflowY: 'auto', overflowWrap: 'anywhere', order: -1, gridColumn: '1 / -1', padding: '6px 12px 4px', '::placeholder': { color: tokens.muted } },
+  expandedInput: { minHeight: 44, padding: '6px 12px 8px' },
   browser: { position: 'relative', '::after': { content: '""', position: 'absolute', inset: '-6px 0' }, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 32, padding: '0 10px', borderRadius: 24, color: tokens.text, fontSize: '.6875rem', fontWeight: 500, pointerEvents: 'auto' },
-  inputActions: { display: 'flex', alignItems: 'center', gap: 0 },
-  submitActions: { display: 'flex', gridColumn: 3, alignItems: 'center', gap: 4, minWidth: 0 },
+  inputActions: { display: 'flex', alignItems: 'center', gap: 0, minWidth: 0 },
+  submitActions: { display: 'flex', gridColumn: 2, alignItems: 'center', gap: 4, minWidth: 0 },
   stop: { position: 'relative', width: 44, height: 44, padding: 5, backgroundClip: 'content-box', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderWidth: 0, backgroundColor: tokens.text, color: tokens.canvas, flexShrink: 0 },
   send: { position: 'relative', width: 44, height: 44, padding: 5, backgroundClip: 'content-box', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderWidth: 0, backgroundColor: { default: tokens.text, ':disabled': tokens.bubble }, color: { default: tokens.canvas, ':disabled': tokens.muted }, flexShrink: 0 },
   contextChips: { order: -3, gridColumn: '1 / -1', display: 'flex', flexWrap: 'wrap', gap: 8, padding: '4px 10px 8px', maxWidth: '100%', minWidth: 0 },

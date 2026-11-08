@@ -46,6 +46,39 @@
     --syntax-keyword: #dda5df; --syntax-string: #a7d6a7; --syntax-number: #e5c07b; --syntax-title: #9ec4ff;
     color-scheme: dark;
   }
+  html[data-wallpaper="on"] {
+    --wp-veil: rgb(0 0 0 / .62);
+    --wp-field: url('./assets/wallpaper-field.webp');
+    --chrome-glass: rgb(9 10 13 / .58);
+    --chrome-glass-border: rgb(255 255 255 / .1);
+    --header-bg: rgb(0 0 0 / .42);
+    --header-border: transparent;
+    --composer-bg: var(--chrome-glass);
+    --composer-border: var(--chrome-glass-border);
+    --composer-footer-bg: transparent;
+    --starter-bg: var(--chrome-glass);
+    --starter-border: var(--chrome-glass-border);
+  }
+  @media (max-width: 820px) { html[data-wallpaper="on"] { --wp-field: url('./assets/wallpaper-field-portrait.webp'); } }
+  html[data-wallpaper="on"] [data-chat-main] {
+    background-color: #06070a;
+    background-image: linear-gradient(var(--wp-veil), var(--wp-veil)), url('./assets/wallpaper-grain.png'), var(--wp-field);
+    background-size: 100% 100%, 192px 192px, cover;
+    background-position: 0 0, 0 0, center;
+    background-repeat: no-repeat, repeat, no-repeat;
+    background-blend-mode: normal, multiply, normal;
+  }
+  html[data-wallpaper="on"] [data-chat-main][data-chat-view="start"] {
+    --header-bg: transparent;
+    background-image: url('./assets/wallpaper-grain.png'), var(--wp-field);
+    background-size: 192px 192px, cover;
+    background-position: 0 0, center;
+    background-repeat: repeat, no-repeat;
+    background-blend-mode: multiply, normal;
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    html[data-wallpaper="on"] { --chrome-glass: #0b0c0f; --header-bg: #000000; }
+  }
   body, button, input, textarea, select { font-family: var(--font-sans); }
   code, pre { font-family: var(--font-code); user-select: text; -webkit-user-select: text; -webkit-touch-callout: default; }
   body { background: var(--canvas); color: var(--text); font-size: 1rem; -webkit-tap-highlight-color: transparent; }

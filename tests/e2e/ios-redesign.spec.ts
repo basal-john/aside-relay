@@ -61,9 +61,10 @@ test.describe('smoke', () => {
     await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('');
   });
 
-  test('the header title is the model and opens the model picker', async ({ page }, testInfo) => {
+  test('the composer model chip opens the model picker', async ({ page }, testInfo) => {
     await page.goto(`/c/${SESSION_A}`);
-    const title = page.locator('#header').getByRole('button', { name: /Choose model, GPT-6\.1 Sol/ });
+    await expect(page.locator('#header').getByRole('button', { name: 'Session options' })).toBeVisible();
+    const title = page.locator('#composer').getByRole('button', { name: /Choose model, GPT-6\.1 Sol/ });
     await expect(title).toBeVisible();
     await title.click();
     const dialog = page.locator('[data-app-dialog]');
@@ -73,28 +74,25 @@ test.describe('smoke', () => {
     await expect(dialog).toHaveCount(0);
   });
 
-  test('phone tabs move between Chats, Settings and Browser', async ({ page }, testInfo) => {
-    test.skip(!isPhone(testInfo.project.name), 'The tab bar only exists on phones.');
+  test('the Chats drawer footer opens Settings, Workspace and Browser, and there is no tab bar', async ({ page }, testInfo) => {
+    test.skip(!isPhone(testInfo.project.name), 'The drawer footer only exists on phones.');
     await page.goto('/');
+    await expect(page.getByRole('navigation', { name: 'Sections' })).toHaveCount(0);
     await openChats(page);
-    const tabs = page.getByRole('navigation', { name: 'Sections' });
-    await expect(tabs.getByRole('button', { name: 'Chats' })).toHaveAttribute('aria-current', 'page');
-
-    await tabs.getByRole('button', { name: 'Settings' }).click();
-    const settings = page.locator('[data-app-dialog][data-dialog-variant="page"]');
+    const footer = page.getByRole('navigation', { name: 'App' });
+    await expect(footer.getByRole('button', { name: 'Workspace' })).toBeVisible();
+    await footer.getByRole('button', { name: 'Settings' }).click();
+    const settings = page.locator('[data-app-dialog][data-dialog-variant="sheet"]');
     await expect(settings.getByRole('heading', { name: 'Settings' })).toBeVisible();
-    await expect(page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: 'Settings' })).toHaveAttribute('aria-current', 'page');
-
-    await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: 'Browser' }).click();
+    await page.keyboard.press('Escape');
+    await expect(settings).toHaveCount(0);
+    await openChats(page);
+    await page.getByRole('navigation', { name: 'App' }).getByRole('button', { name: 'Browser' }).click();
     await expect(page.getByRole('dialog', { name: 'Browser' })).toBeVisible();
-    await expect(page.getByRole('dialog', { name: 'Browser' }).getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: 'Browser' })).toHaveAttribute('aria-current', 'page');
-    await expect(page.getByRole('navigation', { name: 'Sections' })).toHaveCount(1);
-
-    await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: 'Chats' }).click();
-    await expect(page.getByRole('heading', { name: 'Chats', level: 1 })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await openChats(page);
     await page.getByRole('complementary', { name: 'Conversations' }).getByRole('button', { name: /^Alpha conversation/ }).first().click();
     await expect(page.getByRole('article', { name: 'Response' })).toContainText('Hello from the assistant.');
-    await expect(page.getByRole('navigation', { name: 'Sections' })).toHaveCount(0);
   });
 });
 
@@ -108,9 +106,16 @@ test.describe('edge cases', () => {
 
   test('tapping the same starter twice does not stack text', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('button', { name: /Reschedule a meeting/ }).click();
-    await page.getByRole('button', { name: /Reschedule a meeting/ }).click();
-    await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('Reschedule my meeting with ');
+    await page.getByRole('button', { name: /QE board check/ }).click();
+    await page.getByRole('button', { name: /QE board check/ }).click();
+    await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('Check the QE board and tell me which tickets need attention: overdue, out of scope, or ready to close. ');
+  });
+
+  test('the coffee chat starter falls back to text when the skill is missing', async ({ page, mockAside }) => {
+    mockAside.skills = [];
+    await page.goto('/');
+    await page.getByRole('button', { name: /Coffee chat/ }).click();
+    await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('Use my coffee-call-prep skill. ');
   });
 
   test('a brief socket drop shows no banner, a lasting one does', async ({ page, mockAside }) => {
@@ -156,42 +161,11 @@ test.describe('edge cases', () => {
     await expect(page.getByRole('heading', { name: 'Chats', level: 1 })).toBeVisible();
   });
 
-  test('switching tabs never shows the chat underneath, not even for one frame', async ({ page }, testInfo) => {
-    test.skip(!isPhone(testInfo.project.name), 'The tab bar only exists on phones.');
-    await page.goto(`/c/${SESSION_A}`);
-    await expect(page.getByRole('article', { name: 'Response' })).toContainText('Hello from the assistant.');
-    await openChats(page);
-    await page.waitForTimeout(400);
-    await page.evaluate(() => {
-      const log: string[] = [];
-      Reflect.set(window, '__chatFlashes', log);
-      const probe = () => {
-        const points = [[0.5, 0.3], [0.5, 0.6], [0.2, 0.45]] as const;
-        for (const [x, y] of points) {
-          const element = document.elementFromPoint(window.innerWidth * x, window.innerHeight * y);
-          const cover = element?.closest('[data-app-dialog][data-dialog-variant="page"], [data-dialog-surface], aside[aria-label="Conversations"]');
-          let opacity = 1;
-          for (let node: Element | null = element; node; node = node.parentElement) opacity *= Number(getComputedStyle(node).opacity);
-          if (!cover || opacity < 0.95) { log.push(`${performance.now().toFixed(0)} ${x},${y} ${element?.tagName ?? 'none'} opacity ${opacity.toFixed(2)}`); break; }
-        }
-        if (Reflect.get(window, '__chatFlashes') === log) requestAnimationFrame(probe);
-      };
-      requestAnimationFrame(probe);
-    });
-    const tabs = () => page.getByRole('navigation', { name: 'Sections' }).last();
-    for (const [tab, check] of [['Settings', () => page.locator('[data-app-dialog][data-dialog-variant="page"]').getByRole('heading', { name: 'Settings' })], ['Browser', () => page.getByRole('dialog', { name: 'Browser' })], ['Settings', () => page.locator('[data-app-dialog][data-dialog-variant="page"]').getByRole('heading', { name: 'Settings' })], ['Chats', () => page.getByRole('heading', { name: 'Chats', level: 1 })]] as const) {
-      await tabs().getByRole('button', { name: tab }).click();
-      await expect(check()).toBeVisible();
-      await page.waitForTimeout(500);
-    }
-    const flashes = await page.evaluate(() => Reflect.get(window, '__chatFlashes') as string[]);
-    expect(flashes, 'frames where the chat was visible during a tab switch').toEqual([]);
-  });
-
-  test('the chat has no browser shortcut or floating browser preview on phones', async ({ page }, testInfo) => {
+  test('the phone chat opens the browser from the header, with no composer shortcut or floating preview', async ({ page }, testInfo) => {
     test.skip(!isPhone(testInfo.project.name), 'Phone-only.');
     await page.goto(`/c/${SESSION_A}`);
     await expect(page.getByRole('article', { name: 'Response' })).toContainText('Hello from the assistant.');
+    await expect(page.locator('#header').getByRole('button', { name: 'Open browser' })).toBeVisible();
     await page.getByRole('textbox', { name: 'Message' }).focus();
     await expect(page.locator('#composer button[aria-label="Open browser"]')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Open browser preview/ })).toHaveCount(0);
@@ -201,8 +175,7 @@ test.describe('edge cases', () => {
   test('a browser tab card closes its tab after confirmation', async ({ page, mockAside }, testInfo) => {
     test.skip(!isPhone(testInfo.project.name), 'Tested on the phone layout.');
     await page.goto('/');
-    await openChats(page);
-    await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: 'Browser' }).click();
+    await page.locator('#header').getByRole('button', { name: 'Open browser' }).click();
     const browser = page.getByRole('dialog', { name: 'Browser' });
     await browser.locator('[data-browser-tab="tab-docs-001"]').locator('..').getByRole('button', { name: 'Close tab' }).click();
     const confirm = page.locator('[data-app-dialog]').filter({ hasText: 'Close this tab?' });
@@ -219,8 +192,7 @@ test.describe('edge cases', () => {
       ? route.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({ error: 'tab_not_closable', targetId: 'tab-docs-001' }) })
       : route.fallback());
     await page.goto('/');
-    await openChats(page);
-    await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: 'Browser' }).click();
+    await page.locator('#header').getByRole('button', { name: 'Open browser' }).click();
     const browser = page.getByRole('dialog', { name: 'Browser' });
     const card = browser.locator('[data-browser-tab="tab-docs-001"]');
     await card.locator('..').getByRole('button', { name: 'Close tab' }).click();
@@ -310,7 +282,7 @@ test.describe('edge cases', () => {
     await page.setViewportSize({ width: 320, height: 568 });
     await page.goto(`/c/${SESSION_A}`);
     await expect(page.getByRole('article', { name: 'Response' })).toContainText('Hello from the assistant.');
-    const tooSmall = async () => page.evaluate(() => [...document.querySelectorAll<HTMLElement>('#header button, #composer button, nav[aria-label="Sections"] button')]
+    const tooSmall = async () => page.evaluate(() => [...document.querySelectorAll<HTMLElement>('#header button, #composer button, nav[aria-label="App"] button')]
       .filter(element => element.getClientRects().length && getComputedStyle(element).visibility !== 'hidden')
       .map(element => ({ label: element.getAttribute('aria-label') ?? element.textContent?.trim() ?? '', box: element.getBoundingClientRect() }))
       .filter(({ box }) => box.width < 44 || box.height < 44)
@@ -339,7 +311,7 @@ test.describe('visual capture', () => {
       await page.goto(`/c/${SESSION_A}`);
       await expect(page.getByRole('article', { name: 'Response' })).toContainText('Hello from the assistant.');
       await shot('02-chat');
-      await page.locator('#header').getByRole('button', { name: /Choose model/ }).click();
+      await page.locator('#composer').getByRole('button', { name: /Choose model/ }).click();
       await expect(page.locator('[data-app-dialog]').getByRole('heading', { name: 'Models' })).toBeVisible();
       await page.waitForTimeout(400);
       await shot('03-model-sheet');
@@ -347,18 +319,20 @@ test.describe('visual capture', () => {
       await openChats(page);
       await page.waitForTimeout(400);
       await shot('04-chats');
-      await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: 'Settings' }).click();
-      await expect(page.locator('[data-app-dialog][data-dialog-variant="page"]').getByRole('heading', { name: 'Settings' })).toBeVisible();
+      await page.getByRole('navigation', { name: 'App' }).getByRole('button', { name: 'Settings' }).click();
+      await expect(page.locator('[data-app-dialog]').getByRole('heading', { name: 'Settings' })).toBeVisible();
       await page.waitForTimeout(400);
       await shot('05-settings');
-      await page.locator('[data-app-dialog][data-dialog-variant="page"]').getByRole('heading', { name: 'Appearance' }).scrollIntoViewIfNeeded();
+      await page.locator('[data-app-dialog]').getByRole('heading', { name: 'Appearance' }).scrollIntoViewIfNeeded();
       await page.waitForTimeout(300);
       await shot('06-appearance');
-      await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: 'Browser' }).click();
+      await page.keyboard.press('Escape');
+      await page.locator('#header').getByRole('button', { name: 'Open browser' }).click();
       await expect(page.getByRole('dialog', { name: 'Browser' })).toBeVisible();
       await page.waitForTimeout(600);
       await shot('07-browser');
-      await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: 'Chats' }).click();
+      await page.keyboard.press('Escape');
+      await openChats(page);
       await page.getByRole('complementary', { name: 'Conversations' }).getByRole('button', { name: /^Bravo conversation/ }).first().click();
       await expect(page.getByRole('article', { name: 'Response' })).toContainText('I am waiting for approval.');
       await page.waitForTimeout(400);

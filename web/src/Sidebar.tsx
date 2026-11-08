@@ -1,17 +1,17 @@
 import { parseProjects } from './responses';
 import { APP_NAME } from './brand';
-import { useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { motion, useReducedMotion } from 'motion/react';
 import { Virtuoso } from 'react-virtuoso';
-import { Archive, ArrowDownUp, ChevronLeft, ChevronRight, Ellipsis, EyeOff, Grid2X2, List, Pin, PinOff, Plus, Search, Settings2, SquarePen, Trash2, X } from 'lucide-react';
+import { Archive, ArrowDownUp, ChevronRight, Ellipsis, EyeOff, Grid2X2, LayoutGrid, List, PanelLeft, Pin, PinOff, Plus, Search, Settings2, SquarePen, Trash2, X } from 'lucide-react';
 import type { ChatSession, SessionSettings, UseChat } from './types';
 import type { SessionMenuTarget } from './SessionMenu';
 import { tokens } from './tokens.stylex';
 import { DEFAULT_RECENT_CHAT_LIMIT, ICON_STROKE, SESSION_CHANGE_EVENT, BrowserIcon, IconButton, styles as ui } from './ui';
 import { Button } from './Button';
 import { useAutoRefresh } from './useAutoRefresh';
-import { TabBar, TabContext, useIsPhone } from './TabBar';
+import { useIsPhone } from './TabBar';
 
 const NATIVE_PAGE_SIZE = 50;
 const NATIVE_REFRESH_INTERVAL_MS = 5_000;
@@ -21,13 +21,12 @@ type SidebarSession = ChatSession & { archived?: boolean; projectId?: string; st
 type SidebarRow = { kind: 'heading'; group: string } | { kind: 'session'; session: SidebarSession } | { kind: 'pins'; sessions: SidebarSession[] } | { kind: 'more' };
 const SWIPE_ACTION_WIDTH = 74;
 
-export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen, onSettings, onBrowser, onMenu, onDelete }: {
-  chat: UseChat; isDrawer?: boolean; onClose?: () => void; onNew: () => void; onNewIncognito?: () => void; onOpen: (id: string) => void; onSettings: () => void; onBrowser: () => void; onMenu: (target: SessionMenuTarget) => void; onDelete?: (session: { id: string; title: string }) => void;
+export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen, onSettings, onBrowser, onWorkspace, onMenu, onDelete }: {
+  chat: UseChat; isDrawer?: boolean; onClose?: () => void; onNew: () => void; onNewIncognito?: () => void; onOpen: (id: string) => void; onSettings: () => void; onBrowser: () => void; onWorkspace?: () => void; onMenu: (target: SessionMenuTarget) => void; onDelete?: (session: { id: string; title: string }) => void;
 }) {
   const shouldReduceMotion = useReducedMotion();
-  const tabs = useContext(TabContext);
   const isPhone = useIsPhone();
-  const isPage = !!isDrawer && !!tabs && isPhone;
+  const isPage = !!isDrawer && isPhone;
   const [swipedId, setSwipedId] = useState<string>();
   const [isShowingAll, setShowingAll] = useState(false);
   const [recentLimit, setRecentLimit] = useState(DEFAULT_RECENT_CHAT_LIMIT);
@@ -196,7 +195,7 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen
     event.preventDefault(); onMenu(target);
   }}>
     {isPage ? <>
-      <div {...stylex.props(styles.pageBar)}><IconButton label="Close conversations" onClick={onClose}><ChevronLeft size={24} strokeWidth={ICON_STROKE} /></IconButton><span {...stylex.props(styles.pageActions)}>{onNewIncognito && <IconButton label="New incognito chat" onClick={onNewIncognito}><EyeOff size={20} strokeWidth={ICON_STROKE} /></IconButton>}<IconButton label="New chat" onClick={onNew}><SquarePen size={21} strokeWidth={ICON_STROKE} /></IconButton></span></div>
+      <div {...stylex.props(styles.pageBar)}><IconButton label="Close conversations" isGlass onClick={onClose}><PanelLeft size={20} strokeWidth={ICON_STROKE} /></IconButton><span {...stylex.props(styles.pageActions)}>{onNewIncognito && <IconButton label="New incognito chat" isGlass onClick={onNewIncognito}><EyeOff size={19} strokeWidth={ICON_STROKE} /></IconButton>}<IconButton label="New chat" isGlass onClick={onNew}><SquarePen size={19} strokeWidth={ICON_STROKE} /></IconButton></span></div>
       <h1 {...stylex.props(styles.largeTitle)}>Chats</h1>
     </> : <>
       <div {...stylex.props(styles.top)}><span {...stylex.props(styles.brand)}><img src="/icons/mark.svg" width={24} height={24} alt="" aria-hidden="true" />{APP_NAME}</span>{isDrawer && <IconButton label="Close conversations" onClick={onClose}><X size={22} strokeWidth={ICON_STROKE} /></IconButton>}</div>
@@ -233,7 +232,7 @@ export function Sidebar({ chat, isDrawer, onClose, onNew, onNewIncognito, onOpen
       {!rows.length && <p role="status" {...stylex.props(styles.empty)}>{isLoadingNative ? 'Loading conversations…' : nativeError ? 'Could not load conversations.' : chat.isLoadingSessions ? 'Loading conversations…' : chat.authError ? 'Connect in Settings to see your conversations.' : chat.searchQuery ? 'No matching conversations' : view === 'archived' ? 'No archived conversations.' : 'Your conversations will appear here.'}</p>}
     </div>
     {(!chat.searchQuery.trim() && (isShowingAll || recentSessions.length > recentLimit || chat.hasMore) ) && (isPage ? <button type="button" {...stylex.props(styles.pageShowAll)} aria-expanded={isShowingAll} onClick={() => { setShowingAll(current => !current); setView('active'); setProjectId(''); setStatusFilter(''); }}>{isShowingAll ? 'Show recent' : 'Show all'}<ChevronRight size={16} aria-hidden="true" /></button> : <Button {...stylex.props(styles.showAll)} aria-expanded={isShowingAll} onClick={() => { setShowingAll(current => !current); setView('active'); setProjectId(''); setStatusFilter(''); }}>{isShowingAll ? 'Show recent' : 'Show all'}<ChevronRight size={16} aria-hidden="true" /></Button>)}
-    {isPage ? <TabBar /> : <div {...stylex.props(styles.bottom)}><button {...stylex.props(styles.nav)} onClick={onBrowser}><BrowserIcon size={19} />Browser</button><button {...stylex.props(styles.nav)} onClick={onSettings}><Settings2 size={19} strokeWidth={ICON_STROKE} />Settings<span {...stylex.props(styles.connection, chat.isConnected && styles.connected)} role="img" aria-label={chat.isConnected ? 'Connected' : 'Disconnected'} /></button></div>}
+    {isPage ? <nav aria-label="App" {...stylex.props(styles.pageFooter)}><button type="button" {...stylex.props(styles.footerButton)} onClick={onSettings}><Settings2 size={21} strokeWidth={ICON_STROKE} aria-hidden="true" /><span>Settings</span></button>{onWorkspace && <button type="button" {...stylex.props(styles.footerButton)} onClick={onWorkspace}><LayoutGrid size={21} strokeWidth={ICON_STROKE} aria-hidden="true" /><span>Workspace</span></button>}<button type="button" {...stylex.props(styles.footerButton)} onClick={onBrowser}><BrowserIcon size={21} /><span>Browser</span></button><span role="status" {...stylex.props(styles.footerStatus)}><span aria-hidden="true" {...stylex.props(styles.footerDot, chat.isConnected && styles.footerDotOn)} />{chat.isConnected ? 'Mac connected' : 'Mac offline'}</span></nav> : <div {...stylex.props(styles.bottom)}><button {...stylex.props(styles.nav)} onClick={onBrowser}><BrowserIcon size={19} />Browser</button><button {...stylex.props(styles.nav)} onClick={onSettings}><Settings2 size={19} strokeWidth={ICON_STROKE} />Settings<span {...stylex.props(styles.connection, chat.isConnected && styles.connected)} role="img" aria-label={chat.isConnected ? 'Connected' : 'Disconnected'} /></button></div>}
   </aside>;
 }
 
@@ -339,6 +338,11 @@ const styles = stylex.create({
   swipeAction: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, borderWidth: 0, color: '#ffffff', fontFamily: tokens.font, fontSize: '.75rem', fontWeight: 600 },
   swipeContent: { position: 'relative', backgroundColor: tokens.canvas, transitionProperty: 'transform', transitionDuration: '.22s', transitionTimingFunction: 'cubic-bezier(.22,1,.36,1)' },
   page: { backgroundColor: tokens.canvas, paddingBottom: 'calc(84px + max(8px, env(safe-area-inset-bottom) - 22px))' },
+  pageFooter: { position: 'absolute', left: 'max(16px, env(safe-area-inset-left))', right: 'max(16px, env(safe-area-inset-right))', bottom: 'max(8px, calc(env(safe-area-inset-bottom) - 22px))', zIndex: 40, display: 'flex', alignItems: 'center', gap: 2, height: 64, padding: '0 8px', borderRadius: 32, backgroundColor: tokens.glass, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.glassBorder, backdropFilter: 'blur(22px) saturate(180%)', WebkitBackdropFilter: 'blur(22px) saturate(180%)' },
+  footerButton: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, minWidth: 64, height: 54, padding: '0 6px', borderWidth: 0, borderRadius: 27, backgroundColor: { default: 'transparent', ':hover': tokens.hover }, color: tokens.muted, fontFamily: tokens.font, fontSize: '.6875rem', fontWeight: 600 },
+  footerStatus: { display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', paddingRight: 8, color: tokens.muted, fontSize: '.75rem', whiteSpace: 'nowrap' },
+  footerDot: { width: 7, height: 7, borderRadius: '50%', backgroundColor: tokens.danger },
+  footerDotOn: { backgroundColor: '#3ccf7d' },
   pageBar: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 52, padding: '4px max(6px, env(safe-area-inset-right)) 0 max(6px, env(safe-area-inset-left))', flexShrink: 0 },
   pageActions: { display: 'flex', alignItems: 'center' },
   largeTitle: { margin: 0, padding: '0 20px 10px', fontSize: '2.125rem', fontWeight: 700, letterSpacing: '-.6px', lineHeight: 1.15, flexShrink: 0 },
