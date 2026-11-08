@@ -57,14 +57,12 @@ test('failed delivery restores the exact multiline draft', async ({ page, mockAs
 });
 
 test('model choice is persisted through the session model API', async ({ page, mockAside }) => {
-  await page.locator('#composer').getByRole('button', { name: 'Add to message' }).click();
-  await page.getByRole('dialog', { name: 'Add to message' }).getByRole('button', { name: 'Model, GPT-6.1 Sol · High' }).click();
+  await page.locator('#header').getByRole('button', { name: 'Model, GPT-6.1 Sol · High' }).click();
   const dialog = page.getByRole('dialog', { name: 'Models' });
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'GPT-6 Luna, openai-codex' }).click();
   await expect(dialog).toHaveCount(0);
 
-  await page.locator('#composer').getByRole('button', { name: 'Add to message' }).click();
-  await expect(page.getByRole('dialog', { name: 'Add to message' }).getByRole('button', { name: 'Model, GPT-6 Luna · Low' })).toBeVisible();
+  await expect(page.locator('#header').getByRole('button', { name: 'Model, GPT-6 Luna · Low' })).toContainText('GPT-6 Luna');
   expect(mockAside.calls.some(call => call.method === 'PUT' && call.path === `/api/sessions/${SESSION_A}/model` && Reflect.get(call.body as object, 'modelId') === 'gpt-6-luna')).toBe(true);
 });

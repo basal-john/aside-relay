@@ -73,11 +73,12 @@ def sniff(raw: bytes, name: str | None = None) -> tuple[str, str] | None:
         try:
             with zipfile.ZipFile(io.BytesIO(raw)) as archive:
                 names = archive.namelist()
-                if "[Content_Types].xml" not in names:
+                if "[Content_Types].xml" in names:
+                    for prefix, kind in _OFFICE_KINDS.items():
+                        if any(item.startswith(prefix) for item in names):
+                            return kind
                     return None
-                for prefix, kind in _OFFICE_KINDS.items():
-                    if any(item.startswith(prefix) for item in names):
-                        return kind
+                return ("application/zip", "zip") if Path(name or "").suffix.lower() == ".zip" else None
         except (OSError, zipfile.BadZipFile):
             return None
     extension = Path(name or "").suffix.lower().lstrip(".")
@@ -101,7 +102,7 @@ def save(raw: bytes, name: str | None = None) -> dict:
         name = Path(name or "photo").stem + ".jpg"
         kind = sniff(raw, name)
     if not kind:
-        raise ValueError("Choose an image, PDF, video, Office document, or UTF-8 text/code file")
+        raise ValueError("Choose an image, PDF, video, Office document, zip archive, or UTF-8 text/code file")
     mime, ext = kind
     digest = hashlib.sha256(raw).hexdigest()[:16]
     fid = f"{digest}.{ext}"

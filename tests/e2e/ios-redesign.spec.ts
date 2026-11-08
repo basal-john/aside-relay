@@ -61,12 +61,21 @@ test.describe('smoke', () => {
     await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('');
   });
 
-  test('the composer shows no model chip, and the top bar, + sheet and chat menu open the model picker', async ({ page }, testInfo) => {
+  test('the + sheet shows only upload actions, and the top bar and chat menu open the model picker', async ({ page }, testInfo) => {
     await page.goto(`/c/${SESSION_A}`);
     await expect(page.locator('#composer').getByRole('button', { name: 'Add to message' })).toBeVisible();
     await expect(page.locator('#composer').getByRole('button', { name: /Choose model|GPT-6/ })).toHaveCount(0);
     await page.locator('#composer').getByRole('button', { name: 'Add to message' }).click();
-    await page.getByRole('dialog', { name: 'Add to message' }).getByRole('button', { name: 'Model, GPT-6.1 Sol · High' }).click();
+    const attach = page.getByRole('dialog', { name: 'Add to message' });
+    for (const name of ['Photos', 'Files Documents, PDFs, zip', 'Folder', 'Tabs, Mac files and skills']) await expect(attach.getByRole('button', { name })).toBeVisible();
+    await expect(attach.getByRole('button', { name: /^Model/ })).toHaveCount(0);
+    await expect(attach.getByPlaceholder('Search tabs, files, and skills')).toHaveCount(0);
+    await attach.getByRole('button', { name: 'Tabs, Mac files and skills' }).click();
+    const picker = page.getByRole('dialog', { name: 'Tabs, Mac files and skills' });
+    await expect(picker.getByPlaceholder('Search tabs, files, and skills')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(picker).toHaveCount(0);
+    await page.locator('#header').getByRole('button', { name: 'Model, GPT-6.1 Sol · High' }).click();
     const dialog = page.locator('[data-app-dialog]');
     await expect(dialog.getByRole('heading', { name: 'Models' })).toBeVisible();
     await expect(dialog).toHaveAttribute('data-dialog-variant', isPhone(testInfo.project.name) ? 'sheet' : 'card');
@@ -77,18 +86,13 @@ test.describe('smoke', () => {
     await expect(page.locator('[data-app-dialog]').getByRole('heading', { name: 'Models' })).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.locator('[data-app-dialog]')).toHaveCount(0);
-    const headerModel = page.locator('#header').getByRole('button', { name: 'Model, GPT-6.1 Sol · High' });
-    await expect(headerModel).toContainText('GPT-6.1 Sol');
-    await headerModel.click();
-    await expect(page.locator('[data-app-dialog]').getByRole('heading', { name: 'Models' })).toBeVisible();
+    await expect(page.locator('#header').getByRole('button', { name: 'Model, GPT-6.1 Sol · High' })).toContainText('GPT-6.1 Sol');
   });
 
   test('a new chat uses the model chosen last time', async ({ page }) => {
     await page.addInitScript(() => { localStorage.setItem('asideModel', 'openai-codex/gpt-6-luna'); localStorage.setItem('asideThinkingLevel', 'low'); });
     await page.goto('/');
     await expect(page.locator('#header').getByRole('button', { name: 'Model, GPT-6 Luna · Low' })).toContainText('GPT-6 Luna');
-    await page.locator('#composer').getByRole('button', { name: 'Add to message' }).click();
-    await expect(page.getByRole('dialog', { name: 'Add to message' }).getByRole('button', { name: 'Model, GPT-6 Luna · Low' })).toBeVisible();
   });
 
   test('the Chats drawer footer opens Settings, Workspace and Browser, and there is no tab bar', async ({ page }, testInfo) => {
@@ -328,8 +332,7 @@ test.describe('visual capture', () => {
       await page.goto(`/c/${SESSION_A}`);
       await expect(page.getByRole('article', { name: 'Response' })).toContainText('Hello from the assistant.');
       await shot('02-chat');
-      await page.locator('#composer').getByRole('button', { name: 'Add to message' }).click();
-      await page.getByRole('dialog', { name: 'Add to message' }).getByRole('button', { name: /^Model, / }).click();
+      await page.locator('#header').getByRole('button', { name: /^Model, / }).click();
       await expect(page.locator('[data-app-dialog]').getByRole('heading', { name: 'Models' })).toBeVisible();
       await page.waitForTimeout(400);
       await shot('03-model-sheet');

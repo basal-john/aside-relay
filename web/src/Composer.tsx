@@ -5,9 +5,9 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { tokens } from './tokens.stylex';
 import { ICON_STROKE, OPEN_DIALOG_SELECTOR, BrowserIcon, IconButton, styles as ui } from './ui';
 import type { RunOptions, UploadAttachment, UseChat } from './types';
-import { modelLabel, type useModelSelection } from './ModelPicker';
+import type { useModelSelection } from './ModelPicker';
 import { useIsPhone } from './TabBar';
-import { ContextPicker, parseSkills, type ContextReference, type ContextSkill } from './ContextPicker';
+import { AttachSheet, ContextPicker, parseSkills, type ContextReference, type ContextSkill } from './ContextPicker';
 import { SlashMenu } from './SlashMenu';
 import {
   filterSlashItems,
@@ -32,8 +32,8 @@ const MAX_ATTACHMENTS = 12;
 const COMPACT_DRAFT_HEIGHT = 28;
 const MAX_DRAFT_HEIGHT = 160;
 
-export function Composer({ chat, modelSelection, starter, onBrowser, draft, setDraft, revision, notify, textSize, uiFont, isKeyboardOpen, runOptions, onNewChat, onConfirmClear, onChooseModel }: {
-  chat: UseChat; modelSelection: ReturnType<typeof useModelSelection>; starter?: Starter; onBrowser: () => void; draft: string; setDraft: (value: string) => void; revision: number; notify: (text: string, kind?: 'error' | 'success') => void; textSize: number; uiFont: string; isKeyboardOpen: boolean; runOptions?: RunOptions; onNewChat: () => void; onConfirmClear: () => void; onChooseModel: () => void;
+export function Composer({ chat, modelSelection, starter, onBrowser, draft, setDraft, revision, notify, textSize, uiFont, isKeyboardOpen, runOptions, onNewChat, onConfirmClear }: {
+  chat: UseChat; modelSelection: ReturnType<typeof useModelSelection>; starter?: Starter; onBrowser: () => void; draft: string; setDraft: (value: string) => void; revision: number; notify: (text: string, kind?: 'error' | 'success') => void; textSize: number; uiFont: string; isKeyboardOpen: boolean; runOptions?: RunOptions; onNewChat: () => void; onConfirmClear: () => void;
 }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const footerRef = useRef<HTMLElement>(null);
@@ -41,6 +41,8 @@ export function Composer({ chat, modelSelection, starter, onBrowser, draft, setD
   const isPhone = useIsPhone();
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
+  const cameraInput = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | undefined>(undefined);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [contextChips, setContextChips] = useState<ContextChip[]>([]);
@@ -61,8 +63,9 @@ export function Composer({ chat, modelSelection, starter, onBrowser, draft, setD
     window.addEventListener('aside:preferences-changed', refreshPreference);
     return () => { controller.abort(); window.removeEventListener('aside:preferences-changed', refreshPreference); };
   }, [chat.request, chat.isReady, chat.authError]);
-  const [isAddingContext, setAddingContext] = useState(false);
-  const wantsModelRef = useRef(false);
+  const [addSheet, setAddSheet] = useState<'attach' | 'context'>();
+  const wantsContextRef = useRef(false);
+  const hasCamera = useMemo(() => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches, []);
   const [isDictating, setDictating] = useState(false);
   const [skills, setSkills] = useState<ContextSkill[]>([]);
   const [cursor, setCursor] = useState(0);
@@ -357,7 +360,7 @@ export function Composer({ chat, modelSelection, starter, onBrowser, draft, setD
           <AnimatePresence initial={false} onExitComplete={flushPreviewRevokes}>{attachments.map(attachment => <AttachmentItem key={attachment.key} attachment={attachment} onPreviewUnmount={markSubmittedPreviewUnmounted} onRemove={() => { if (attachment.preview) pendingPreviewRevokesRef.current.push(attachment.preview); attachmentRef.current = attachmentRef.current.filter(item => item.key !== attachment.key); setAttachments(attachmentRef.current); }} />)}</AnimatePresence>
         </motion.div>}
       </AnimatePresence>
-      <div {...stylex.props(styles.inputActions)}><IconButton label="Add to message" aria-haspopup="dialog" disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={() => setAddingContext(true)}><Plus size={22} strokeWidth={ICON_STROKE} /></IconButton>{speechRecognition && <IconButton label={isDictating ? 'Stop dictation' : 'Dictate'} aria-pressed={isDictating} disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={toggleDictation}><Mic size={21} strokeWidth={ICON_STROKE} /></IconButton>}</div>
+      <div {...stylex.props(styles.inputActions)}><IconButton label="Add to message" aria-haspopup="dialog" disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={() => setAddSheet('attach')}><Plus size={22} strokeWidth={ICON_STROKE} /></IconButton>{speechRecognition && <IconButton label={isDictating ? 'Stop dictation' : 'Dictate'} aria-pressed={isDictating} disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={toggleDictation}><Mic size={21} strokeWidth={ICON_STROKE} /></IconButton>}</div>
       <textarea ref={input} id="draft" aria-label="Message" placeholder={chat.authError ? 'Connect in Settings' : chat.isRunning ? 'Follow up' : 'Message'} rows={1} value={draft} disabled={!chat.isReady || chat.isOpening || !!chat.authError} {...stylex.props(styles.input, isExpanded && styles.expandedInput)} onChange={event => { draftRef.current = event.target.value; setDraft(event.target.value); setCursor(event.target.selectionStart); }} onSelect={event => setCursor(event.currentTarget.selectionStart)} onClick={event => setCursor(event.currentTarget.selectionStart)} onKeyUp={event => setCursor(event.currentTarget.selectionStart)} onPaste={event => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); void addFiles(files); } }} onKeyDown={event => {
         if (slashOpen && slashItems.length) {
           if (event.key === 'ArrowDown') { event.preventDefault(); setSlashIndex(index => (index + 1) % slashItems.length); return; }
@@ -371,10 +374,12 @@ export function Composer({ chat, modelSelection, starter, onBrowser, draft, setD
       <div {...stylex.props(styles.submitActions)}>{chat.isRunning && !hasInput
         ? <motion.button key="stop" type="button" aria-label={chat.isStopping ? 'Stopping response' : 'Stop response'} title="Stop response" disabled={chat.isStopping} aria-busy={chat.isStopping} whileTap={shouldReduceMotion ? undefined : { scale: .88 }} {...stylex.props(styles.stop)} onPointerDown={event => { isTouchSubmissionRef.current = false; if (event.pointerType === 'touch') event.preventDefault(); }} onClick={event => { if (event.detail === 0 || !isTouchSubmissionRef.current) void chat.abort(); }}><Square size={13} fill="currentColor" /></motion.button>
         : <motion.button key="send" type="submit" id="send" aria-label={submitLabel} title={submitLabel} disabled={!canSubmit} whileTap={shouldReduceMotion ? undefined : { scale: .88 }} {...stylex.props(styles.send)} onPointerDown={event => { isTouchSubmissionRef.current = event.pointerType === 'touch'; if (isTouchSubmissionRef.current) { event.preventDefault(); void submit(); } }} onClick={event => { if (isTouchSubmissionRef.current && event.detail > 0) event.preventDefault(); }}><ArrowUp size={22} strokeWidth={2.2} /></motion.button>}</div>
-      <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif,image/heic,image/heif,application/pdf,video/mp4,video/quicktime,video/webm,text/*,.md,.json,.xml,.yaml,.yml,.toml,.js,.jsx,.ts,.tsx,.py,.rb,.go,.rs,.java,.kt,.c,.cc,.cpp,.h,.hpp,.docx,.xlsx,.pptx" multiple hidden onChange={event => { void addFiles([...event.target.files || []]); event.target.value = ''; }} />
+      <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif,image/heic,image/heif,application/pdf,video/mp4,video/quicktime,video/webm,text/*,.md,.json,.xml,.yaml,.yml,.toml,.js,.jsx,.ts,.tsx,.py,.rb,.go,.rs,.java,.kt,.c,.cc,.cpp,.h,.hpp,.docx,.xlsx,.pptx,.zip,application/zip" multiple hidden onChange={event => { void addFiles([...event.target.files || []]); event.target.value = ''; }} />
+      <input ref={photoInput} type="file" accept="image/*,video/*" multiple hidden onChange={event => { void addFiles([...event.target.files || []]); event.target.value = ''; }} />
+      <input ref={cameraInput} type="file" accept="image/*" capture="environment" hidden onChange={event => { void addFiles([...event.target.files || []]); event.target.value = ''; }} />
       <input ref={element => { folderInput.current = element; element?.setAttribute('webkitdirectory', ''); }} type="file" multiple hidden onChange={event => { void addFiles([...event.target.files || []]); event.target.value = ''; }} />
     </form>
-    <AnimatePresence onExitComplete={() => { if (!wantsModelRef.current) return; wantsModelRef.current = false; requestAnimationFrame(() => requestAnimationFrame(onChooseModel)); }}>{isAddingContext && <ContextPicker request={chat.request} sessionId={chat.sessionId} onSelect={addContext} onChooseFiles={() => fileInput.current?.click()} onChooseFolder={() => folderInput.current?.click()} model={{ label: modelLabel(modelSelection), onChoose: () => { wantsModelRef.current = true; setAddingContext(false); } }} onClose={() => setAddingContext(false)} />}</AnimatePresence>
+    <AnimatePresence onExitComplete={() => { if (!wantsContextRef.current) return; wantsContextRef.current = false; requestAnimationFrame(() => requestAnimationFrame(() => setAddSheet('context'))); }}>{addSheet === 'attach' && <AttachSheet key="attach" hasCamera={hasCamera} onPhotos={() => photoInput.current?.click()} onCamera={() => cameraInput.current?.click()} onFiles={() => fileInput.current?.click()} onFolder={() => folderInput.current?.click()} onContext={() => { wantsContextRef.current = true; setAddSheet(undefined); }} onClose={() => setAddSheet(undefined)} />}{addSheet === 'context' && <ContextPicker key="context" request={chat.request} sessionId={chat.sessionId} onSelect={addContext} onClose={() => setAddSheet(undefined)} />}</AnimatePresence>
   </footer>;
 }
 

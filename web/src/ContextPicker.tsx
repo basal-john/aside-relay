@@ -3,7 +3,7 @@ import { formatBytes } from './format';
 import type { UseChat } from './types';
 import { useEffect, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { ArrowLeft, Bot, ChevronRight, File, Folder, FolderOpen, Globe2, ImagePlus, Search, Sparkles } from 'lucide-react';
+import { ArrowLeft, AtSign, Camera, ChevronRight, File, Folder, FolderOpen, Globe2, Image as ImageIcon, Search, Sparkles } from 'lucide-react';
 import { Button } from './Button';
 import { Sheet, ICON_STROKE } from './ui';
 import { tokens } from './tokens.stylex';
@@ -16,14 +16,36 @@ type NativeEntry = { name: string; path: string; absolutePath: string; kind: 'fi
 type Tab = { targetId: string; title: string; url: string };
 type PickerLocation = { root: NativeRoot; path: string; sessionId?: string };
 
-export function ContextPicker({ request, sessionId, skills = [], model, onSelect, onChooseFiles, onChooseFolder, onClose }: {
+/** The + sheet: upload actions only, plus one row that opens the Mac tabs, files and skills picker. */
+export function AttachSheet({ hasCamera, onPhotos, onCamera, onFiles, onFolder, onContext, onClose }: {
+  hasCamera: boolean;
+  onPhotos: () => void;
+  onCamera: () => void;
+  onFiles: () => void;
+  onFolder: () => void;
+  onContext: () => void;
+  onClose: () => void;
+}) {
+  const pick = (open: () => void) => () => { open(); onClose(); };
+  return <Sheet title="Add to message" onClose={onClose}>
+    <h2 {...stylex.props(styles.title, styles.attachTitle)}>Add to message</h2>
+    <div {...stylex.props(styles.attachGroup)}>
+      <button type="button" {...stylex.props(styles.attachRow)} onClick={pick(onPhotos)}><ImageIcon size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /><span {...stylex.props(styles.attachLabel)}>Photos</span></button>
+      {hasCamera && <button type="button" {...stylex.props(styles.attachRow)} onClick={pick(onCamera)}><Camera size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /><span {...stylex.props(styles.attachLabel)}>Camera</span></button>}
+      <button type="button" {...stylex.props(styles.attachRow)} onClick={pick(onFiles)}><File size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /><span {...stylex.props(styles.attachLabel)}>Files<small {...stylex.props(styles.attachHint)}>Documents, PDFs, zip</small></span></button>
+      <button type="button" {...stylex.props(styles.attachRow, styles.attachLast)} onClick={pick(onFolder)}><FolderOpen size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /><span {...stylex.props(styles.attachLabel)}>Folder</span></button>
+    </div>
+    <div {...stylex.props(styles.attachGroup)}>
+      <button type="button" {...stylex.props(styles.attachRow, styles.attachLast)} onClick={onContext}><AtSign size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /><span {...stylex.props(styles.attachLabel)}>Tabs, Mac files and skills</span><ChevronRight size={18} strokeWidth={ICON_STROKE} aria-hidden="true" {...stylex.props(styles.attachChevron)} /></button>
+    </div>
+  </Sheet>;
+}
+
+export function ContextPicker({ request, sessionId, skills = [], onSelect, onClose }: {
   request: UseChat['request'];
   sessionId?: string;
   skills?: ContextSkill[];
-  model?: { label: string; onChoose: () => void };
   onSelect: (reference: ContextReference) => void;
-  onChooseFiles: () => void;
-  onChooseFolder: () => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState('');
@@ -95,15 +117,13 @@ export function ContextPicker({ request, sessionId, skills = [], model, onSelect
     setQuery(''); setEntries([]); setError(''); setLoadingEntries(!!next); setLocation(next);
   }
 
-  return <Sheet title="Add to message" onClose={onClose} isWide>
+  return <Sheet title="Tabs, Mac files and skills" onClose={onClose} isWide>
     <div {...stylex.props(styles.header)}>
       <div {...stylex.props(styles.titleRow)}>{activeLocation && <button type="button" aria-label="Back" {...stylex.props(styles.iconButton)} onClick={() => {
         if (!activeLocation.path) { openLocation(); return; }
         openLocation({ ...activeLocation, path: activeLocation.path.split('/').slice(0, -1).join('/') });
-      }}><ArrowLeft size={20} strokeWidth={ICON_STROKE} /></button>}<div><h2 {...stylex.props(styles.title)}>{activeLocation ? activeLocation.root.name : 'Add to message'}</h2>{activeLocation?.path && <p {...stylex.props(styles.path)}>{activeLocation.path}</p>}</div></div>
-      <div {...stylex.props(styles.actions)}><Button size="compact" onClick={() => { onChooseFiles(); onClose(); }}><ImagePlus size={17} />Upload files</Button><Button size="compact" onClick={() => { onChooseFolder(); onClose(); }}><FolderOpen size={17} />Upload folder</Button></div>
+      }}><ArrowLeft size={20} strokeWidth={ICON_STROKE} /></button>}<div><h2 {...stylex.props(styles.title)}>{activeLocation ? activeLocation.root.name : 'Tabs, Mac files and skills'}</h2>{activeLocation?.path && <p {...stylex.props(styles.path)}>{activeLocation.path}</p>}</div></div>
     </div>
-    {model && !activeLocation && <button type="button" aria-label={'Model, ' + model.label} {...stylex.props(styles.modelRow)} onClick={model.onChoose}><Bot size={19} strokeWidth={ICON_STROKE} aria-hidden="true" /><span {...stylex.props(styles.rowText)}><strong {...stylex.props(styles.rowTitle)}>Model</strong><small {...stylex.props(styles.rowMeta)}>{model.label}</small></span><ChevronRight size={18} strokeWidth={ICON_STROKE} aria-hidden="true" /></button>}
     <label {...stylex.props(styles.search)}><Search size={18} strokeWidth={ICON_STROKE} aria-hidden="true" /><span {...stylex.props(styles.srOnly)}>Search context</span><input autoFocus value={query} placeholder="Search tabs, files, and skills" {...stylex.props(styles.searchInput)} onChange={event => setQuery(event.target.value)} /></label>
     {error && <p role="status" {...stylex.props(styles.error)}>{error}</p>}
     <div {...stylex.props(styles.list)}>
@@ -147,13 +167,11 @@ const styles = stylex.create({
   titleRow: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 },
   title: { margin: 0, fontSize: '1.125rem', lineHeight: 1.3, color: tokens.text },
   path: { margin: '2px 0 0', maxWidth: 320, color: tokens.muted, fontSize: '.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  actions: { display: 'flex', alignItems: 'center', gap: 6 },
   iconButton: { display: 'grid', placeItems: 'center', width: 40, height: 40, flexShrink: 0, borderWidth: 0, borderRadius: '50%', color: tokens.text, backgroundColor: 'transparent' },
   search: { display: 'flex', alignItems: 'center', gap: 8, minHeight: 44, padding: '0 12px', borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, borderRadius: 14, backgroundColor: tokens.surface, color: tokens.muted },
   searchInput: { width: '100%', minWidth: 0, borderWidth: 0, padding: 0, backgroundColor: 'transparent', color: tokens.text, fontSize: '.9375rem' },
   list: { display: 'flex', flexDirection: 'column', minHeight: 180, maxHeight: 'min(60dvh, 560px)', marginTop: 12, overflowY: 'auto', overscrollBehavior: 'contain' },
   row: { display: 'flex', alignItems: 'center', width: '100%', minHeight: 56, gap: 12, padding: '8px 10px', borderWidth: 0, borderBottomWidth: 1, borderStyle: 'solid', borderColor: tokens.border, backgroundColor: 'transparent', color: tokens.muted, textAlign: 'left' },
-  modelRow: { display: 'flex', alignItems: 'center', width: '100%', minHeight: 56, gap: 12, padding: '8px 12px', marginBottom: 12, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, borderRadius: 14, backgroundColor: tokens.surface, color: tokens.muted, textAlign: 'left' },
   entry: { display: 'flex', alignItems: 'center', width: '100%', minHeight: 56, gap: 6, paddingRight: 8, borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: tokens.border },
   entryMain: { display: 'flex', flex: 1, alignItems: 'center', minWidth: 0, minHeight: 55, gap: 12, padding: '8px 10px', borderWidth: 0, backgroundColor: 'transparent', color: tokens.muted, textAlign: 'left' },
   rowText: { display: 'flex', flex: 1, minWidth: 0, flexDirection: 'column', gap: 2, color: tokens.text, overflow: 'hidden' },
@@ -161,5 +179,12 @@ const styles = stylex.create({
   rowMeta: { fontSize: '.75rem', color: tokens.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   empty: { margin: '24px 0', color: tokens.muted, fontSize: '.875rem', textAlign: 'center' },
   error: { margin: '10px 0 0', color: tokens.danger, fontSize: '.8125rem' },
+  attachTitle: { margin: '0 4px 14px' },
+  attachGroup: { display: 'flex', flexDirection: 'column', marginBottom: 12, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, borderRadius: 14, backgroundColor: tokens.surface, overflow: 'hidden' },
+  attachRow: { display: 'flex', alignItems: 'center', gap: 14, width: '100%', minHeight: 52, padding: '8px 16px', borderWidth: 0, borderBottomWidth: 1, borderStyle: 'solid', borderColor: tokens.border, backgroundColor: { default: 'transparent', ':hover': tokens.hover }, color: tokens.text, fontFamily: tokens.font, textAlign: 'left' },
+  attachLast: { borderBottomWidth: 0 },
+  attachLabel: { display: 'flex', flex: 1, flexDirection: 'column', gap: 1, fontSize: '1.0625rem' },
+  attachHint: { fontSize: '.8125rem', color: tokens.muted },
+  attachChevron: { color: tokens.muted },
   srOnly: { position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', borderWidth: 0 },
 });

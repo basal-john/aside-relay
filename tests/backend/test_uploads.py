@@ -54,6 +54,8 @@ class UploadsTest(support.IsolatedBackendTest):
             ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"),
         )
         self.assertIsNone(uploads.sniff(random_zip, "document.docx"))
+        self.assertEqual(uploads.sniff(random_zip, "project.zip"), ("application/zip", "zip"))
+        self.assertIsNone(uploads.sniff(b"PK\x03\x04not a zip", "project.zip"))
 
     async def test_save_is_bounded_deduplicated_and_metadata_is_canonical(self):
         raw = b"console.log('safe')\n"
