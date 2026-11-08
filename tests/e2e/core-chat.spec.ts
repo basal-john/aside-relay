@@ -56,23 +56,15 @@ test('failed delivery restores the exact multiline draft', async ({ page, mockAs
   await expect(page.getByRole('alert')).toContainText('Something went wrong. Please try again.');
 });
 
-test('model choice is persisted through the session model API', async ({ page, mockAside }, testInfo) => {
-  const composer = page.getByRole('textbox', { name: 'Message' });
-  await composer.fill('Use another model');
-  const viewport = page.viewportSize();
-  if (testInfo.project.name === 'mobile-webkit' && viewport) await page.setViewportSize({ width: viewport.width, height: viewport.height - 240 });
-  const modelButton = page.getByRole('button', { name: /Choose model, GPT-6\.1 Sol, High/ });
-  if (testInfo.project.name === 'mobile-webkit') {
-    const box = await modelButton.boundingBox();
-    expect(box).not.toBeNull();
-    await page.touchscreen.tap(box!.x + box!.width / 2, box!.y + box!.height / 2);
-  } else await modelButton.click();
+test('model choice is persisted through the session model API', async ({ page, mockAside }) => {
+  await page.locator('#composer').getByRole('button', { name: 'Add to message' }).click();
+  await page.getByRole('button', { name: 'Model, GPT-6.1 Sol · High' }).click();
   const dialog = page.getByRole('dialog', { name: 'Models' });
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'GPT-6 Luna, openai-codex' }).click();
+  await expect(dialog).toHaveCount(0);
 
-  await composer.focus();
-  await expect(page.getByRole('button', { name: /Choose model, GPT-6 Luna/ })).toBeVisible();
-  if (viewport) await page.setViewportSize(viewport);
+  await page.locator('#composer').getByRole('button', { name: 'Add to message' }).click();
+  await expect(page.getByRole('button', { name: 'Model, GPT-6 Luna · Low' })).toBeVisible();
   expect(mockAside.calls.some(call => call.method === 'PUT' && call.path === `/api/sessions/${SESSION_A}/model` && Reflect.get(call.body as object, 'modelId') === 'gpt-6-luna')).toBe(true);
 });

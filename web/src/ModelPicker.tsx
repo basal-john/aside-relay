@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { Check, ChevronDown, ChevronRight } from 'lucide-react';
-import { AnimatePresence } from 'motion/react';
+import { Check } from 'lucide-react';
 import { parseModelConfig, parseModels } from './responses';
 import { tokens } from './tokens.stylex';
 import { ICON_STROKE } from './ui';
@@ -101,43 +100,40 @@ function configureModel(model: AvailableModel, current: ModelConfig): ModelConfi
     fastMode: model.supportsFastMode && current.fastMode };
 }
 
-export function ModelPicker({ selection, disabled, isRunning, variant = 'chip' }: {
-  selection: ReturnType<typeof useModelSelection>; disabled: boolean; isRunning: boolean; variant?: 'chip' | 'title';
-}) {
-  const [isOpen, setOpen] = useState(false);
+/** Short label for the current model and reasoning effort, such as "Claude Opus 5.5 · High". */
+export function modelLabel(selection: ReturnType<typeof useModelSelection>) {
   const current = selection.items.find(model => model.id === selection.current?.modelId && model.provider === selection.current.provider);
-  const name = current?.name ?? selection.current?.modelId ?? 'Model';
-  const providers = [...new Set(selection.items.map(model => model.provider))];
-  const thinkingLabel = selection.current && (THINKING_LABELS[selection.current.thinkingLevel] ?? selection.current.thinkingLevel);
-  const close = () => setOpen(false);
-  const open = () => { selection.reload(); setOpen(true); };
+  const name = current?.name ?? selection.current?.modelId;
+  const thinking = selection.current && (THINKING_LABELS[selection.current.thinkingLevel] ?? selection.current.thinkingLevel);
+  return name ? (thinking ? `${name} · ${thinking}` : name) : 'Loading…';
+}
 
-  return <>
-    <button type="button" aria-label={'Choose model, ' + name + (thinkingLabel ? ', ' + thinkingLabel : '')} aria-haspopup="dialog" aria-expanded={isOpen} disabled={disabled || selection.isUpdating} {...stylex.props(variant === 'title' ? styles.titleTrigger : styles.trigger)} onPointerDown={event => { if (event.pointerType === 'touch') { event.preventDefault(); if (!disabled && !selection.isUpdating) open(); } }} onClick={open}>
-      {variant === 'title'
-        ? <><span {...stylex.props(styles.name)}>{name}</span><ChevronRight size={15} strokeWidth={ICON_STROKE} aria-hidden="true" {...stylex.props(styles.titleChevron)} /></>
-        : <><span {...stylex.props(styles.triggerText)}><span {...stylex.props(styles.name)}>{name}</span>{thinkingLabel && <span {...stylex.props(styles.effort)}>{thinkingLabel}</span>}</span><ChevronDown size={13} strokeWidth={ICON_STROKE} aria-hidden="true" /></>}
-    </button>
-    <AnimatePresence>{isOpen && <Dialog key="models" title="Models" onClose={close}>
-      {isRunning && <p {...stylex.props(styles.note)}>Applies to your next response.</p>}
-      {selection.error ? <p role="alert" {...stylex.props(styles.note)}>{selection.error} <Button size="compact" onClick={selection.reload}>Try again</Button></p> : !selection.current && <p role="status" {...stylex.props(styles.note)}>Loading models…</p>}
-      {current && selection.current && <label {...stylex.props(styles.reasoning)}><span>Reasoning effort</span>
-        <select aria-label="Reasoning effort" value={selection.current.thinkingLevel} disabled={disabled || selection.isUpdating} {...stylex.props(styles.effortSelect)} onChange={event => { void selection.select(current, event.target.value); }}>
-          {current.thinkingLevels.map(level => <option key={level} value={level}>{THINKING_LABELS[level] ?? level}</option>)}
-        </select>
-      </label>}
-      {providers.map(provider => <section key={provider} aria-label={provider} {...stylex.props(styles.group)}>
-        <h3 {...stylex.props(styles.provider)}>{provider === 'openai-codex' ? 'OpenAI Codex' : provider === 'aside' ? 'Aside' : provider}</h3>
-        {sortModels(selection.items.filter(model => model.provider === provider)).map(model => {
-          const isSelected = model.id === selection.current?.modelId && model.provider === selection.current.provider;
-          return <button key={model.id} type="button" aria-label={model.name + ', ' + provider} aria-pressed={isSelected} disabled={selection.isUpdating || disabled} {...stylex.props(styles.option, isSelected && styles.selected)} onClick={() => { close(); void selection.select(model); }}>
-            <span {...stylex.props(styles.name)}>{model.name}</span>{isSelected && <Check {...stylex.props(styles.check)} size={19} strokeWidth={ICON_STROKE} aria-hidden="true" />}
-          </button>;
-        })}
-      </section>)}
-      {selection.isUpdating && <p role="status" {...stylex.props(styles.note)}>Updating model settings…</p>}
-    </Dialog>}</AnimatePresence>
-  </>;
+/** The Models sheet. The choice is saved on the device and used for every new chat until it is changed here. */
+export function ModelSheet({ selection, disabled, isRunning, onClose }: {
+  selection: ReturnType<typeof useModelSelection>; disabled: boolean; isRunning: boolean; onClose: () => void;
+}) {
+  const current = selection.items.find(model => model.id === selection.current?.modelId && model.provider === selection.current.provider);
+  const providers = [...new Set(selection.items.map(model => model.provider))];
+
+  return <Dialog key="models" title="Models" onClose={onClose}>
+    {isRunning && <p {...stylex.props(styles.note)}>Applies to your next response.</p>}
+    {selection.error ? <p role="alert" {...stylex.props(styles.note)}>{selection.error} <Button size="compact" onClick={selection.reload}>Try again</Button></p> : !selection.current && <p role="status" {...stylex.props(styles.note)}>Loading models…</p>}
+    {current && selection.current && <label {...stylex.props(styles.reasoning)}><span>Reasoning effort</span>
+      <select aria-label="Reasoning effort" value={selection.current.thinkingLevel} disabled={disabled || selection.isUpdating} {...stylex.props(styles.effortSelect)} onChange={event => { void selection.select(current, event.target.value); }}>
+        {current.thinkingLevels.map(level => <option key={level} value={level}>{THINKING_LABELS[level] ?? level}</option>)}
+      </select>
+    </label>}
+    {providers.map(provider => <section key={provider} aria-label={provider} {...stylex.props(styles.group)}>
+      <h3 {...stylex.props(styles.provider)}>{provider === 'openai-codex' ? 'OpenAI Codex' : provider === 'aside' ? 'Aside' : provider}</h3>
+      {sortModels(selection.items.filter(model => model.provider === provider)).map(model => {
+        const isSelected = model.id === selection.current?.modelId && model.provider === selection.current.provider;
+        return <button key={model.id} type="button" aria-label={model.name + ', ' + provider} aria-pressed={isSelected} disabled={selection.isUpdating || disabled} {...stylex.props(styles.option, isSelected && styles.selected)} onClick={() => { onClose(); void selection.select(model); }}>
+          <span {...stylex.props(styles.name)}>{model.name}</span>{isSelected && <Check {...stylex.props(styles.check)} size={19} strokeWidth={ICON_STROKE} aria-hidden="true" />}
+        </button>;
+      })}
+    </section>)}
+    {selection.isUpdating && <p role="status" {...stylex.props(styles.note)}>Updating model settings…</p>}
+  </Dialog>;
 }
 
 function sortModels(models: AvailableModel[]) {
@@ -148,12 +144,7 @@ function sortModels(models: AvailableModel[]) {
 }
 
 const styles = stylex.create({
-  trigger: { position: 'relative', '::after': { content: '""', position: 'absolute', inset: '-6px 0' }, display: 'flex', alignItems: 'center', gap: 6, minHeight: 44, maxWidth: 230, minWidth: 0, padding: '0 8px', borderWidth: 0, borderRadius: 16, backgroundColor: { default: 'transparent', ':hover': tokens.hover }, color: tokens.text, fontFamily: tokens.font, fontSize: '.9375rem', pointerEvents: 'auto', '@media (max-width: 375px)': { maxWidth: 180 } },
-  titleTrigger: { display: 'flex', alignItems: 'center', gap: 3, minHeight: 44, maxWidth: 'min(60vw, 320px)', minWidth: 0, padding: '0 8px', borderWidth: 0, borderRadius: 12, backgroundColor: { default: 'transparent', ':hover': tokens.hover }, color: tokens.text, fontFamily: tokens.font, fontSize: '1.0625rem', fontWeight: 650, letterSpacing: '-.2px' },
-  titleChevron: { color: tokens.muted, flexShrink: 0 },
   name: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 },
-  triggerText: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 },
-  effort: { fontSize: '.875rem', color: tokens.muted, flexShrink: 0 },
   note: { color: tokens.muted, fontSize: '0.8125rem', lineHeight: 1.5, margin: '0 0 14px' },
   group: { marginBottom: 16 },
   reasoning: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '0 12px', marginBottom: 20, color: tokens.muted, fontSize: '0.8125rem' },

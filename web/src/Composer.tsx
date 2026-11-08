@@ -5,7 +5,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { tokens } from './tokens.stylex';
 import { ICON_STROKE, OPEN_DIALOG_SELECTOR, BrowserIcon, IconButton, styles as ui } from './ui';
 import type { RunOptions, UploadAttachment, UseChat } from './types';
-import { ModelPicker, type useModelSelection } from './ModelPicker';
+import { modelLabel, type useModelSelection } from './ModelPicker';
 import { useIsPhone } from './TabBar';
 import { ContextPicker, parseSkills, type ContextReference, type ContextSkill } from './ContextPicker';
 import { SlashMenu } from './SlashMenu';
@@ -32,8 +32,8 @@ const MAX_ATTACHMENTS = 12;
 const COMPACT_DRAFT_HEIGHT = 28;
 const MAX_DRAFT_HEIGHT = 160;
 
-export function Composer({ chat, modelSelection, starter, onBrowser, draft, setDraft, revision, notify, textSize, uiFont, isKeyboardOpen, runOptions, onNewChat, onConfirmClear }: {
-  chat: UseChat; modelSelection: ReturnType<typeof useModelSelection>; starter?: Starter; onBrowser: () => void; draft: string; setDraft: (value: string) => void; revision: number; notify: (text: string, kind?: 'error' | 'success') => void; textSize: number; uiFont: string; isKeyboardOpen: boolean; runOptions?: RunOptions; onNewChat: () => void; onConfirmClear: () => void;
+export function Composer({ chat, modelSelection, starter, onBrowser, draft, setDraft, revision, notify, textSize, uiFont, isKeyboardOpen, runOptions, onNewChat, onConfirmClear, onChooseModel }: {
+  chat: UseChat; modelSelection: ReturnType<typeof useModelSelection>; starter?: Starter; onBrowser: () => void; draft: string; setDraft: (value: string) => void; revision: number; notify: (text: string, kind?: 'error' | 'success') => void; textSize: number; uiFont: string; isKeyboardOpen: boolean; runOptions?: RunOptions; onNewChat: () => void; onConfirmClear: () => void; onChooseModel: () => void;
 }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const footerRef = useRef<HTMLElement>(null);
@@ -62,6 +62,7 @@ export function Composer({ chat, modelSelection, starter, onBrowser, draft, setD
     return () => { controller.abort(); window.removeEventListener('aside:preferences-changed', refreshPreference); };
   }, [chat.request, chat.isReady, chat.authError]);
   const [isAddingContext, setAddingContext] = useState(false);
+  const wantsModelRef = useRef(false);
   const [isDictating, setDictating] = useState(false);
   const [skills, setSkills] = useState<ContextSkill[]>([]);
   const [cursor, setCursor] = useState(0);
@@ -356,7 +357,7 @@ export function Composer({ chat, modelSelection, starter, onBrowser, draft, setD
           <AnimatePresence initial={false} onExitComplete={flushPreviewRevokes}>{attachments.map(attachment => <AttachmentItem key={attachment.key} attachment={attachment} onPreviewUnmount={markSubmittedPreviewUnmounted} onRemove={() => { if (attachment.preview) pendingPreviewRevokesRef.current.push(attachment.preview); attachmentRef.current = attachmentRef.current.filter(item => item.key !== attachment.key); setAttachments(attachmentRef.current); }} />)}</AnimatePresence>
         </motion.div>}
       </AnimatePresence>
-      <div {...stylex.props(styles.inputActions)}><IconButton label="Add to message" aria-haspopup="dialog" disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={() => setAddingContext(true)}><Plus size={22} strokeWidth={ICON_STROKE} /></IconButton>{speechRecognition && <IconButton label={isDictating ? 'Stop dictation' : 'Dictate'} aria-pressed={isDictating} disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={toggleDictation}><Mic size={21} strokeWidth={ICON_STROKE} /></IconButton>}<ModelPicker selection={modelSelection} disabled={!chat.isReady || chat.isOpening || chat.isSending || !!chat.authError} isRunning={chat.isRunning} /></div>
+      <div {...stylex.props(styles.inputActions)}><IconButton label="Add to message" aria-haspopup="dialog" disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={() => setAddingContext(true)}><Plus size={22} strokeWidth={ICON_STROKE} /></IconButton>{speechRecognition && <IconButton label={isDictating ? 'Stop dictation' : 'Dictate'} aria-pressed={isDictating} disabled={!chat.isReady || chat.isOpening || !!chat.authError} onClick={toggleDictation}><Mic size={21} strokeWidth={ICON_STROKE} /></IconButton>}</div>
       <textarea ref={input} id="draft" aria-label="Message" placeholder={chat.authError ? 'Connect in Settings' : chat.isRunning ? 'Follow up' : 'Message'} rows={1} value={draft} disabled={!chat.isReady || chat.isOpening || !!chat.authError} {...stylex.props(styles.input, isExpanded && styles.expandedInput)} onChange={event => { draftRef.current = event.target.value; setDraft(event.target.value); setCursor(event.target.selectionStart); }} onSelect={event => setCursor(event.currentTarget.selectionStart)} onClick={event => setCursor(event.currentTarget.selectionStart)} onKeyUp={event => setCursor(event.currentTarget.selectionStart)} onPaste={event => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); void addFiles(files); } }} onKeyDown={event => {
         if (slashOpen && slashItems.length) {
           if (event.key === 'ArrowDown') { event.preventDefault(); setSlashIndex(index => (index + 1) % slashItems.length); return; }
@@ -373,7 +374,7 @@ export function Composer({ chat, modelSelection, starter, onBrowser, draft, setD
       <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif,image/heic,image/heif,application/pdf,video/mp4,video/quicktime,video/webm,text/*,.md,.json,.xml,.yaml,.yml,.toml,.js,.jsx,.ts,.tsx,.py,.rb,.go,.rs,.java,.kt,.c,.cc,.cpp,.h,.hpp,.docx,.xlsx,.pptx" multiple hidden onChange={event => { void addFiles([...event.target.files || []]); event.target.value = ''; }} />
       <input ref={element => { folderInput.current = element; element?.setAttribute('webkitdirectory', ''); }} type="file" multiple hidden onChange={event => { void addFiles([...event.target.files || []]); event.target.value = ''; }} />
     </form>
-    <AnimatePresence>{isAddingContext && <ContextPicker request={chat.request} sessionId={chat.sessionId} onSelect={addContext} onChooseFiles={() => fileInput.current?.click()} onChooseFolder={() => folderInput.current?.click()} onClose={() => setAddingContext(false)} />}</AnimatePresence>
+    <AnimatePresence onExitComplete={() => { if (!wantsModelRef.current) return; wantsModelRef.current = false; requestAnimationFrame(() => requestAnimationFrame(onChooseModel)); }}>{isAddingContext && <ContextPicker request={chat.request} sessionId={chat.sessionId} onSelect={addContext} onChooseFiles={() => fileInput.current?.click()} onChooseFolder={() => folderInput.current?.click()} model={{ label: modelLabel(modelSelection), onChoose: () => { wantsModelRef.current = true; setAddingContext(false); } }} onClose={() => setAddingContext(false)} />}</AnimatePresence>
   </footer>;
 }
 
@@ -423,7 +424,7 @@ async function resizeImage(file: File) {
 }
 
 const styles = stylex.create({
-  footer: { position: 'absolute', bottom: 0, left: 0, width: '100%', zIndex: 3, backgroundColor: 'var(--composer-footer-bg, var(--canvas))', padding: '6px max(12px, env(safe-area-inset-right)) var(--composer-bottom-padding, max(8px, calc(env(safe-area-inset-bottom) - 20px))) max(12px, env(safe-area-inset-left))' },
+  footer: { position: 'absolute', bottom: 0, left: 0, width: '100%', zIndex: 3, backgroundColor: 'var(--composer-footer-bg, var(--canvas))', padding: '6px max(12px, env(safe-area-inset-right)) var(--composer-bottom-padding, max(12px, env(safe-area-inset-bottom))) max(12px, env(safe-area-inset-left))' },
   expandedFooter: { paddingLeft: 'max(12px, env(safe-area-inset-left))', paddingRight: 'max(12px, env(safe-area-inset-right))' },
   tools: { display: 'var(--composer-tools-display, none)', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 10, minWidth: 0 },
   composer: { position: 'relative', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', width: '100%', maxWidth: 768, margin: '0 auto', borderRadius: 26, padding: '6px 4px 2px', minWidth: 0, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--composer-border, var(--control-border))', backgroundColor: 'var(--composer-bg, var(--canvas))', backdropFilter: 'blur(18px) saturate(1.2)', WebkitBackdropFilter: 'blur(18px) saturate(1.2)' },

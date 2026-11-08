@@ -3,7 +3,7 @@ import { formatBytes } from './format';
 import type { UseChat } from './types';
 import { useEffect, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { ArrowLeft, File, Folder, FolderOpen, Globe2, ImagePlus, Search, Sparkles } from 'lucide-react';
+import { ArrowLeft, Bot, ChevronRight, File, Folder, FolderOpen, Globe2, ImagePlus, Search, Sparkles } from 'lucide-react';
 import { Button } from './Button';
 import { Sheet, ICON_STROKE } from './ui';
 import { tokens } from './tokens.stylex';
@@ -16,10 +16,11 @@ type NativeEntry = { name: string; path: string; absolutePath: string; kind: 'fi
 type Tab = { targetId: string; title: string; url: string };
 type PickerLocation = { root: NativeRoot; path: string; sessionId?: string };
 
-export function ContextPicker({ request, sessionId, skills = [], onSelect, onChooseFiles, onChooseFolder, onClose }: {
+export function ContextPicker({ request, sessionId, skills = [], model, onSelect, onChooseFiles, onChooseFolder, onClose }: {
   request: UseChat['request'];
   sessionId?: string;
   skills?: ContextSkill[];
+  model?: { label: string; onChoose: () => void };
   onSelect: (reference: ContextReference) => void;
   onChooseFiles: () => void;
   onChooseFolder: () => void;
@@ -102,6 +103,7 @@ export function ContextPicker({ request, sessionId, skills = [], onSelect, onCho
       }}><ArrowLeft size={20} strokeWidth={ICON_STROKE} /></button>}<div><h2 {...stylex.props(styles.title)}>{activeLocation ? activeLocation.root.name : 'Add to message'}</h2>{activeLocation?.path && <p {...stylex.props(styles.path)}>{activeLocation.path}</p>}</div></div>
       <div {...stylex.props(styles.actions)}><Button size="compact" onClick={() => { onChooseFiles(); onClose(); }}><ImagePlus size={17} />Upload files</Button><Button size="compact" onClick={() => { onChooseFolder(); onClose(); }}><FolderOpen size={17} />Upload folder</Button></div>
     </div>
+    {model && !activeLocation && <button type="button" aria-label={'Model, ' + model.label} {...stylex.props(styles.modelRow)} onClick={model.onChoose}><Bot size={19} strokeWidth={ICON_STROKE} aria-hidden="true" /><span {...stylex.props(styles.rowText)}><strong {...stylex.props(styles.rowTitle)}>Model</strong><small {...stylex.props(styles.rowMeta)}>{model.label}</small></span><ChevronRight size={18} strokeWidth={ICON_STROKE} aria-hidden="true" /></button>}
     <label {...stylex.props(styles.search)}><Search size={18} strokeWidth={ICON_STROKE} aria-hidden="true" /><span {...stylex.props(styles.srOnly)}>Search context</span><input autoFocus value={query} placeholder="Search tabs, files, and skills" {...stylex.props(styles.searchInput)} onChange={event => setQuery(event.target.value)} /></label>
     {error && <p role="status" {...stylex.props(styles.error)}>{error}</p>}
     <div {...stylex.props(styles.list)}>
@@ -151,6 +153,7 @@ const styles = stylex.create({
   searchInput: { width: '100%', minWidth: 0, borderWidth: 0, padding: 0, backgroundColor: 'transparent', color: tokens.text, fontSize: '.9375rem' },
   list: { display: 'flex', flexDirection: 'column', minHeight: 180, maxHeight: 'min(60dvh, 560px)', marginTop: 12, overflowY: 'auto', overscrollBehavior: 'contain' },
   row: { display: 'flex', alignItems: 'center', width: '100%', minHeight: 56, gap: 12, padding: '8px 10px', borderWidth: 0, borderBottomWidth: 1, borderStyle: 'solid', borderColor: tokens.border, backgroundColor: 'transparent', color: tokens.muted, textAlign: 'left' },
+  modelRow: { display: 'flex', alignItems: 'center', width: '100%', minHeight: 56, gap: 12, padding: '8px 12px', marginBottom: 12, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.border, borderRadius: 14, backgroundColor: tokens.surface, color: tokens.muted, textAlign: 'left' },
   entry: { display: 'flex', alignItems: 'center', width: '100%', minHeight: 56, gap: 6, paddingRight: 8, borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: tokens.border },
   entryMain: { display: 'flex', flex: 1, alignItems: 'center', minWidth: 0, minHeight: 55, gap: 12, padding: '8px 10px', borderWidth: 0, backgroundColor: 'transparent', color: tokens.muted, textAlign: 'left' },
   rowText: { display: 'flex', flex: 1, minWidth: 0, flexDirection: 'column', gap: 2, color: tokens.text, overflow: 'hidden' },

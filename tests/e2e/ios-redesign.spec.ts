@@ -61,17 +61,27 @@ test.describe('smoke', () => {
     await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('');
   });
 
-  test('the composer model chip opens the model picker', async ({ page }, testInfo) => {
+  test('the composer shows no model chip, and the + sheet and chat menu open the model picker', async ({ page }, testInfo) => {
     await page.goto(`/c/${SESSION_A}`);
-    await expect(page.locator('#header').getByRole('button', { name: 'Session options' })).toBeVisible();
-    const title = page.locator('#composer').getByRole('button', { name: /Choose model, GPT-6\.1 Sol/ });
-    await expect(title).toBeVisible();
-    await title.click();
+    await expect(page.locator('#composer').getByRole('button', { name: 'Add to message' })).toBeVisible();
+    await expect(page.locator('#composer').getByRole('button', { name: /Choose model|GPT-6/ })).toHaveCount(0);
+    await page.locator('#composer').getByRole('button', { name: 'Add to message' }).click();
+    await page.getByRole('button', { name: 'Model, GPT-6.1 Sol · High' }).click();
     const dialog = page.locator('[data-app-dialog]');
     await expect(dialog.getByRole('heading', { name: 'Models' })).toBeVisible();
     await expect(dialog).toHaveAttribute('data-dialog-variant', isPhone(testInfo.project.name) ? 'sheet' : 'card');
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
+    await page.locator('#header').getByRole('button', { name: 'Session options' }).click();
+    await page.getByRole('menuitem', { name: 'Model' }).click();
+    await expect(page.locator('[data-app-dialog]').getByRole('heading', { name: 'Models' })).toBeVisible();
+  });
+
+  test('a new chat uses the model chosen last time', async ({ page }) => {
+    await page.addInitScript(() => { localStorage.setItem('asideModel', 'openai-codex/gpt-6-luna'); localStorage.setItem('asideThinkingLevel', 'low'); });
+    await page.goto('/');
+    await page.locator('#composer').getByRole('button', { name: 'Add to message' }).click();
+    await expect(page.getByRole('button', { name: 'Model, GPT-6 Luna · Low' })).toBeVisible();
   });
 
   test('the Chats drawer footer opens Settings, Workspace and Browser, and there is no tab bar', async ({ page }, testInfo) => {
@@ -311,7 +321,8 @@ test.describe('visual capture', () => {
       await page.goto(`/c/${SESSION_A}`);
       await expect(page.getByRole('article', { name: 'Response' })).toContainText('Hello from the assistant.');
       await shot('02-chat');
-      await page.locator('#composer').getByRole('button', { name: /Choose model/ }).click();
+      await page.locator('#composer').getByRole('button', { name: 'Add to message' }).click();
+      await page.getByRole('button', { name: /^Model, / }).click();
       await expect(page.locator('[data-app-dialog]').getByRole('heading', { name: 'Models' })).toBeVisible();
       await page.waitForTimeout(400);
       await shot('03-model-sheet');

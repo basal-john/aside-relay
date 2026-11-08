@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { Archive, ArchiveRestore, Check, Copy, Files, FolderInput, Link, Mail, MailOpen, Pencil, Pin, PinOff, Share2, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, Bot, Check, Copy, Files, FolderInput, Link, Mail, MailOpen, Pencil, Pin, PinOff, Share2, Trash2 } from 'lucide-react';
 import type { UseChat } from './types';
 import { parseProjects, parseSessionDetails } from './responses';
 import { PopoverMenu } from './PopoverMenu';
@@ -13,9 +13,10 @@ export type SessionMenuTarget = { id: string; title: string; anchor: HTMLElement
 type Conversation = { id: string; title: string };
 type Project = { id: string; name: string };
 
-export function SessionMenu({ target, chat, onClose, onRename, onDelete, onFiles, notify }: {
+export function SessionMenu({ target, chat, onClose, onRename, onDelete, onFiles, onModel, notify }: {
   target: SessionMenuTarget; chat: UseChat; onClose: () => void; onRename: (session: Conversation) => void; onDelete: (session: Conversation) => void;
   onFiles?: (sessionId: string) => void;
+  onModel?: () => void;
   notify: (text: string, kind?: 'error' | 'success') => void;
 }) {
   const [details, setDetails] = useState<ReturnType<typeof parseSessionDetails>>();
@@ -75,6 +76,7 @@ export function SessionMenu({ target, chat, onClose, onRename, onDelete, onFiles
     <p {...stylex.props(styles.title)}>{title}</p>
     <button type="button" role="menuitem" {...stylex.props(styles.action)} onClick={() => { void updatePinned(); }}>{isPinned ? <PinOff {...stylex.props(styles.pin)} size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /> : <Pin {...stylex.props(styles.pin)} size={20} strokeWidth={ICON_STROKE} aria-hidden="true" />}<span>{isPinned ? 'Unpin conversation' : 'Pin conversation'}</span></button>
     <button type="button" role="menuitem" {...stylex.props(styles.action)} onClick={() => { onClose(); onRename({ id: target.id, title }); }}><Pencil size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /><span>Rename</span></button>
+    {onModel && <button type="button" role="menuitem" {...stylex.props(styles.action)} onClick={() => { onClose(); onModel(); }}><Bot size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /><span>Model</span></button>}
     {onFiles && <button type="button" role="menuitem" {...stylex.props(styles.action)} onClick={() => { onClose(); onFiles(target.id); }}><Files size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /><span>Files &amp; outputs</span></button>}
     <button type="button" role="menuitem" {...stylex.props(styles.action)} disabled={isBusy} onClick={() => { setDialog('project'); }}><FolderInput size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /><span>Move to project</span></button>
     <button type="button" role="menuitem" {...stylex.props(styles.action)} disabled={isBusy} onClick={() => { void mutateNative(isUnread ? '/read' : '/unread', isUnread ? 'Marked as read.' : 'Marked as unread.'); }}>{isUnread ? <MailOpen size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /> : <Mail size={20} strokeWidth={ICON_STROKE} aria-hidden="true" />}<span>{isUnread ? 'Mark as read' : 'Mark as unread'}</span></button>
