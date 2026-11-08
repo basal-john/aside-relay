@@ -70,6 +70,7 @@
   }
   html[data-wallpaper="on"] [data-chat-main][data-chat-view="start"] {
     --header-bg: transparent;
+    --header-blur: none;
     background-image: url('./assets/wallpaper-grain.png'), var(--wp-field);
     background-size: 192px 192px, cover;
     background-position: 0 0, center;
