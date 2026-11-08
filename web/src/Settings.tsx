@@ -7,6 +7,7 @@ import { ICON_STROKE, styles as ui } from './ui';
 import { Button } from './Button';
 import { tokens } from './tokens.stylex';
 import { formatRequestError } from './errors';
+import { loadHaptics, setHaptics, supportsHaptics } from './haptics';
 import { TEXT_SIZES, THEME_PRESETS, UI_FONTS, CODE_FONTS, ACCENT_COLORS, DEFAULT_ACCENT, type Appearance, type ThemeMode } from './theme';
 import { useAutoRefresh } from './useAutoRefresh';
 import type { PushNotifications } from './notifications';
@@ -56,7 +57,7 @@ export function Settings({ chat, notify, notifications, isDarkMode, textSize, on
       <div role="group" aria-label="Primary color presets" {...stylex.props(styles.swatches)}>{ACCENT_COLORS.map(color => <button key={color} type="button" aria-label={'Primary color ' + color} aria-pressed={appearance.accent === color} onClick={() => onAppearanceChange({ ...appearance, accent: color })} {...stylex.props(styles.swatch, appearance.accent === color && styles.selectedSwatch)} style={{ backgroundColor: color }} />)}</div>
       {([{ key: 'uiFont', label: 'UI font', fonts: UI_FONTS }, { key: 'contentFont', label: 'Content font', fonts: UI_FONTS }, { key: 'codeFont', label: 'Code font', fonts: CODE_FONTS }] as const).map(({ key, label, fonts }) => <div key={key} {...stylex.props(styles.statusRow)}><label htmlFor={key}>{label}</label><select id={key} value={appearance[key]} onChange={event => onAppearanceChange({ ...appearance, [key]: event.target.value })} {...stylex.props(styles.textSize)}>{fonts.map(font => <option key={font.id} value={font.id}>{font.name}</option>)}</select></div>)}
       <p {...stylex.props(ui.muted)}>The interface, messages and code can each use a different font.</p></div></section>
-    <section><h3 {...stylex.props(styles.heading)}>App</h3><div {...stylex.props(styles.group)}><p {...stylex.props(ui.muted)}>Reload to pick up an update or recover a stuck screen. Your conversations stay on the Mac.</p><div {...stylex.props(styles.actions)}><Button onClick={() => location.reload()}><RotateCw size={16} aria-hidden="true" />Reload app</Button></div><InstallApp /><ViewportReadout /></div></section>
+    <section><h3 {...stylex.props(styles.heading)}>App</h3><div {...stylex.props(styles.group)}><HapticsSetting /><p {...stylex.props(ui.muted)}>Reload to pick up an update or recover a stuck screen. Your conversations stay on the Mac.</p><div {...stylex.props(styles.actions)}><Button onClick={() => location.reload()}><RotateCw size={16} aria-hidden="true" />Reload app</Button></div><InstallApp /><ViewportReadout /></div></section>
   </div>;
 }
 
@@ -115,3 +116,9 @@ const styles = stylex.create({
   workspace: { display: 'flex', alignItems: 'center', gap: 12, width: '100%', minHeight: 64, padding: '10px 0', borderWidth: 0, borderRadius: 0, backgroundColor: 'transparent', color: tokens.text, textAlign: 'left' },
   workspaceText: { display: 'flex', flex: 1, minWidth: 0, flexDirection: 'column', gap: 2, overflowWrap: 'anywhere' },
 });
+
+function HapticsSetting() {
+  const [isEnabled, setEnabled] = useState(loadHaptics);
+  if (!supportsHaptics()) return null;
+  return <label {...stylex.props(styles.statusRow)}><span>Haptic feedback</span><input type="checkbox" {...{ switch: '' }} checked={isEnabled} onChange={event => { const value = event.currentTarget.checked; setEnabled(value); setHaptics(value); }} /></label>;
+}

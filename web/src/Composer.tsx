@@ -9,6 +9,7 @@ import type { useModelSelection } from './ModelPicker';
 import { useIsPhone } from './TabBar';
 import { AttachSheet, ContextPicker, parseSkills, type ContextReference, type ContextSkill } from './ContextPicker';
 import { SlashMenu } from './SlashMenu';
+import { isHapticTrigger } from './haptics';
 import {
   filterSlashItems,
   parseSubmittedSlash,
@@ -26,6 +27,9 @@ type SpeechRecognitionLike = { continuous: boolean; interimResults: boolean; lan
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
 /** A home-screen starter: text placed in the composer, plus an optional Aside skill attached as a chip. `id` makes repeated taps re-apply. */
+/** A haptic Send tap submits through its click. This submits anyway when iOS drops that click, and stays above WebKit's 400 ms observed-timer limit. */
+const HAPTIC_SEND_BACKSTOP_MS = 450;
+
 export type Starter = { id: number; text: string; skill?: string };
 
 const MAX_ATTACHMENTS = 12;
@@ -96,6 +100,7 @@ export function Composer({ chat, modelSelection, starter, onBrowser, draft, setD
   }, [slashOpen, chat.request, chat.isReady, chat.authError]);
   // A touch submits before iOS can blur the input. Its later click must not send again or activate the replacement Stop button.
   const isTouchSubmissionRef = useRef(false);
+  const hapticSendTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const pendingPreviewRevokesRef = useRef<string[]>([]);
   const submittedPreviewRevokesRef = useRef(new Map<string, { canRevoke: boolean; hasUnmounted: boolean }>());
   const revisionRef = useRef(revision);
@@ -303,6 +308,7 @@ export function Composer({ chat, modelSelection, starter, onBrowser, draft, setD
   }
 
   async function submit() {
+    clearTimeout(hapticSendTimerRef.current);
     const slashSubmit = parseSubmittedSlash(draftRef.current);
     if (slashSubmit && !attachments.some(attachment => attachment.upload) && contextChipsRef.current.length === 0) {
       draftRef.current = ''; setDraft(''); setCursor(0);
@@ -373,7 +379,7 @@ export function Composer({ chat, modelSelection, starter, onBrowser, draft, setD
       }} />
       <div {...stylex.props(styles.submitActions)}>{chat.isRunning && !hasInput
         ? <motion.button key="stop" type="button" aria-label={chat.isStopping ? 'Stopping response' : 'Stop response'} title="Stop response" disabled={chat.isStopping} aria-busy={chat.isStopping} whileTap={shouldReduceMotion ? undefined : { scale: .88 }} {...stylex.props(styles.stop)} onPointerDown={event => { isTouchSubmissionRef.current = false; if (event.pointerType === 'touch') event.preventDefault(); }} onClick={event => { if (event.detail === 0 || !isTouchSubmissionRef.current) void chat.abort(); }}><Square size={13} fill="currentColor" /></motion.button>
-        : <motion.button key="send" type="submit" id="send" aria-label={submitLabel} title={submitLabel} disabled={!canSubmit} whileTap={shouldReduceMotion ? undefined : { scale: .88 }} {...stylex.props(styles.send)} onPointerDown={event => { isTouchSubmissionRef.current = event.pointerType === 'touch'; if (isTouchSubmissionRef.current) { event.preventDefault(); void submit(); } }} onClick={event => { if (isTouchSubmissionRef.current && event.detail > 0) event.preventDefault(); }}><ArrowUp size={22} strokeWidth={2.2} /></motion.button>}</div>
+        : <motion.button key="send" type="submit" id="send" aria-label={submitLabel} title={submitLabel} disabled={!canSubmit} whileTap={shouldReduceMotion ? undefined : { scale: .88 }} {...stylex.props(styles.send)} onPointerDown={event => { isTouchSubmissionRef.current = event.pointerType === 'touch' && !isHapticTrigger(event.target); if (event.pointerType === 'touch') event.preventDefault(); if (isTouchSubmissionRef.current) void submit(); }} onPointerUp={event => { if (event.pointerType === 'touch' && isHapticTrigger(event.target)) { clearTimeout(hapticSendTimerRef.current); hapticSendTimerRef.current = setTimeout(() => { void submit(); }, HAPTIC_SEND_BACKSTOP_MS); } }} onClick={event => { if (isTouchSubmissionRef.current && event.detail > 0) event.preventDefault(); }}><ArrowUp size={22} strokeWidth={2.2} /></motion.button>}</div>
       <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif,image/heic,image/heif,application/pdf,video/mp4,video/quicktime,video/webm,text/*,.md,.json,.xml,.yaml,.yml,.toml,.js,.jsx,.ts,.tsx,.py,.rb,.go,.rs,.java,.kt,.c,.cc,.cpp,.h,.hpp,.docx,.xlsx,.pptx,.zip,application/zip" multiple hidden onChange={event => { void addFiles([...event.target.files || []]); event.target.value = ''; }} />
       <input ref={photoInput} type="file" accept="image/*,video/*" multiple hidden onChange={event => { void addFiles([...event.target.files || []]); event.target.value = ''; }} />
       <input ref={cameraInput} type="file" accept="image/*" capture="environment" hidden onChange={event => { void addFiles([...event.target.files || []]); event.target.value = ''; }} />
