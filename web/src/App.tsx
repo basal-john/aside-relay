@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useSta
 import { createPortal } from 'react-dom';
 import type { VirtuosoHandle } from 'react-virtuoso';
 import * as stylex from '@stylexjs/stylex';
-import { ArrowDown, Check, ChevronDown, CircleAlert, PanelLeft, SquarePen, WifiOff, X } from 'lucide-react';
+import { ArrowDown, Check, ChevronDown, ChevronRight, CircleAlert, PanelLeft, SquarePen, WifiOff, X } from 'lucide-react';
 import { AnimatePresence, MotionConfig, motion, usePresence, useReducedMotion } from 'motion/react';
 import { useChat } from './chat';
 import { isRecord } from './responses';
@@ -17,7 +17,7 @@ import { BrowserLive } from './BrowserLive';
 import { BrowserPanel } from './BrowserPanel';
 import { ImagePreview } from './ImagePreview';
 import { Settings } from './Settings';
-import { ModelSheet, useModelSelection } from './ModelPicker';
+import { ModelSheet, modelLabel, modelName, useModelSelection } from './ModelPicker';
 import { useIsPhone } from './TabBar';
 import { SessionWorkspace, type SessionWorkspaceState } from './SessionWorkspace';
 import { RenameConversation, SessionMenu, type SessionMenuTarget } from './SessionMenu';
@@ -360,7 +360,7 @@ export function App() {
       <div className="sr-only" role="status" aria-atomic="true">{announcement}</div>
       <header ref={headerRef} id="header" {...stylex.props(styles.header)}>
         <div {...stylex.props(styles.headerSide)}><span {...stylex.props(styles.mobileMenu)}><IconButton label="Open conversations" isGlass aria-haspopup="dialog" aria-expanded={isDrawer} onClick={() => { drawerInstantRef.current = false; setDrawer(true); }}><PanelLeft size={20} strokeWidth={ICON_STROKE} aria-hidden="true" /></IconButton></span></div>
-        <div {...stylex.props(styles.heading)}>{chat.sessionId && !chat.authError ? <><h1 className="sr-only">{sessionTitle}</h1><button type="button" title={SESSION_MENU_LABEL} aria-label={SESSION_MENU_LABEL} aria-haspopup="menu" aria-expanded={menuSession?.id === chat.sessionId} disabled={!chat.isReady || chat.isOpening} {...stylex.props(styles.titleButton)} onClick={event => { const id = chat.sessionId; if (menuSession) setMenuSession(undefined); else if (id) setMenuSession({ id, title: sessionTitle, anchor: event.currentTarget }); }}><span {...stylex.props(styles.title)}>{sessionTitle}</span><ChevronDown size={14} strokeWidth={ICON_STROKE} aria-hidden="true" {...stylex.props(styles.titleChevron)} /></button></> : <span className="sr-only">{sessionTitle}</span>}{headerStatus && <span {...stylex.props(styles.subtitle)}>{headerStatus}</span>}</div>
+        <div {...stylex.props(styles.heading)}><button type="button" aria-label={'Model, ' + modelLabel(modelSelection)} aria-haspopup="dialog" aria-expanded={isChoosingModel} disabled={!!chat.authError} {...stylex.props(styles.titleButton, styles.modelButton)} onClick={chooseModel}><span {...stylex.props(styles.title)}>{modelName(modelSelection) ?? 'Aside'}</span><ChevronRight size={15} strokeWidth={ICON_STROKE} aria-hidden="true" {...stylex.props(styles.titleChevron)} /></button>{chat.sessionId && !chat.authError ? <><h1 className="sr-only">{sessionTitle}</h1><button type="button" title={SESSION_MENU_LABEL} aria-label={SESSION_MENU_LABEL} aria-haspopup="menu" aria-expanded={menuSession?.id === chat.sessionId} disabled={!chat.isReady || chat.isOpening} {...stylex.props(styles.titleButton, styles.sessionButton)} onClick={event => { const id = chat.sessionId; if (menuSession) setMenuSession(undefined); else if (id) setMenuSession({ id, title: sessionTitle, anchor: event.currentTarget }); }}><span {...stylex.props(styles.subtitle)}>{headerStatus || sessionTitle}</span><ChevronDown size={12} strokeWidth={ICON_STROKE} aria-hidden="true" {...stylex.props(styles.titleChevron)} /></button></> : <><span className="sr-only">{sessionTitle}</span>{headerStatus && <span {...stylex.props(styles.subtitle)}>{headerStatus}</span>}</>}</div>
         <div {...stylex.props(styles.headerSide, styles.headerActions)}>{isPhone && <IconButton label="Open browser" isGlass aria-haspopup="dialog" onClick={() => openPanel('browser')}><BrowserIcon size={20} /></IconButton>}<IconButton label="New chat" isGlass onClick={newChat}><SquarePen size={19} strokeWidth={ICON_STROKE} aria-hidden="true" /></IconButton></div>
       </header>
       {chat.authError && <div role="alert" {...stylex.props(styles.notice)}><span>Connect to load your conversations.</span><button {...stylex.props(styles.noticeAction)} onClick={() => openPanel('settings')}>Settings</button></div>}
@@ -463,6 +463,8 @@ const styles = stylex.create({
   headerActions: { justifyContent: 'flex-end', gap: 4 },
   titleButton: { display: 'flex', alignItems: 'center', gap: 4, maxWidth: '100%', minWidth: 0, minHeight: 44, padding: '0 8px', borderWidth: 0, borderRadius: 12, backgroundColor: { default: 'transparent', ':hover': tokens.hover }, color: tokens.text, fontFamily: tokens.font },
   titleChevron: { color: tokens.muted, flexShrink: 0 },
+  modelButton: { minHeight: 32 },
+  sessionButton: { minHeight: 22, gap: 2, padding: '0 8px 2px' },
   title: { margin: 0, maxWidth: '100%', fontSize: '1.0625rem', fontWeight: 650, letterSpacing: '-.2px', lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   mobileMenu: { display: 'none', '@media (max-width: 820px)': { display: 'inline-flex' } },
   subtitle: { color: tokens.muted, fontSize: '.75rem', lineHeight: 1.2, marginTop: 1, paddingBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' },

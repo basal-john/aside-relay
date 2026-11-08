@@ -101,9 +101,14 @@ function configureModel(model: AvailableModel, current: ModelConfig): ModelConfi
 }
 
 /** Short label for the current model and reasoning effort, such as "Claude Opus 5.5 · High". */
-export function modelLabel(selection: ReturnType<typeof useModelSelection>) {
+/** The display name of the selected model, or undefined while the catalog loads. */
+export function modelName(selection: ReturnType<typeof useModelSelection>) {
   const current = selection.items.find(model => model.id === selection.current?.modelId && model.provider === selection.current.provider);
-  const name = current?.name ?? selection.current?.modelId;
+  return current?.name ?? selection.current?.modelId;
+}
+
+export function modelLabel(selection: ReturnType<typeof useModelSelection>) {
+  const name = modelName(selection);
   const thinking = selection.current && (THINKING_LABELS[selection.current.thinkingLevel] ?? selection.current.thinkingLevel);
   return name ? (thinking ? `${name} · ${thinking}` : name) : 'Loading…';
 }
