@@ -59,11 +59,16 @@ await Promise.race([
 ]);
 await waitFor(() => document.querySelector('aside[aria-label="Conversations"]')?.textContent.includes('Beta conversation'));
 check('no boot errors', runtimeErrors.length === 0);
+check('launch layer ships in the page with a light and a dark variant', /<div id="boot">[\s\S]*class="boot-light"[\s\S]*class="boot-dark"/.test(html));
+await waitFor(() => !document.getElementById('boot'));
+check('launch layer is removed once the app has rendered', !document.getElementById('boot') && document.getElementById('root').childElementCount > 0);
 check('product title is aside-relay', document.title === PRODUCT_NAME);
 check('Home Screen title is aside-relay', document.querySelector('meta[name="apple-mobile-web-app-title"]')?.content === PRODUCT_NAME);
 check('drawer brand is aside-relay', document.querySelector('aside[aria-label="Conversations"]')?.textContent.includes(PRODUCT_NAME));
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'web/manifest.webmanifest'), 'utf8'));
 check('installation manifest uses aside-relay', manifest.name === PRODUCT_NAME && manifest.short_name === PRODUCT_NAME);
+const startupLinks = [...document.querySelectorAll('link[rel="apple-touch-startup-image"]')];
+check('every launch screen has a light and a dark image that exists on disk', startupLinks.length > 0 && ['light', 'dark'].every(scheme => startupLinks.filter(link => link.media.includes(`(prefers-color-scheme: ${scheme})`)).length === startupLinks.length / 2) && startupLinks.every(link => fs.existsSync(path.join(dist, new URL(link.href).pathname))));
 check('iOS Home Screen app avoids the black-translucent status bar that shortens the page by the status-bar height', !fs.readFileSync(path.join(root, 'web/index.html'), 'utf8').includes('black-translucent'));
 check('conversation list rendered', document.querySelectorAll('aside[aria-label="Conversations"]').length === 1);
 check('launch opens a blank chat behind settings instead of the remembered one', location.pathname === '/settings' && !document.querySelector('[aria-current="page"]') && document.body.textContent.includes('What can I help with?'));
