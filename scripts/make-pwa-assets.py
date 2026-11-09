@@ -28,7 +28,7 @@ STEP = 5.4
 FIELD_RADIUS = 5.2
 DOT_RADIUS = 0.55
 DOT_OPACITY = 0.16
-WAVE_DELAY_S = 0.11
+WAVE_PERIOD_S = 1.4
 
 
 def art(theme: str, attrs: str) -> str:
@@ -41,7 +41,7 @@ def art(theme: str, attrs: str) -> str:
     cx, cy = 50, 150
     dots = "".join(
         f'<circle class="boot-dot" cx="{round(cx + x * STEP, 2):g}" cy="{round(cy + y * STEP, 2):g}" r="{DOT_RADIUS}" fill="{c["ink"]}" '
-        f'opacity="{DOT_OPACITY}" style="animation-delay:{math.hypot(x, y) * WAVE_DELAY_S:.2f}s"/>'
+        f'opacity="{DOT_OPACITY}" style="animation-delay:{math.hypot(x, y) / FIELD_RADIUS * WAVE_PERIOD_S:.2f}s"/>'
         for y in range(-5, 6)
         for x in range(-5, 6)
         if math.hypot(x, y) <= FIELD_RADIUS

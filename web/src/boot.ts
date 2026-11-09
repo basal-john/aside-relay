@@ -1,10 +1,10 @@
 const FADE_FALLBACK_MS = 600;
-const MIN_VISIBLE_MS = 1100;
+const MIN_VISIBLE_MS = 1400;
 
 /**
  * Fades out the launch layer from index.html once React has put its first frame on screen.
  * The layer repeats the iOS launch image, so the hand-off from the launch screen to the app shows no flash.
- * It stays for at least MIN_VISIBLE_MS after navigation start so one dot wave reaches the edge of the field.
+ * It stays for at least MIN_VISIBLE_MS after navigation start, one full period of the dot ripple.
  * Reduce Motion removes it as soon as the app has rendered.
  */
 export function dismissBootScreen(doc: Document = document) {

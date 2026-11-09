@@ -41,3 +41,19 @@ for (const scheme of ['light', 'dark'] as const) {
     expect(share).toBeLessThan(MAX_DIFFERENT_SHARE);
   });
 }
+
+test('the dot ripple plays while the app scripts are still loading', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile-webkit', 'WebKit holds the first paint of a page without text.');
+  await page.route('**/assets/*.js', async route => {
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    await route.continue();
+  });
+  await page.goto('/', { waitUntil: 'commit' });
+  await page.waitForTimeout(1200);
+  const state = await page.evaluate(() => ({
+    rendered: (document.getElementById('root')?.childElementCount ?? 0) > 0,
+    lit: [...document.querySelectorAll('#boot .boot-light .boot-dot')].filter(dot => parseFloat(getComputedStyle(dot).opacity) > 0.2).length,
+  }));
+  expect(state.rendered).toBe(false);
+  expect(state.lit).toBeGreaterThan(0);
+});
