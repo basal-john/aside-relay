@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const MAX_DIFFERENT_SHARE = 0.01;
+const MAX_DIFFERENT_SHARE = 0.001;
 const CHANNEL_TOLERANCE = 8;
 
 for (const scheme of ['light', 'dark'] as const) {

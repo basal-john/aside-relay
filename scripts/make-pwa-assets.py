@@ -4,6 +4,7 @@
 One SVG composition drives both outputs, so the launch image iOS shows and the first frame the page paints are the same picture.
 Requires rsvg-convert (Homebrew librsvg).
 """
+import math
 import re
 import subprocess
 from pathlib import Path
@@ -19,38 +20,36 @@ DEVICES = [
 ]
 
 THEMES = {
-    "light": {"bg": "#ffffff", "halo": 0.30, "ring": 0.20, "shadow": 0.45},
-    "dark": {"bg": "#000000", "halo": 0.42, "ring": 0.30, "shadow": 0.70},
+    "light": {"bg": "#ffffff", "ink": "#171717"},
+    "dark": {"bg": "#000000", "ink": "#f3f3f3"},
 }
+
+STEP = 5.4
+FIELD_RADIUS = 5.2
+DOT_RADIUS = 0.55
+DOT_OPACITY = 0.16
+WAVE_DELAY_S = 0.11
 
 
 def art(theme: str, attrs: str) -> str:
-    """Returns the launch composition in a 100 x 300 box that is cropped to fill any portrait screen."""
+    """Returns the launch composition in a 100 x 300 box that is cropped to fill any portrait screen.
+
+    A round field of faint dots on the app canvas. Each dot carries the delay of the wave that index.html plays over it,
+    so the still image is the first frame of the loading motion.
+    """
     c = THEMES[theme]
-    p = theme[0]
-    t, cx, cy = 27, 50, 150
-    x, y = cx - t / 2, cy - t / 2
-    rings = "".join(
-        f'<circle cx="{cx}" cy="{cy}" r="{t * k:.2f}" fill="none" stroke="#a34dff" stroke-opacity="{c["ring"] * (1.6 - k / 2):.3f}" stroke-width=".22"/>'
-        for k in (1.05, 1.6, 2.25)
+    cx, cy = 50, 150
+    dots = "".join(
+        f'<circle class="boot-dot" cx="{round(cx + x * STEP, 2):g}" cy="{round(cy + y * STEP, 2):g}" r="{DOT_RADIUS}" fill="{c["ink"]}" '
+        f'opacity="{DOT_OPACITY}" style="animation-delay:{math.hypot(x, y) * WAVE_DELAY_S:.2f}s"/>'
+        for y in range(-5, 6)
+        for x in range(-5, 6)
+        if math.hypot(x, y) <= FIELD_RADIUS
     )
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 300" preserveAspectRatio="xMidYMid slice" {attrs}>'
-        f'<defs>'
-        f'<radialGradient id="{p}-halo" cx="{cx}" cy="{cy}" r="85" gradientUnits="userSpaceOnUse">'
-        f'<stop offset="0" stop-color="#a34dff" stop-opacity="{c["halo"]}"/>'
-        f'<stop offset=".45" stop-color="#a34dff" stop-opacity="{c["halo"] * 0.35:.3f}"/>'
-        f'<stop offset="1" stop-color="#a34dff" stop-opacity="0"/></radialGradient>'
-        f'<linearGradient id="{p}-tile" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#bb74ff"/><stop offset="1" stop-color="#8b34f2"/></linearGradient>'
-        f'<linearGradient id="{p}-gloss" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient>'
-        f'<filter id="{p}-shadow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="1.62" stdDeviation="2.43" flood-color="#7a1fe0" flood-opacity="{c["shadow"]}"/></filter>'
-        f'</defs>'
         f'<rect x="-100" y="-100" width="300" height="500" fill="{c["bg"]}"/>'
-        f'<rect x="-100" y="-100" width="300" height="500" fill="url(#{p}-halo)"/>'
-        f'{rings}'
-        f'<rect x="{x}" y="{y}" width="{t}" height="{t}" rx="6.35" fill="url(#{p}-tile)" filter="url(#{p}-shadow)"/>'
-        f'<rect x="{x}" y="{y}" width="{t}" height="{t}" rx="6.35" fill="url(#{p}-gloss)"/>'
-        f'<g transform="translate({x} {y}) scale({t / 64:.6f})">{ARROWS}</g>'
+        f'{dots}'
         f'</svg>'
     )
 
