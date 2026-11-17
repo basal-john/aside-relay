@@ -46,6 +46,7 @@ const STARTERS: { title: string; hint: string; text: string; skill?: string }[] 
   { title: 'Coffee chat', hint: 'peer or cross-team', text: '', skill: 'coffee-call-prep' },
   { title: 'Meeting action items', hint: 'from Wispr Flow', text: 'Give me my action items and the Slack messages I need to send from my Wispr Flow meeting with ' },
   { title: 'QE board check', hint: 'what needs attention', text: 'Check the QE board and tell me which tickets need attention: overdue, out of scope, or ready to close. ' },
+  { title: 'Agent Projects', hint: 'Todoist ideas board', text: 'Check Agent Projects now. Run the board command, reply to every new idea and every new comment from me, start building anything marked go, sign every comment with --as Aside, and run notify once if you posted anything.', skill: 'agent-projects' },
 ];
 type Panel = 'settings' | 'browser' | 'workspace' | 'files';
 const panelsByPath: Record<string, Panel | undefined> = { '/settings': 'settings', '/tabs': 'browser', '/workspace': 'workspace', '/files': 'files' };
