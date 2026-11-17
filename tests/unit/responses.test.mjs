@@ -10,6 +10,7 @@ import {
   parseSessionsResponse,
   parseStartedRun,
   parseUploadAttachment,
+  parseUsage,
 } from '../../web/src/responses.ts'
 
 const invalidResponse = { message: 'Invalid server response.' }
@@ -70,4 +71,23 @@ test('upload responses reject invalid byte counts and field types', () => {
     assert.throws(() => parseUploadAttachment({ ...payload, bytes }), invalidResponse)
   }
   assert.throws(() => parseUploadAttachment({ ...payload, url: null }), invalidResponse)
+})
+
+test('usage responses keep ordered windows and reject out-of-range percents', () => {
+  assert.deepEqual(parseUsage({
+    providerId: 'claude-code',
+    state: 'active',
+    windows: [
+      { kind: 'five_hour', label: '5 hours', usedPercent: 11, resetsAt: '2026-11-12T19:29:59Z' },
+      { kind: 'weekly', label: 'Weekly', usedPercent: 43 },
+    ],
+  }), {
+    providerId: 'claude-code',
+    state: 'active',
+    windows: [
+      { kind: 'five_hour', label: '5 hours', usedPercent: 11, resetsAt: '2026-11-12T19:29:59Z' },
+      { kind: 'weekly', label: 'Weekly', usedPercent: 43, resetsAt: undefined },
+    ],
+  })
+  assert.throws(() => parseUsage({ providerId: 'claude-code', windows: [{ kind: 'weekly', label: 'Weekly', usedPercent: 140 }] }), invalidResponse)
 })

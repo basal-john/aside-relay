@@ -55,7 +55,8 @@
     --header-border: transparent;
     --composer-bg: var(--chrome-glass);
     --composer-border: var(--chrome-glass-border);
-    --composer-footer-bg: transparent;
+    /* Absolute composer footer sits over the transcript. Keep it opaque. */
+    --composer-footer-bg: #06070a;
     --starter-bg: var(--chrome-glass);
     --starter-border: var(--chrome-glass-border);
   }
@@ -68,6 +69,11 @@
     background-repeat: no-repeat, repeat, no-repeat;
     background-blend-mode: normal, multiply, normal;
   }
+  /* Thread view uses a solid composer so keyboard-open transcript cannot bleed through glass. */
+  html[data-wallpaper="on"] [data-chat-main]:not([data-chat-view="start"]) {
+    --composer-bg: #141416;
+    --composer-border: #28282c;
+  }
   html[data-wallpaper="on"] [data-chat-main][data-chat-view="start"] {
     --header-bg: transparent;
     --header-blur: none;
@@ -78,7 +84,7 @@
     background-blend-mode: multiply, normal;
   }
   @media (prefers-reduced-transparency: reduce) {
-    html[data-wallpaper="on"] { --chrome-glass: #0b0c0f; --header-bg: #000000; }
+    html[data-wallpaper="on"] { --chrome-glass: #0b0c0f; --header-bg: #000000; --composer-footer-bg: #06070a; }
   }
   body, button, input, textarea, select { font-family: var(--font-sans); }
   code, pre { font-family: var(--font-code); user-select: text; -webkit-user-select: text; -webkit-touch-callout: default; }

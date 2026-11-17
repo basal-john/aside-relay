@@ -36,6 +36,7 @@ import followups
 import uploads
 import runner
 import sessions
+import usage_routes
 import web_push
 import native_sessions
 import native_files
@@ -102,6 +103,7 @@ app.include_router(native_sessions.projects_router, dependencies=[Auth])
 app.include_router(native_files.router, dependencies=[Auth])
 app.include_router(native_browser.router, dependencies=[Auth])
 app.include_router(native_workspace.router, dependencies=[Auth])
+app.include_router(usage_routes.attach(require_auth))
 
 
 @app.exception_handler(native_queue.NativeQueueError)

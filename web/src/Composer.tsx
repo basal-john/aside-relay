@@ -5,7 +5,8 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { tokens } from './tokens.stylex';
 import { ICON_STROKE, OPEN_DIALOG_SELECTOR, BrowserIcon, IconButton, styles as ui } from './ui';
 import type { RunOptions, UploadAttachment, UseChat } from './types';
-import type { useModelSelection } from './ModelPicker';
+import { modelName, type useModelSelection } from './ModelPicker';
+import { UsageBadge } from './UsageBadge';
 import { useIsPhone } from './TabBar';
 import { AttachSheet, ContextPicker, parseSkills, type ContextReference, type ContextSkill } from './ContextPicker';
 import { SlashMenu } from './SlashMenu';
@@ -377,7 +378,7 @@ export function Composer({ chat, modelSelection, starter, onBrowser, draft, setD
         }
         if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && matchMedia('(pointer: fine)').matches) { event.preventDefault(); void submit(); }
       }} />
-      <div {...stylex.props(styles.submitActions)}>{chat.isRunning && !hasInput
+      <div {...stylex.props(styles.submitActions)}><UsageBadge chat={chat} provider={modelSelection.current?.provider} modelId={modelSelection.current?.modelId} modelName={modelName(modelSelection)} />{chat.isRunning && !hasInput
         ? <motion.button key="stop" type="button" aria-label={chat.isStopping ? 'Stopping response' : 'Stop response'} title="Stop response" disabled={chat.isStopping} aria-busy={chat.isStopping} whileTap={shouldReduceMotion ? undefined : { scale: .88 }} {...stylex.props(styles.stop)} onPointerDown={event => { isTouchSubmissionRef.current = false; if (event.pointerType === 'touch') event.preventDefault(); }} onClick={event => { if (event.detail === 0 || !isTouchSubmissionRef.current) void chat.abort(); }}><Square size={13} fill="currentColor" /></motion.button>
         : <motion.button key="send" type="submit" id="send" aria-label={submitLabel} title={submitLabel} disabled={!canSubmit} whileTap={shouldReduceMotion ? undefined : { scale: .88 }} {...stylex.props(styles.send)} onPointerDown={event => { isTouchSubmissionRef.current = event.pointerType === 'touch' && !isHapticTrigger(event.target); if (event.pointerType === 'touch') event.preventDefault(); if (isTouchSubmissionRef.current) void submit(); }} onPointerUp={event => { if (event.pointerType === 'touch' && isHapticTrigger(event.target)) { clearTimeout(hapticSendTimerRef.current); hapticSendTimerRef.current = setTimeout(() => { void submit(); }, HAPTIC_SEND_BACKSTOP_MS); } }} onClick={event => { if (isTouchSubmissionRef.current && event.detail > 0) event.preventDefault(); }}><ArrowUp size={22} strokeWidth={2.2} /></motion.button>}</div>
       <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif,image/heic,image/heif,application/pdf,video/mp4,video/quicktime,video/webm,text/*,.md,.json,.xml,.yaml,.yml,.toml,.js,.jsx,.ts,.tsx,.py,.rb,.go,.rs,.java,.kt,.c,.cc,.cpp,.h,.hpp,.docx,.xlsx,.pptx,.zip,application/zip" multiple hidden onChange={event => { void addFiles([...event.target.files || []]); event.target.value = ''; }} />

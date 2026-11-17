@@ -110,6 +110,26 @@ test('stale visual viewport values cannot displace the shell after a portrait la
   await expect(draft).toHaveValue('Rotation draft');
 });
 
+test('a layout already shrunk by interactive-widget fills to the layout bottom, not a shorter visualViewport', async ({ page }) => {
+  const screen = requiredViewport(page);
+  const draft = page.getByRole('textbox', { name: 'Message' });
+  await draft.fill('Resized layout draft');
+
+  const keyboard = {
+    width: screen.width,
+    height: screen.height - 300,
+    offsetTop: 0,
+    innerHeight: screen.height - 280,
+    layoutHeight: screen.height - 280,
+  };
+  await setViewport(page, keyboard);
+
+  await expect.poll(() => shellBounds(page)).toMatchObject({ top: 0, height: keyboard.innerHeight });
+  await expect.poll(() => composerBottom(page)).toBeCloseTo(keyboard.innerHeight!, 0);
+  await expect.poll(() => shellBounds(page)).not.toMatchObject({ height: keyboard.height });
+  await expect(draft).toHaveValue('Resized layout draft');
+});
+
 test('a viewport correction that settles after 100ms is reconciled without another viewport event', async ({ page }) => {
   const screen = requiredViewport(page);
   const draft = page.getByRole('textbox', { name: 'Message' });

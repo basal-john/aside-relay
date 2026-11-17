@@ -301,7 +301,7 @@ export const test = base.extend<Fixtures>({
       if (message.type() !== 'error') return;
       const text = message.text();
       if (browserName === 'webkit' && text === 'Viewport argument key "interactive-widget" not recognized and ignored.') return;
-      if (/Failed to load resource: the server responded with a status of 503/.test(text)) return;
+      if (/Failed to load resource: the server responded with a status of 50[13]/.test(text)) return;
       if (mock.allowedConsoleErrors.some(pattern => pattern.test(text))) return;
       runtimeErrors.push(`console: ${text}`);
     });

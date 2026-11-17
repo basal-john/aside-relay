@@ -309,8 +309,16 @@ export function App() {
       const isKeyboardVisible = hasDraftFocus && matchMedia('(pointer: coarse)').matches && expandedHeight - viewport.height > 150;
       setKeyboardOpen(isKeyboardVisible);
       if (isKeyboardVisible) {
-        root.style.height = viewport.height + 'px';
-        root.style.top = viewport.offsetTop + 'px';
+        // interactive-widget=resizes-content already shrinks the layout. Using only
+        // visualViewport.height then leaves a dead band above the keyboard. When the
+        // layout has not been panned (offsetTop ~ 0) and still ends below the visual
+        // viewport, fill to the layout bottom. Otherwise pin to the visual viewport.
+        const top = viewport.offsetTop;
+        const layoutBottom = window.innerHeight;
+        const vvBottom = top + viewport.height;
+        const fillLayout = top <= 0 && layoutBottom > vvBottom + 1;
+        root.style.top = `${top}px`;
+        root.style.height = `${fillLayout ? layoutBottom - top : viewport.height}px`;
       } else {
         root.style.removeProperty('height');
         root.style.removeProperty('top');

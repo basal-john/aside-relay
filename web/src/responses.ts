@@ -219,3 +219,38 @@ export function parseRunStatus(value: unknown) {
 export function parseHealth(value: unknown) {
   return { asideApp: boolean(record(value).asideApp) };
 }
+
+export type UsageWindow = {
+  kind: 'five_hour' | 'weekly' | 'monthly';
+  label: string;
+  usedPercent: number;
+  resetsAt?: string;
+};
+
+export type UsageSnapshot = {
+  providerId?: string;
+  state?: string;
+  windows: UsageWindow[];
+};
+
+export function parseUsage(value: unknown): UsageSnapshot {
+  const item = record(value);
+  const windows = array(item.windows).flatMap((entry): UsageWindow[] => {
+    const window = record(entry);
+    const kind = text(window.kind);
+    if (kind !== 'five_hour' && kind !== 'weekly' && kind !== 'monthly') throw new Error(INVALID_RESPONSE);
+    const usedPercent = number(window.usedPercent);
+    if (!Number.isFinite(usedPercent) || usedPercent < 0 || usedPercent > 100) throw new Error(INVALID_RESPONSE);
+    return [{
+      kind,
+      label: text(window.label),
+      usedPercent: Math.round(usedPercent),
+      resetsAt: optionalText(window.resetsAt),
+    }];
+  });
+  return {
+    providerId: optionalText(item.providerId),
+    state: optionalText(item.state),
+    windows,
+  };
+}
