@@ -1404,7 +1404,11 @@ async def _handle_ws(ws: WebSocket, msg: dict) -> None:
     op = msg.get("op")
     rid = msg.get("requestId")
 
-    if op in ("pong", "ping"):
+    if op == "pong":
+        return
+
+    if op == "ping":
+        await _send(ws, {"op": "pong"})
         return
 
     if op == "sub":

@@ -65,6 +65,8 @@ export class MockAside {
   preferences: Record<string, unknown> = { followUpBehavior: 'queue', sidebarRecentChatLimit: 3, defaultProjectId: null };
   tabs = [{ targetId: BROWSER_TAB_ID, title: BROWSER_TAB_TITLE, url: BROWSER_TAB_URL, active: true, loaded: true, lastAccessed: Date.now() }];
   skills: Array<{ name: string; path: string; description?: string; enabled?: boolean }> = [];
+  socketConnections = 0;
+  answerPings = true;
   private socket?: WebSocketRoute;
   private pendingRun?: { payload: Record<string, unknown>; gate: Gate };
   private delayedNativePage?: { cursor: string; gate: Gate };
@@ -76,6 +78,7 @@ export class MockAside {
   async install() {
     await this.page.routeWebSocket('**/ws', ws => {
       this.socket = ws;
+      this.socketConnections += 1;
       ws.send(JSON.stringify({ op: 'hello', running: [...this.running] }));
       ws.onMessage(message => this.onSocketMessage(String(message)));
     });
@@ -117,6 +120,7 @@ export class MockAside {
   private onSocketMessage(raw: string) {
     const payload = JSON.parse(raw) as Record<string, unknown>;
     this.socketMessages.push(payload);
+    if (payload.op === 'ping' && this.answerPings) this.socket?.send(JSON.stringify({ op: 'pong' }));
     if (payload.op !== 'run' && payload.op !== 'continue') return;
     const pending = { payload, gate: gate() };
     if (this.pauseRuns) {
@@ -205,6 +209,7 @@ export class MockAside {
     if (method === 'GET' && /^\/api\/sessions\/[^/]+\/status$/.test(url.pathname)) return json(route, { running: this.running.has(decodeURIComponent(url.pathname.split('/')[3])) });
     if (method === 'GET' && url.pathname === '/api/models') return json(route, { items: [{ id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', provider: 'openai-codex', thinkingLevels: ['low', 'high'], supportsFastMode: true }, { id: 'gpt-6-luna', name: 'GPT-6 Luna', provider: 'openai-codex', thinkingLevels: ['low'], supportsFastMode: true }], current: { provider: 'openai-codex', modelId: 'gpt-6.1-sol', thinkingLevel: 'high', fastMode: false } });
     if (method === 'PUT' && /^\/api\/sessions\/[^/]+\/model$/.test(url.pathname)) return json(route, body);
+    if (method === 'GET' && url.pathname === '/api/usage') return json(route, { providerId: url.searchParams.get('provider'), state: 'ok', windows: [] });
     if (method === 'GET' && url.pathname === '/api/native/workspace/preferences') return json(route, this.preferences);
     if (method === 'PATCH' && url.pathname === '/api/native/workspace/preferences') { Object.assign(this.preferences, body); return json(route, this.preferences); }
     if (method === 'GET' && url.pathname === '/api/native/projects') return json(route, { items: [{ id: 'project-one-01', name: 'Project One', archivedAt: null }] });

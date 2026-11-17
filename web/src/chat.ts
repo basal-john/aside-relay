@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { formatRequestError } from "./errors"
 import { useAutoRefresh } from "./useAutoRefresh"
 import { SESSION_CHANGE_EVENT } from "./ui"
+import { SOCKET_PROBE_TIMEOUT_MS, SOCKET_WATCHDOG_INTERVAL_MS, isSocketSilent } from "./socketWatchdog"
 import {
   isRecord,
   parseChatMessage,
@@ -237,6 +238,8 @@ export const useChat = (): UseChat => {
   const socketRef = useRef<WebSocket | undefined>(undefined)
   const reconnectTimerRef = useRef<number | undefined>(undefined)
   const reconnectAttemptsRef = useRef(0)
+  const lastSocketMessageAtRef = useRef(0)
+  const socketProbeTimerRef = useRef<number | undefined>(undefined)
   const hasRefreshedSocketAuthRef = useRef(false)
   const tokenSaveRevisionRef = useRef(0)
   const sessionIdRef = useRef<string | undefined>(undefined)
@@ -765,6 +768,7 @@ export const useChat = (): UseChat => {
         sendSocket({ op: "pong" })
         return
       }
+      if (payload.op === "pong") return
       if (payload.op === "hello") {
         setRunningSessionIds((current) => [...new Set([...current, ...(payload.running ?? [])])])
         return
@@ -986,6 +990,7 @@ export const useChat = (): UseChat => {
     socket.onopen = () => {
       if (socketRef.current !== socket) return
       didOpen = true
+      lastSocketMessageAtRef.current = Date.now()
       hasRefreshedSocketAuthRef.current = false
       reconnectAttemptsRef.current = 0
       setIsConnected(true)
@@ -1002,7 +1007,10 @@ export const useChat = (): UseChat => {
         })
       }
     }
-    socket.onmessage = handleSocketMessage
+    socket.onmessage = (event: MessageEvent<string>) => {
+      lastSocketMessageAtRef.current = Date.now()
+      handleSocketMessage(event)
+    }
     socket.onerror = () => undefined
     socket.onclose = (event) => {
       if (socketRef.current !== socket || isUnmountedRef.current) return
@@ -1055,10 +1063,70 @@ export const useChat = (): UseChat => {
           tokenSaveRevision !== tokenSaveRevisionRef.current
         ) return
         const delay = Math.min(20_000, 1_000 * 2 ** reconnectAttemptsRef.current++)
-        reconnectTimerRef.current = window.setTimeout(connectSocket, delay)
+        reconnectTimerRef.current = window.setTimeout(() => {
+          reconnectTimerRef.current = undefined
+          connectSocket()
+        }, delay)
       }
     }
   }, [fetchMessages, handleSocketMessage, recoverPendingRequest, subscribe])
+
+  /** Replaces a socket that stopped delivering messages, through the normal close and reconnect path. */
+  const dropSilentSocket = useCallback((socket: WebSocket) => {
+    if (socketRef.current !== socket) return
+    const handleClose = socket.onclose
+    socket.onclose = null
+    socket.onmessage = null
+    socket.close(4000, "No heartbeat")
+    handleClose?.call(socket, new CloseEvent("close", { code: 4000 }))
+  }, [])
+
+  useEffect(() => {
+    let lastTickAt = Date.now()
+    const watchdog = window.setInterval(() => {
+      const now = Date.now()
+      const socket = socketRef.current
+      const silent = socket?.readyState === WebSocket.OPEN && isSocketSilent({
+        lastMessageAt: lastSocketMessageAtRef.current,
+        lastTickAt,
+        now,
+        visible: document.visibilityState === "visible",
+      })
+      lastTickAt = now
+      if (silent && socket) dropSilentSocket(socket)
+    }, SOCKET_WATCHDOG_INTERVAL_MS)
+
+    const probe = () => {
+      if (document.visibilityState !== "visible" || isUnmountedRef.current) return
+      const socket = socketRef.current
+      if (!socket) {
+        if (reconnectTimerRef.current === undefined) return
+        window.clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = undefined
+        reconnectAttemptsRef.current = 0
+        connectSocket()
+        return
+      }
+      if (socket.readyState !== WebSocket.OPEN) return
+      const sentAt = Date.now()
+      socket.send(JSON.stringify({ op: "ping" }))
+      window.clearTimeout(socketProbeTimerRef.current)
+      socketProbeTimerRef.current = window.setTimeout(() => {
+        if (lastSocketMessageAtRef.current < sentAt) dropSilentSocket(socket)
+      }, SOCKET_PROBE_TIMEOUT_MS)
+    }
+
+    document.addEventListener("visibilitychange", probe)
+    window.addEventListener("online", probe)
+    window.addEventListener("pageshow", probe)
+    return () => {
+      window.clearInterval(watchdog)
+      window.clearTimeout(socketProbeTimerRef.current)
+      document.removeEventListener("visibilitychange", probe)
+      window.removeEventListener("online", probe)
+      window.removeEventListener("pageshow", probe)
+    }
+  }, [connectSocket, dropSilentSocket])
 
   const send = useCallback(
     async (prompt: string, attachments: UploadAttachment[] = [], model?: ModelConfig, options?: RunOptions) => {

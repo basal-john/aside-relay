@@ -62,6 +62,15 @@ class RealtimeWebSocketTests(support.IsolatedBackendTest):
                     "op": "hello", "running": [SESSION_ID],
                 })
 
+    async def test_client_ping_gets_pong_and_server_pong_gets_no_reply(self):
+        with self.client.websocket_connect(
+            "/ws", headers={"authorization": f"Bearer {support.TEST_TOKEN}"}
+        ) as socket:
+            socket.receive_json()
+            socket.send_json({"op": "pong"})
+            socket.send_json({"op": "ping"})
+            self.assertEqual(socket.receive_json(), {"op": "pong"})
+
     async def test_invalid_payload_and_subscription_positions_do_not_disconnect(self):
         subscribe = AsyncMock()
         with patch("server._require_session"), patch.object(server.hub, "subscribe", subscribe):
