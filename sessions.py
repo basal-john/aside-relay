@@ -375,10 +375,18 @@ async def live_sessions() -> list[dict]:
         return []
     items = []
     for line in text.splitlines():
-        match = re.fullmatch(r"([A-Za-z0-9]{12,32})  (\S+)  (ephemeral|persistent)  (.*?)  (\S+)", line)
-        if not match:
-            raise RuntimeError("Unrecognized Aside session list output")
-        sid, status, kind, title, updated = match.groups()
+        if not line.strip() or line.split("\t", 1)[0] == "ID":
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 5 and re.fullmatch(r"(?:[a-z]+-)?[A-Za-z0-9]{12,32}", parts[0]) \
+                and parts[2] in ("ephemeral", "persistent"):
+            sid, status, kind, updated = parts[0], parts[1], parts[2], parts[-1]
+            title = "\t".join(parts[3:-1])
+        else:
+            match = re.fullmatch(r"([A-Za-z0-9]{12,32})  (\S+)  (ephemeral|persistent)  (.*?)  (\S+)", line)
+            if not match:
+                raise RuntimeError("Unrecognized Aside session list output")
+            sid, status, kind, title, updated = match.groups()
         items.append({"id": sid, "status": status, "ephemeral": kind == "ephemeral",
                       "title": title, "updatedAt": updated})
     return items
