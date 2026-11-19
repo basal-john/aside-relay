@@ -32,7 +32,7 @@ test.describe('smoke', () => {
     await rememberLastChat(page);
     await page.goto('/');
     await expectBlankChat(page);
-    await expect(page.getByRole('group', { name: 'Starter prompts' }).getByRole('button')).toHaveCount(7);
+    await expect(page.getByRole('group', { name: 'Starter prompts' }).getByRole('button')).toHaveCount(6);
   });
 
   test('a chat link still opens that chat', async ({ page }) => {
@@ -43,7 +43,7 @@ test.describe('smoke', () => {
 
   test('a starter fills the composer, keeps the cursor at the end and sends nothing', async ({ page, mockAside }) => {
     await page.goto('/');
-    await expect(page.getByRole('group', { name: 'Starter prompts' }).getByRole('button')).toHaveCount(7);
+    await expect(page.getByRole('group', { name: 'Starter prompts' }).getByRole('button')).toHaveCount(6);
     await page.getByRole('button', { name: /Handle a message/ }).click();
     const composer = page.getByRole('textbox', { name: 'Message' });
     await expect(composer).toHaveValue('Handle the Slack message from ');
