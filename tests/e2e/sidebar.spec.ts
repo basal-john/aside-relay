@@ -6,6 +6,16 @@ async function openConversations(page: import('@playwright/test').Page) {
   return page.getByRole('complementary', { name: 'Conversations' });
 }
 
+async function openOptions(sidebar: import('@playwright/test').Locator, title: string, exact = false) {
+  const button = sidebar.getByRole('button', { name: `Options for ${title}`, exact });
+  if (await button.evaluate(element => getComputedStyle(element).pointerEvents === 'none')) {
+    await button.focus();
+    await button.press('Enter');
+  } else {
+    await button.click();
+  }
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto(`/c/${SESSION_A}`);
   await expect(page.getByRole('article', { name: 'Response' })).toBeVisible();
@@ -21,7 +31,7 @@ test('native-only conversation options load pin details from the real details co
   });
   const sidebar = await openConversations(page);
   await sidebar.getByRole('button', { name: 'Show all', exact: true }).click();
-  await sidebar.getByRole('button', { name: `Options for ${title}`, exact: true }).click();
+  await openOptions(sidebar, title, true);
   await expect.poll(() => mockAside.calls.some(call => call.path === `/api/sessions/${id}/details`)).toBe(true);
   await expect(page.getByRole('menuitem', { name: 'Unpin conversation', exact: true })).toBeVisible();
 });
@@ -40,17 +50,17 @@ test('show all sends server-side status and search filters', async ({ page, mock
 test('session menu performs optimistic pin, rename, unread, and archive actions', async ({ page, mockAside }) => {
   const sidebar = await openConversations(page);
   const releasePin = mockAside.holdNextRequest('PATCH', `/api/sessions/${SESSION_B}`);
-  await sidebar.getByRole('button', { name: 'Options for Bravo conversation' }).click();
+  await openOptions(sidebar, 'Bravo conversation');
   let menu = page.getByRole('menu', { name: 'Conversation options' });
   await menu.getByRole('menuitem', { name: 'Pin conversation' }).click();
   try {
-    await sidebar.getByRole('button', { name: 'Options for Bravo conversation' }).click();
+    await openOptions(sidebar, 'Bravo conversation');
     await expect(page.getByRole('menuitem', { name: 'Unpin conversation' })).toBeVisible();
   } finally { releasePin(); }
   await expect.poll(() => mockAside.calls.some(call => call.method === 'PATCH' && call.path === `/api/sessions/${SESSION_B}` && Reflect.get(call.body as object, 'isPinned') === true)).toBe(true);
   await page.keyboard.press('Escape');
 
-  await sidebar.getByRole('button', { name: 'Options for Bravo conversation' }).click();
+  await openOptions(sidebar, 'Bravo conversation');
   menu = page.getByRole('menu', { name: 'Conversation options' });
   await menu.getByRole('menuitem', { name: 'Rename' }).click();
   const rename = page.getByRole('dialog', { name: 'Rename conversation' });
@@ -59,18 +69,18 @@ test('session menu performs optimistic pin, rename, unread, and archive actions'
   await expect(sidebar.getByText('Renamed conversation')).toBeVisible();
 
   const releaseRead = mockAside.holdNextRequest('POST', `/api/native/sessions/${SESSION_B}/read`);
-  await sidebar.getByRole('button', { name: 'Options for Renamed conversation' }).click();
+  await openOptions(sidebar, 'Renamed conversation');
   menu = page.getByRole('menu', { name: 'Conversation options' });
   await menu.getByRole('menuitem', { name: 'Mark as read' }).click();
   try {
-    await sidebar.getByRole('button', { name: 'Options for Renamed conversation' }).click();
+    await openOptions(sidebar, 'Renamed conversation');
     await expect(page.getByRole('menuitem', { name: 'Mark as unread' })).toBeVisible();
   } finally { releaseRead(); }
   await expect.poll(() => mockAside.calls.some(call => call.path === `/api/native/sessions/${SESSION_B}/read`)).toBe(true);
   await page.keyboard.press('Escape');
 
   const releaseArchive = mockAside.holdNextRequest('POST', `/api/native/sessions/${SESSION_B}/archive`);
-  await sidebar.getByRole('button', { name: 'Options for Renamed conversation' }).click();
+  await openOptions(sidebar, 'Renamed conversation');
   menu = page.getByRole('menu', { name: 'Conversation options' });
   await menu.getByRole('menuitem', { name: 'Archive' }).click();
   try { await expect(sidebar.getByText('Renamed conversation')).toHaveCount(0); }
@@ -106,19 +116,17 @@ test('failed read and archive mutations roll optimistic state back', async ({ pa
   const sidebar = await openConversations(page);
   await sidebar.getByRole('button', { name: 'Show all' }).click();
   await expect(sidebar.getByText('Bravo conversation')).toBeVisible();
-  const options = () => sidebar.getByRole('button', { name: 'Options for Bravo conversation' });
-
   const releaseRead = mockAside.holdNextRequest('POST', `/api/native/sessions/${SESSION_B}/read`, 503);
-  await options().click();
+  await openOptions(sidebar, 'Bravo conversation');
   await page.getByRole('menuitem', { name: 'Mark as read' }).click();
-  await options().click();
+  await openOptions(sidebar, 'Bravo conversation');
   await expect(page.getByRole('menuitem', { name: 'Mark as unread' })).toBeVisible();
   await page.keyboard.press('Escape');
   const releaseReadRefresh = mockAside.holdNativeRefreshes();
   releaseRead();
   try {
     await expect(page.getByRole('alert')).toContainText("Couldn't update the conversation");
-    await options().click();
+    await openOptions(sidebar, 'Bravo conversation');
     await expect(page.getByRole('menuitem', { name: 'Mark as read' })).toBeVisible();
     await page.keyboard.press('Escape');
   } finally { releaseReadRefresh(); }
@@ -126,7 +134,7 @@ test('failed read and archive mutations roll optimistic state back', async ({ pa
   await expect(page.getByRole('alert')).toHaveCount(0);
 
   const releaseArchive = mockAside.holdNextRequest('POST', `/api/native/sessions/${SESSION_B}/archive`, 503);
-  await options().click();
+  await openOptions(sidebar, 'Bravo conversation');
   await page.getByRole('menuitem', { name: 'Archive' }).click();
   await expect(sidebar.getByText('Bravo conversation')).toHaveCount(0);
   const releaseArchiveRefresh = mockAside.holdNativeRefreshes();
@@ -147,7 +155,7 @@ test('failed unarchive restores an archived-only row', async ({ page, mockAside 
   await expect(sidebar.getByText('Bravo conversation')).toBeVisible();
 
   const release = mockAside.holdNextRequest('POST', `/api/native/sessions/${SESSION_B}/unarchive`, 503);
-  await sidebar.getByRole('button', { name: 'Options for Bravo conversation' }).click();
+  await openOptions(sidebar, 'Bravo conversation');
   await page.getByRole('menuitem', { name: 'Unarchive' }).click();
   await expect(sidebar.getByText('Bravo conversation')).toHaveCount(0);
   const releaseRefresh = mockAside.holdNativeRefreshes();
@@ -166,7 +174,7 @@ test('success toast preserves the dark theme and layout, then dismisses itself',
   const before = await header.boundingBox();
   expect(before).not.toBeNull();
 
-  await sidebar.getByRole('button', { name: 'Options for Bravo conversation' }).click();
+  await openOptions(sidebar, 'Bravo conversation');
   await page.getByRole('menuitem', { name: 'Mark as read' }).click();
   const toast = page.getByRole('status').filter({ hasText: 'Marked as read.' });
   await expect(toast).toBeVisible();

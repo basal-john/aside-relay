@@ -140,6 +140,10 @@
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
 }
 
+:has(> [data-haptic-trigger]) {
+  isolation: isolate;
+}
+
 [data-haptic-trigger] {
   position: absolute;
   inset: 0;

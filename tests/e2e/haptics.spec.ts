@@ -62,4 +62,31 @@ test.describe('haptics', () => {
     await expect(page.locator('[data-haptic-trigger]')).toHaveCount(0);
     await expect(page.locator(SWITCH)).toHaveCount(0);
   });
+
+  test('tapping the right side of a closed swipe row opens the chat instead of hidden swipe actions', async ({ page, mockAside }, testInfo) => {
+    test.skip(!isPhone(testInfo.project.name), 'phone only');
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Open conversations' }).tap();
+    await expect(page.getByRole('heading', { name: 'Chats', level: 1 })).toBeVisible();
+    const row = page.locator('[data-swipe-row]').filter({ hasText: 'Charlie conversation' });
+    await expect(row).toBeVisible();
+    const openButton = row.locator('button[data-session-id]');
+    await expect(openButton.locator(':scope > label[data-haptic-trigger]')).toHaveCount(1);
+    const box = (await row.boundingBox())!;
+    for (const fraction of [0.5, 0.7, 0.85, 0.95]) {
+      const hit = await page.evaluate(({ x, y }) => {
+        const element = document.elementFromPoint(x, y);
+        const button = element?.closest('button');
+        return {
+          sessionId: button?.getAttribute('data-session-id'),
+          text: button?.textContent?.trim() ?? '',
+          ariaLabel: button?.getAttribute('aria-label') ?? '',
+        };
+      }, { x: box.x + box.width * fraction, y: box.y + box.height / 2 });
+      expect(hit.sessionId, `fraction ${fraction} hit ${JSON.stringify(hit)}`).toBeTruthy();
+    }
+    await page.touchscreen.tap(box.x + box.width * 0.7, box.y + box.height / 2);
+    await expect(page).toHaveURL(/\/c\/sessioncharlie03$/);
+    expect(mockAside.calls.some(call => /\/(archive|delete)$/.test(call.path) || call.method === 'PATCH')).toBe(false);
+  });
 });

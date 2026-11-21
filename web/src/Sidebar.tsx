@@ -242,6 +242,7 @@ const recentSessionListComponents = {};
 function SwipeRow({ children, actions, isOpen, onOpenChange }: { children: ReactNode; actions: { label: string; color: string; icon: ReactNode; onSelect: () => void }[]; isOpen: boolean; onOpenChange: (isOpen: boolean) => void }) {
   const contentRef = useRef<HTMLDivElement>(null);
   const gesture = useRef<{ x: number; y: number; base: number; offset: number; isDragging: boolean } | undefined>(undefined);
+  const lastDragEndRef = useRef(0);
   const width = actions.length * SWIPE_ACTION_WIDTH;
   const resting = isOpen ? -width : 0;
   function move(x: number, y: number) {
@@ -250,7 +251,7 @@ function SwipeRow({ children, actions, isOpen, onOpenChange }: { children: React
     const dx = x - current.x; const dy = y - current.y;
     if (!current.isDragging) {
       if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) { gesture.current = undefined; return; }
-      if (Math.abs(dx) < 10) return;
+      if (Math.abs(dx) < 16 || Math.abs(dx) <= Math.abs(dy) * 1.25) return;
       current.isDragging = true;
     }
     current.offset = Math.min(0, Math.max(-width, current.base + dx));
@@ -261,16 +262,17 @@ function SwipeRow({ children, actions, isOpen, onOpenChange }: { children: React
     const current = gesture.current; const content = contentRef.current;
     gesture.current = undefined;
     if (!current?.isDragging || !content) return;
+    lastDragEndRef.current = Date.now();
     content.style.removeProperty('transition');
     content.style.removeProperty('transform');
     onOpenChange(current.offset < -width / 2);
   }
   return <div data-swipe-row="" {...stylex.props(styles.swipeRow)}
-    onTouchStart={event => { const touch = event.touches[0]; if (event.touches.length === 1 && touch) gesture.current = { x: touch.clientX, y: touch.clientY, base: resting, offset: resting, isDragging: false }; }}
+    onTouchStart={event => { lastDragEndRef.current = 0; const touch = event.touches[0]; if (event.touches.length === 1 && touch) gesture.current = { x: touch.clientX, y: touch.clientY, base: resting, offset: resting, isDragging: false }; }}
     onTouchMove={event => { const touch = event.touches[0]; if (touch) move(touch.clientX, touch.clientY); }}
     onTouchEnd={finish} onTouchCancel={finish}>
-    <div {...stylex.props(styles.swipeActions)} style={{ width }} aria-hidden={!isOpen}>{actions.map(action => <button key={action.label} type="button" tabIndex={isOpen ? 0 : -1} {...stylex.props(styles.swipeAction)} style={{ backgroundColor: action.color }} onClick={action.onSelect}>{action.icon}<span>{action.label}</span></button>)}</div>
-    <div ref={contentRef} {...stylex.props(styles.swipeContent)} style={{ transform: `translateX(${resting}px)` }} onClickCapture={event => { if (isOpen) { event.preventDefault(); event.stopPropagation(); onOpenChange(false); } }}>{children}</div>
+    <div {...stylex.props(styles.swipeActions)} style={{ width, pointerEvents: isOpen ? 'auto' : 'none' }} aria-hidden={!isOpen} inert={!isOpen}>{actions.map(action => <button key={action.label} type="button" tabIndex={isOpen ? 0 : -1} {...stylex.props(styles.swipeAction)} style={{ backgroundColor: action.color }} onClick={action.onSelect}>{action.icon}<span>{action.label}</span></button>)}</div>
+    <div ref={contentRef} {...stylex.props(styles.swipeContent)} style={{ transform: `translateX(${resting}px)` }} onClickCapture={event => { if (Date.now() - lastDragEndRef.current < 350) { lastDragEndRef.current = 0; event.preventDefault(); event.stopPropagation(); return; } if (isOpen) { event.preventDefault(); event.stopPropagation(); onOpenChange(false); } }}>{children}</div>
   </div>;
 }
 
@@ -324,19 +326,19 @@ const styles = stylex.create({
   sidebar: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, width: '100%', backgroundColor: tokens.surface, paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', minWidth: 0 },
   leadDot: { width: 10, height: 14, flexShrink: 0, marginLeft: -6 },
   leadUnread: { position: 'absolute', left: 6, top: '50%', marginTop: -7 },
-  pageOptions: { width: 44, color: tokens.muted, opacity: { default: 0, ':focus-visible': 1 } },
+  pageOptions: { position: 'absolute', top: 0, right: 0, bottom: 0, width: 44, height: 'auto', color: tokens.muted, opacity: { default: 0, ':focus-visible': 1 }, pointerEvents: { default: 'none', ':focus-visible': 'auto' } },
   pageGroup: { minHeight: 0, padding: '14px 12px 4px', fontSize: '.8125rem', fontWeight: 600 },
   pageShowAll: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, alignSelf: 'center', margin: '0 auto 4px', borderWidth: 0, backgroundColor: 'transparent', color: tokens.primary, fontFamily: tokens.font, fontSize: '.9375rem', fontWeight: 600, minHeight: 44, padding: '0 16px' },
   pins: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10, padding: '4px 8px 14px' },
   pinWrap: { position: 'relative', minWidth: 0 },
-  pinOptions: { position: 'absolute', top: 0, right: 0, width: 44, height: 44, display: 'grid', placeItems: 'center', borderWidth: 0, backgroundColor: 'transparent', color: tokens.muted, opacity: { default: 0, ':focus-visible': 1 } },
+  pinOptions: { position: 'absolute', top: 0, right: 0, width: 44, height: 44, display: 'grid', placeItems: 'center', borderWidth: 0, backgroundColor: 'transparent', color: tokens.muted, opacity: { default: 0, ':focus-visible': 1 }, pointerEvents: { default: 'none', ':focus-visible': 'auto' } },
   pinCard: { width: '100%', paddingRight: 14, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 8, minHeight: 76, padding: '12px 14px', borderWidth: 0, borderRadius: 18, backgroundColor: { default: tokens.surface, ':hover': tokens.hover }, color: tokens.text, textAlign: 'left', fontFamily: tokens.font },
   pinTitle: { fontSize: '.9375rem', fontWeight: 650, lineHeight: 1.3, display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden' },
   pinMeta: { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '.75rem', color: tokens.muted },
-  swipeRow: { position: 'relative', overflow: 'hidden', borderRadius: 14, marginBottom: 2 },
-  swipeActions: { position: 'absolute', top: 1, right: 1, bottom: 1, display: 'flex', borderRadius: 13, overflow: 'hidden' },
+  swipeRow: { position: 'relative', isolation: 'isolate', overflow: 'hidden', borderRadius: 14, marginBottom: 2 },
+  swipeActions: { position: 'absolute', zIndex: 0, top: 1, right: 1, bottom: 1, display: 'flex', borderRadius: 13, overflow: 'hidden' },
   swipeAction: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, borderWidth: 0, color: '#ffffff', fontFamily: tokens.font, fontSize: '.75rem', fontWeight: 600 },
-  swipeContent: { position: 'relative', backgroundColor: tokens.canvas, transitionProperty: 'transform', transitionDuration: '.22s', transitionTimingFunction: 'cubic-bezier(.22,1,.36,1)' },
+  swipeContent: { position: 'relative', zIndex: 1, backgroundColor: tokens.canvas, transitionProperty: 'transform', transitionDuration: '.22s', transitionTimingFunction: 'cubic-bezier(.22,1,.36,1)' },
   page: { backgroundColor: tokens.canvas, paddingBottom: 'calc(84px + max(12px, env(safe-area-inset-bottom)))' },
   pageFooter: { position: 'absolute', left: 'max(16px, env(safe-area-inset-left))', right: 'max(16px, env(safe-area-inset-right))', bottom: 'max(12px, env(safe-area-inset-bottom))', zIndex: 40, display: 'flex', alignItems: 'center', gap: 2, height: 64, padding: '0 8px', borderRadius: 32, backgroundColor: tokens.glass, borderWidth: 1, borderStyle: 'solid', borderColor: tokens.glassBorder, backdropFilter: 'blur(22px) saturate(180%)', WebkitBackdropFilter: 'blur(22px) saturate(180%)' },
   footerButton: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, minWidth: 64, height: 54, padding: '0 6px', borderWidth: 0, borderRadius: 27, backgroundColor: { default: 'transparent', ':hover': tokens.hover }, color: tokens.muted, fontFamily: tokens.font, fontSize: '.6875rem', fontWeight: 600 },
@@ -348,8 +350,8 @@ const styles = stylex.create({
   largeTitle: { margin: 0, padding: '0 20px 10px', fontSize: '2.125rem', fontWeight: 700, letterSpacing: '-.6px', lineHeight: 1.15, flexShrink: 0 },
   pageSearch: { margin: '0 16px 10px', padding: '0 12px', borderRadius: 12, backgroundColor: tokens.bubble },
   pageList: { padding: '0 8px 0' },
-  pageSession: { borderRadius: 14, marginBottom: 0 },
-  pageSessionButton: { position: 'relative', minHeight: 44, fontSize: '1rem', padding: '8px 4px 8px 12px', gap: 8 },
+  pageSession: { position: 'relative', borderRadius: 14, marginBottom: 0 },
+  pageSessionButton: { position: 'relative', minHeight: 44, fontSize: '1rem', padding: '8px 12px', gap: 8 },
   top: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 68, padding: '8px 16px 8px 24px', flexShrink: 0 },
   brand: { display: 'flex', alignItems: 'center', gap: 8, fontSize: '1.3125rem', fontWeight: 650, letterSpacing: '-.5px' },
   newChatRow: { display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, margin: '0 14px 12px' },

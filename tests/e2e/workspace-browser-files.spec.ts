@@ -58,7 +58,13 @@ test('files menu opens a real artifact preview and settings theme persists', asy
   const drawerButton = page.getByRole('button', { name: 'Open conversations' });
   if (await drawerButton.isVisible()) await drawerButton.click();
   const sidebar = page.getByRole('complementary', { name: 'Conversations' });
-  await sidebar.getByRole('button', { name: 'Options for Alpha conversation' }).click();
+  const optionsButton = sidebar.getByRole('button', { name: 'Options for Alpha conversation' });
+  if (await optionsButton.evaluate(element => getComputedStyle(element).pointerEvents === 'none')) {
+    await optionsButton.focus();
+    await optionsButton.press('Enter');
+  } else {
+    await optionsButton.click();
+  }
   await page.getByRole('menuitem', { name: 'Files & outputs' }).click();
   const files = page.getByRole('dialog', { name: 'Files' });
   await files.getByRole('button', { name: /result\.txt/ }).click();
