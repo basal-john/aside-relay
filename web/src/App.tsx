@@ -39,8 +39,7 @@ const HORIZONTAL_GESTURE_RATIO = 1.25;
 const RESUME_BLANK_AFTER_MS = 2 * 60_000;
 const NOTIFICATION_OPEN_GRACE_MS = 5_000;
 const OFFLINE_BANNER_DELAY_MS = 2_000;
-type StarterCard = { title: string; hint: string; text: string; skill?: string; model?: string };
-const QUICK_MODEL = 'aside/claude-haiku-5-5';
+type StarterCard = { title: string; hint: string; text: string; skill?: string };
 const WORK_STARTERS: StarterCard[] = [
   { title: 'Handle Slack', hint: 'message, thread or link', text: 'Handle this Slack message or thread: ' },
   { title: '1:1 prep', hint: 'direct report', text: '', skill: 'one-on-one-prep' },
@@ -51,9 +50,9 @@ const WORK_STARTERS: StarterCard[] = [
 ];
 const PERSONAL_STARTERS: StarterCard[] = [
   { title: 'Trakt / Nuvio', hint: 'watch progress, players', text: '', skill: 'tweakstreams-jellyfin' },
-  { title: 'Discord sweep', hint: "what's new", text: 'Discord sweep', skill: 'discord-sweep', model: QUICK_MODEL },
-  { title: 'Review a link', hint: 'reel, video or post', text: 'Review this link: ', model: QUICK_MODEL },
-  { title: 'Approve a device code', hint: 'sign-in or OAuth', text: 'Approve this device code: ', model: QUICK_MODEL },
+  { title: 'Discord sweep', hint: "what's new", text: 'Discord sweep', skill: 'discord-sweep' },
+  { title: 'Review a link', hint: 'reel, video or post', text: 'Review this link: ' },
+  { title: 'Approve a device code', hint: 'sign-in or OAuth', text: 'Approve this device code: ' },
 ];
 
 function scheduledSet() {

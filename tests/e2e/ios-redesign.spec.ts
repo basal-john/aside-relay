@@ -40,16 +40,17 @@ test.describe('smoke', () => {
     await expect(page.getByRole('group', { name: 'Starter prompts' }).getByRole('button')).toHaveCount(6);
   });
 
-  test('a weekend offers personal cards and lets the user switch sets and models', async ({ page }) => {
+  test('personal and work cards select Opus 5.5 High over a saved Low preference', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('asideThinkingLevel', 'low'));
     await page.clock.setFixedTime('2026-11-22T12:00:00');
     await page.goto('/');
     const cards = page.getByRole('group', { name: 'Starter prompts' });
     await expect(cards.getByRole('button')).toHaveCount(4);
     await cards.getByRole('button', { name: /Review a link/ }).click();
-    await expect(page.getByRole('button', { name: /Model, Claude Haiku/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Model, Claude Opus 5.5 · High' })).toBeVisible();
     await page.getByRole('button', { name: 'Work', exact: true }).click();
     await cards.getByRole('button', { name: /Handle Slack/ }).click();
-    await expect(page.getByRole('button', { name: /Model, GPT-6.1 Sol/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Model, Claude Opus 5.5 · High' })).toBeVisible();
   });
 
   test('a shared URL opens an editable unsent draft in a new chat', async ({ page, mockAside }) => {

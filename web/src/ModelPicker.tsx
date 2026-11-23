@@ -24,9 +24,9 @@ export function useModelSelection(chat: UseChat, notify: (text: string, kind?: '
   const loaded = catalog?.sessionId === sessionId ? catalog : undefined;
 
   const [manuallyChanged, setManuallyChanged] = useState<Starter>();
-  const preset = !sessionId && starter?.model && starter !== manuallyChanged
-    ? loaded?.items.find(model => `${model.provider}/${model.id}` === starter.model) : undefined;
-  const current = preset && loaded ? configureModel(preset, loaded.current) : loaded?.current;
+  const preset = !sessionId && starter && starter !== manuallyChanged
+    ? loaded?.items.find(model => model.provider === 'claude-code' && model.id === 'claude-opus-5-5') : undefined;
+  const current = preset && loaded ? configureModel(preset, { ...loaded.current, thinkingLevel: 'high' }) : loaded?.current;
 
   useEffect(() => {
     const version = ++generation.current;

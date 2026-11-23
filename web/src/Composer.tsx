@@ -31,7 +31,7 @@ type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 /** A haptic Send tap submits through its click. This submits anyway when iOS drops that click, and stays above WebKit's 400 ms observed-timer limit. */
 const HAPTIC_SEND_BACKSTOP_MS = 450;
 
-export type Starter = { id: number; text: string; skill?: string; model?: string };
+export type Starter = { id: number; text: string; skill?: string };
 
 const MAX_ATTACHMENTS = 12;
 const COMPACT_DRAFT_HEIGHT = 28;
