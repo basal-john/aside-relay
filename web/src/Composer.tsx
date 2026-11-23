@@ -21,7 +21,7 @@ import {
 } from './slashCommands';
 
 type Attachment = { key: string; preview?: string; name: string; mime: string; upload?: UploadAttachment; hasError?: boolean };
-type ContextChip = ContextReference & { key: string };
+type ContextChip = ContextReference & { key: string; fromStarter?: boolean };
 type SpeechRecognitionResult = { 0?: { transcript?: string } };
 type SpeechRecognitionEvent = { resultIndex: number; results: ArrayLike<SpeechRecognitionResult> };
 type SpeechRecognitionLike = { continuous: boolean; interimResults: boolean; lang: string; onresult?: (event: SpeechRecognitionEvent) => void; onend?: () => void; onerror?: () => void; start: () => void; stop: () => void };
@@ -31,7 +31,7 @@ type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 /** A haptic Send tap submits through its click. This submits anyway when iOS drops that click, and stays above WebKit's 400 ms observed-timer limit. */
 const HAPTIC_SEND_BACKSTOP_MS = 450;
 
-export type Starter = { id: number; text: string; skill?: string };
+export type Starter = { id: number; text: string; skill?: string; model?: string };
 
 const MAX_ATTACHMENTS = 12;
 const COMPACT_DRAFT_HEIGHT = 28;
@@ -207,6 +207,7 @@ export function Composer({ chat, modelSelection, starter, onBrowser, draft, setD
 
   useEffect(() => {
     if (!starter) return;
+    setContextChips(current => current.filter(chip => !chip.fromStarter));
     const controller = new AbortController();
     const focusEnd = (text: string) => requestAnimationFrame(() => { const area = input.current; area?.focus({ preventScroll: true }); area?.setSelectionRange(text.length, text.length); });
     draftRef.current = starter.text; setDraft(starter.text); focusEnd(starter.text);
@@ -216,14 +217,15 @@ export function Composer({ chat, modelSelection, starter, onBrowser, draft, setD
       .then(value => {
         if (controller.signal.aborted) return;
         const skill = parseSkills(value).find(item => item.name === skillName);
-        if (skill) { addContextChip({ kind: 'skill', label: skill.name, value: skillReference(skill) }); return; }
+        if (skill) { addContextChip({ kind: 'skill', label: skill.name, value: skillReference(skill), fromStarter: true }); return; }
+        if (draftRef.current !== starter.text) return;
         const fallback = `Use my ${skillName} skill. ${starter.text}`;
         draftRef.current = fallback; setDraft(fallback); focusEnd(fallback);
       })
       .catch(() => undefined);
     return () => controller.abort();
   }, [starter]);
-  function addContextChip(reference: ContextReference) {
+  function addContextChip(reference: Omit<ContextChip, 'key'>) {
     setContextChips(current => {
       if (current.some(item => item.value === reference.value)) return current;
       const next = [...current, { ...reference, key: crypto.randomUUID() }];

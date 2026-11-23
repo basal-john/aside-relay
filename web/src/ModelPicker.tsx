@@ -6,13 +6,14 @@ import { tokens } from './tokens.stylex';
 import { ICON_STROKE } from './ui';
 import { Dialog } from './Dialog';
 import { Button } from './Button';
+import type { Starter } from './Composer';
 import type { AvailableModel, ModelConfig, UseChat } from './types';
 
 const MODEL_STORAGE_KEY = 'asideModel';
 const THINKING_STORAGE_KEY = 'asideThinkingLevel';
 const THINKING_LABELS: Record<string, string> = { off: 'Off', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra' };
 
-export function useModelSelection(chat: UseChat, notify: (text: string, kind?: 'error' | 'success') => void) {
+export function useModelSelection(chat: UseChat, notify: (text: string, kind?: 'error' | 'success') => void, starter?: Starter) {
   const [catalog, setCatalog] = useState<{ sessionId?: string; items: AvailableModel[]; current: ModelConfig }>();
   const [error, setError] = useState<string>();
   const [isUpdating, setUpdating] = useState(false);
@@ -21,6 +22,11 @@ export function useModelSelection(chat: UseChat, notify: (text: string, kind?: '
   const { sessionId, isReady, authError, request } = chat;
   const [revision, setRevision] = useState(0);
   const loaded = catalog?.sessionId === sessionId ? catalog : undefined;
+
+  const [manuallyChanged, setManuallyChanged] = useState<Starter>();
+  const preset = !sessionId && starter?.model && starter !== manuallyChanged
+    ? loaded?.items.find(model => `${model.provider}/${model.id}` === starter.model) : undefined;
+  const current = preset && loaded ? configureModel(preset, loaded.current) : loaded?.current;
 
   useEffect(() => {
     const version = ++generation.current;
@@ -68,6 +74,7 @@ export function useModelSelection(chat: UseChat, notify: (text: string, kind?: '
         : config;
       if (owner.version !== generation.current || mutation.current !== owner) return false;
       setCatalog({ ...loaded, current });
+      setManuallyChanged(starter);
       if (!savePreference(current)) notify('Model selected, but this choice could not be saved.', 'error');
       return true;
     } catch {
@@ -78,7 +85,7 @@ export function useModelSelection(chat: UseChat, notify: (text: string, kind?: '
     }
   }
 
-  return { items: loaded?.items ?? [], current: loaded?.current, error, isUpdating, select, reload: () => setRevision(value => value + 1) };
+  return { items: loaded?.items ?? [], current, error, isUpdating, select, reload: () => setRevision(value => value + 1) };
 }
 
 function readPreference(key: string) {

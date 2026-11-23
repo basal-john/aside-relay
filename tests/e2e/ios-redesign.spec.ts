@@ -27,12 +27,38 @@ async function openChats(page: Page) {
   await expect(page.getByRole('heading', { name: 'Chats', level: 1 })).toBeVisible();
 }
 
+async function openWorkHome(page: Page) {
+  await page.clock.setFixedTime('2026-11-23T12:00:00');
+  await page.goto('/');
+}
+
 test.describe('smoke', () => {
   test('launch opens a blank chat even when a previous chat was remembered', async ({ page }) => {
     await rememberLastChat(page);
-    await page.goto('/');
+    await openWorkHome(page);
     await expectBlankChat(page);
     await expect(page.getByRole('group', { name: 'Starter prompts' }).getByRole('button')).toHaveCount(6);
+  });
+
+  test('a weekend offers personal cards and lets the user switch sets and models', async ({ page }) => {
+    await page.clock.setFixedTime('2026-11-22T12:00:00');
+    await page.goto('/');
+    const cards = page.getByRole('group', { name: 'Starter prompts' });
+    await expect(cards.getByRole('button')).toHaveCount(4);
+    await cards.getByRole('button', { name: /Review a link/ }).click();
+    await expect(page.getByRole('button', { name: /Model, Claude Haiku/ })).toBeVisible();
+    await page.getByRole('button', { name: 'Work', exact: true }).click();
+    await cards.getByRole('button', { name: /Handle Slack/ }).click();
+    await expect(page.getByRole('button', { name: /Model, GPT-6.1 Sol/ })).toBeVisible();
+  });
+
+  test('a shared URL opens an editable unsent draft in a new chat', async ({ page, mockAside }) => {
+    await rememberLastChat(page);
+    const link = 'https://example.com/watch?v=abc&time=10#clip';
+    await page.goto('/#prompt=' + encodeURIComponent(link));
+    await expectBlankChat(page);
+    await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue(link);
+    expect(mockAside.socketMessages.filter(message => message.op === 'run')).toHaveLength(0);
   });
 
   test('a chat link still opens that chat', async ({ page }) => {
@@ -42,20 +68,20 @@ test.describe('smoke', () => {
   });
 
   test('a starter fills the composer, keeps the cursor at the end and sends nothing', async ({ page, mockAside }) => {
-    await page.goto('/');
+    await openWorkHome(page);
     await expect(page.getByRole('group', { name: 'Starter prompts' }).getByRole('button')).toHaveCount(6);
-    await page.getByRole('button', { name: /Handle a message/ }).click();
+    await page.getByRole('button', { name: /Handle Slack/ }).click();
     const composer = page.getByRole('textbox', { name: 'Message' });
-    await expect(composer).toHaveValue('Handle the Slack message from ');
+    await expect(composer).toHaveValue('Handle this Slack message or thread: ');
     await expect(composer).toBeFocused();
     await page.keyboard.type('Ashok');
-    await expect(composer).toHaveValue('Handle the Slack message from Ashok');
+    await expect(composer).toHaveValue('Handle this Slack message or thread: Ashok');
     expect(mockAside.socketMessages.filter(message => message.op === 'run')).toHaveLength(0);
   });
 
   test('the 1:1 starter attaches the one-on-one-prep skill as a chip', async ({ page, mockAside }) => {
     mockAside.skills = [{ name: 'one-on-one-prep', path: 'user/one-on-one-prep', description: '1:1 prep' }];
-    await page.goto('/');
+    await openWorkHome(page);
     await page.getByRole('button', { name: /1:1 prep/ }).click();
     await expect(page.locator('#composer').getByText('one-on-one-prep')).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('');
@@ -120,23 +146,23 @@ test.describe('smoke', () => {
 test.describe('edge cases', () => {
   test('the 1:1 starter falls back to text when the skill is missing', async ({ page, mockAside }) => {
     mockAside.skills = [];
-    await page.goto('/');
+    await openWorkHome(page);
     await page.getByRole('button', { name: /1:1 prep/ }).click();
     await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('Use my one-on-one-prep skill. ');
   });
 
   test('tapping the same starter twice does not stack text', async ({ page }) => {
-    await page.goto('/');
-    await page.getByRole('button', { name: /QE board check/ }).click();
-    await page.getByRole('button', { name: /QE board check/ }).click();
-    await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('Check the QE board and tell me which tickets need attention: overdue, out of scope, or ready to close. ');
+    await openWorkHome(page);
+    await page.getByRole('button', { name: /Handle Slack/ }).click();
+    await page.getByRole('button', { name: /Handle Slack/ }).click();
+    await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('Handle this Slack message or thread: ');
   });
 
-  test('the coffee chat starter falls back to text when the skill is missing', async ({ page, mockAside }) => {
+  test('the move a meeting starter falls back to text when the skill is missing', async ({ page, mockAside }) => {
     mockAside.skills = [];
-    await page.goto('/');
-    await page.getByRole('button', { name: /Coffee chat/ }).click();
-    await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('Use my coffee-call-prep skill. ');
+    await openWorkHome(page);
+    await page.getByRole('button', { name: /Move a meeting/ }).click();
+    await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('Use my schedule-meeting skill. ');
   });
 
   test('a brief socket drop shows no banner, a lasting one does', async ({ page, mockAside }) => {

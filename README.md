@@ -8,6 +8,15 @@ previews, interactive HTML visuals, and completion notifications.
 Tailscale, your own VPN, or an HTTPS address on your own domain. The bridge has
 its own access-token login; no separate AI API key is required.
 
+## Send to Aside from the iPhone Share Sheet
+
+1. In Shortcuts, create **Send to Aside**. In Details, enable **Show in Share Sheet** and accept URLs and text.
+2. Add **Get URLs from Input** using **Shortcut Input**, then **Get Item from List** with **First Item** selected.
+3. Add **URL Encode** and encode that first URL. In a **Text** action, enter `https://relay.basaljohn.com/#prompt=` and insert the **URL Encoded Text** variable immediately after the equals sign. For another installation, use its HTTPS address.
+4. Add **Open URLs** using the Text result. From an app, share a link and choose **Send to Aside**.
+
+The link opens in an editable new chat. Tap Send when ready. The fragment stays in the browser and Relay removes it from the address after reading it. Sign in through Relay Settings if needed. The Shortcut needs only the Relay address.
+
 ## Screenshots
 
 Current app UI captured in a phone-sized browser with public sample conversations
